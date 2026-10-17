@@ -37,12 +37,11 @@ Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo
 
 ## Flujo de uso
 
-1. **Plano**
-   - Abre el archivo. La app sugiere un rol para cada capa (muro, columna, puerta, ventana, mobiliario existente…) y estima la escala con el radio de las puertas (≈ 0,90 m). En PDF propone 1:N.
-   - Verifica la escala con **Calibrar**: dos clics sobre una medida conocida.
-   - **Detectar automáticamente** inunda el recinto interior más grande y cierra los vanos de puertas. Con **Elegir con un clic** marcas el área que quieres.
-   - Marca la **puerta principal** y las **salidas**.
-   - Dibuja lo que falte: columnas, oficinas fijas, tableros con despeje, zonas reservadas y ventanas.
+1. **Plano**: la app te guía con tres tareas, cada una con su estado. La tarea pendiente activa sola su herramienta y muestra la instrucción sobre el plano.
+   - **Escala:** se toma del archivo (unidades del DXF o la escala guardada en PDF exportados por la app) o se estima por el tamaño de las puertas. **Calibrar con una medida:** dos clics sobre algo que conozcas.
+   - **Área a amoblar:** se detecta sola (ignora el marco de la hoja). Si no queda bien, **clic dentro del área**, o **Dibujar contorno**, con enganche a los vértices del dibujo.
+   - **Puerta principal:** si la app eligió la más ancha, pide confirmar. **Marcar en el plano** o **Dibujar puerta** si no se detectó.
+   - Ajustes opcionales: salidas, obstáculos y zonas, roles de capas y **Exportar plano base**.
 2. **Escritorios**
    - Se muestran los tipos disponibles con su vista previa y tú escribes cuántos ubicar.
    - Las islas **flexibles** se piden en *puestos* y el optimizador arma islas de distinto largo. Los demás tipos se piden en *unidades*.
@@ -81,9 +80,19 @@ Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo
 
 Lo que se mueve o gira a mano queda fijado. Después de cada edición la app recalcula los avisos (superposiciones, accesos, recorridos) sin mover nada.
 
-### Plano sin mobiliario
+### Plano base (simplificado)
 
-En *Plano → Plano sin mobiliario* se exporta el dibujo original (DXF y PDF a escala) quitando las capas marcadas como «Mobiliario existente». Antes de exportar, revisa qué capas tienen ese rol.
+En *Plano → Exportar plano base* se genera el plano mínimo para optimizar, en DXF y PDF a escala:
+
+- **Contenido:** contorno del área amoblable, oficinas y recintos, columnas, zonas con despeje y puertas (hoja + barrido).
+- **Capas estándar:** `A-MURO-EXT`, `A-OFICINA-FIJA`, `A-RECINTOS`, `A-EDIFICIO`, `A-COLUMNA`, `A-PUERTA-PPAL`, `A-PUERTA-SALIDA`, `A-PUERTA-OFICINA`, `A-PUERTA-VANO`.
+- **Escala:** el PDF guarda capas y escala, así que reimportarlo no pide asignar capas ni calibrar.
+
+También se puede exportar el dibujo original completo quitando solo las capas de «Mobiliario existente».
+
+### Tema
+
+Arriba a la derecha: Claro, Oscuro o Sistema (sigue la configuración de Windows).
 
 ## Convención de capas recomendada
 

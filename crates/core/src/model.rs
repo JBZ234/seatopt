@@ -80,6 +80,20 @@ pub struct Plan {
     pub doors: Vec<Door>,
     #[serde(default)]
     pub windows: Vec<Window>,
+    /// Referencia (no la usa el optimizador): oficinas y recintos cerrados fuera del área amoblable.
+    #[serde(default)]
+    pub rooms: Vec<Room>,
+    /// Referencia: contorno exterior del edificio.
+    #[serde(default)]
+    pub building: Vec<Pt>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Room {
+    pub poly: Vec<Pt>,
+    #[serde(default)]
+    pub label: String,
 }
 
 // ---------------------------------------------------------------------------

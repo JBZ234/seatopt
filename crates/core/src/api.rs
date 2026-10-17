@@ -440,6 +440,11 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
             let r: PdfReq = serde_json::from_value(args).map_err(|e| format!("Datos inválidos: {e}"))?;
             export_pdf(&r).map(Value::String)
         }
+        "export_plan_dxf" => {
+            let plan: Plan = serde_json::from_value(get("plan")).map_err(|e| format!("Datos inválidos: {e}"))?;
+            let out_mm = get("outMm").as_f64().unwrap_or(1.0);
+            Ok(Value::String(crate::export::plan_dxf(&plan, out_mm)))
+        }
         "export_clean_dxf" => {
             let id = get("drawingId").as_str().unwrap_or("").to_string();
             let mm = get("mmPerUnit").as_f64().unwrap_or(1.0);

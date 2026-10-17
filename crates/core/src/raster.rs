@@ -390,7 +390,9 @@ pub fn contours(f: &Frame, m: &[bool]) -> Vec<Vec<Pt>> {
         }
     }
     let mut rings = Vec::new();
-    let keys: Vec<(i64, i64)> = next.keys().cloned().collect();
+    // orden fijo: el resultado no depende del orden aleatorio del HashMap
+    let mut keys: Vec<(i64, i64)> = next.keys().cloned().collect();
+    keys.sort_by_key(|&(x, y)| (y, x));
     for k in keys {
         loop {
             let start = match next.get_mut(&k) {

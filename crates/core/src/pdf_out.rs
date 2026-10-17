@@ -106,6 +106,8 @@ struct Canvas {
     k: f64,
     ox: f64,
     oy: f64,
+    /// Capas (Optional Content Groups) usadas, en orden.
+    layers: Vec<String>,
 }
 
 impl Canvas {
@@ -140,6 +142,41 @@ impl Canvas {
     fn text_c(&mut self, x: f64, y: f64, size: f64, bold: bool, t: &str) {
         self.text(x - text_w(t, size) / 2.0, y - size * 0.35, size, bold, t);
     }
+    /// Abre una capa (OCG): AutoCAD y la propia app la reconocen al importar.
+    fn layer(&mut self, name: &str) {
+        let i = match self.layers.iter().position(|l| l == name) {
+            Some(i) => i,
+            None => {
+                self.layers.push(name.to_string());
+                self.layers.len() - 1
+            }
+        };
+        let _ = writeln!(self.s, "/OC /L{i} BDC");
+    }
+    fn end_layer(&mut self) {
+        self.raw("EMC");
+    }
+    /// Arco circular con curvas de Bézier (tramos de ≤ 45°), desde el punto actual o con `m`.
+    fn arc(&mut self, c: Pt, r: f64, a0: f64, da: f64) {
+        let n = ((da.abs() / std::f64::consts::FRAC_PI_4).ceil() as usize).max(1);
+        let step = da / n as f64;
+        let kk = 4.0 / 3.0 * (step / 4.0).tan();
+        let start = c + Pt::from_angle(a0) * r;
+        let (x, y) = self.p(start);
+        let _ = write!(self.s, "{x:.2} {y:.2} m ");
+        for i in 0..n {
+            let t0 = a0 + step * i as f64;
+            let t1 = t0 + step;
+            let p0 = c + Pt::from_angle(t0) * r;
+            let p3 = c + Pt::from_angle(t1) * r;
+            let p1 = p0 + Pt::from_angle(t0).perp() * (r * kk);
+            let p2 = p3 - Pt::from_angle(t1).perp() * (r * kk);
+            let (x1, y1) = self.p(p1);
+            let (x2, y2) = self.p(p2);
+            let (x3, y3) = self.p(p3);
+            let _ = write!(self.s, "{x1:.2} {y1:.2} {x2:.2} {y2:.2} {x3:.2} {y3:.2} c ");
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -152,9 +189,17 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
 
     // límites del dibujo
     let mut bb = BBox::empty();
-    if let Some(p) = plan.filter(|_| !opts.clean) {
+    if let Some(p) = plan {
         for r in &p.region {
             for &q in r {
+                bb.add(q);
+            }
+        }
+        for &q in &p.building {
+            bb.add(q);
+        }
+        for rm in &p.rooms {
+            for &q in &rm.poly {
                 bb.add(q);
             }
         }
@@ -186,15 +231,15 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     let (dw, dh) = (bb.w() * k, bb.h() * k);
     let ox = area.0 + (area.2 - dw) / 2.0 - bb.min.x * k;
     let oy = area.1 + (area.3 - dh) / 2.0 - bb.min.y * k;
-    let mut c = Canvas { s: String::new(), k, ox, oy };
+    let mut c = Canvas { s: String::new(), k, ox, oy, layers: vec![] };
     c.raw("1 J 1 j");
 
     // recorte al área de dibujo
     c.raw("q");
     let _ = writeln!(c.s, "{:.2} {:.2} {:.2} {:.2} re W n", area.0, area.1, area.2, area.3);
 
-    // ------------------------------------------------ fondo
-    if let Some((d, s)) = bg.filter(|_| opts.background || opts.clean) {
+    // ------------------------------------------------ fondo (dibujo original, opcional)
+    if let Some((d, s)) = bg.filter(|_| opts.background) {
         let col = if opts.clean { (0.0, 0.0, 0.0) } else { (0.62, 0.65, 0.63) };
         c.stroke_rgb(col);
         c.lw(if opts.clean { 0.3 } else { 0.25 });
@@ -222,62 +267,11 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     let catalog: Vec<DeskType> = cfg.map(|c| c.catalog.clone()).unwrap_or_default();
     let org = cfg.map(|c| c.org.clone()).unwrap_or_default();
 
+    if let Some(plan) = plan {
+        // plano mínimo: edificio, recintos, área amoblable, obstáculos y puertas
+        draw_minimal_plan(&mut c, plan, layout);
+    }
     if !opts.clean {
-        if let Some(plan) = plan {
-            // recinto
-            c.stroke_rgb((0.15, 0.19, 0.17));
-            c.lw(0.9);
-            for r in &plan.region {
-                c.path(r, true);
-                c.raw("S");
-            }
-            // pasillo principal (translúcido)
-            if let Some(l) = layout {
-                c.raw("q /GS1 gs");
-                c.fill_rgb(hex_rgb("#6fa8c4"));
-                for p in &l.corridors {
-                    c.path(p, true);
-                    c.raw("f");
-                }
-                c.raw("Q");
-            }
-            for o in &plan.obstacles {
-                let col = match o.kind {
-                    ObstacleKind::Column => "#c86b5c",
-                    ObstacleKind::FixedOffice => "#c8d3e0",
-                    ObstacleKind::Restricted => "#e3b3da",
-                    ObstacleKind::Reserved => "#e2d99a",
-                };
-                c.fill_rgb(hex_rgb(col));
-                c.stroke_rgb((0.33, 0.38, 0.36));
-                c.lw(0.4);
-                c.path(&o.poly, true);
-                c.raw("B");
-                if !o.label.is_empty() {
-                    let (x, y) = c.p(centroid(&o.poly));
-                    c.fill_rgb((0.15, 0.19, 0.17));
-                    c.text_c(x, y, 6.0, false, &o.label);
-                }
-            }
-            c.stroke_rgb(hex_rgb("#3aa7d9"));
-            c.lw(2.0);
-            for w in &plan.windows {
-                c.path(&[w.a, w.b], false);
-                c.raw("S");
-            }
-            for d in &plan.doors {
-                let col = match d.kind {
-                    DoorKind::Main => "#1a9c3b",
-                    DoorKind::Exit => "#e07b12",
-                    DoorKind::Office => "#2a8fb0",
-                    DoorKind::Ignore => continue,
-                };
-                c.stroke_rgb(hex_rgb(col));
-                c.lw(if d.kind == DoorKind::Main { 3.5 } else { 2.2 });
-                c.path(&[d.a, d.b], false);
-                c.raw("S");
-            }
-        }
         if let Some(l) = layout {
             let by_type = opts.color_by == "type";
             for m in &l.modules {
@@ -332,8 +326,65 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     if opts.clean {
         c.fill_rgb((0.1, 0.1, 0.1));
         c.text(margin, margin + 22.0, 13.0, true, if opts.title.is_empty() { "Plano" } else { &opts.title });
-        c.text(margin, margin + 8.0, 8.0, false, &format!("Plano sin mobiliario · Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
-        scale_bar(&mut c, pw - margin - 160.0, margin + 10.0, k, n);
+        let area_m2: f64 = plan.map(|p| p.region.iter().map(|r| polygon_area(r).abs()).sum::<f64>() / 1e6 - p.obstacles.iter().filter(|o| point_in_region(centroid(&o.poly), &p.region)).map(|o| polygon_area(&o.poly).abs() / 1e6).sum::<f64>()).unwrap_or(0.0);
+        c.text(margin, margin + 8.0, 8.0, false, &format!("Planta para optimización · área amoblable {area_m2:.0} m² · Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
+        // convenciones (solo lo que hay en el plano), en filas
+        let has = |f: &dyn Fn(&Plan) -> bool| plan.map(f).unwrap_or(false);
+        let mut items: Vec<(&str, &str, u8)> = vec![("#f6f9f6", "Área amoblable", 0)];
+        if has(&|p| !p.rooms.is_empty() || p.obstacles.iter().any(|o| o.kind == ObstacleKind::FixedOffice)) {
+            items.push(("#e0e6ed", "Oficinas y recintos", 0));
+        }
+        if has(&|p| p.obstacles.iter().any(|o| o.kind == ObstacleKind::Column)) {
+            items.push(("#5c615e", "Columnas", 0));
+        }
+        if has(&|p| p.obstacles.iter().any(|o| o.kind == ObstacleKind::Restricted)) {
+            items.push(("#e3b3da", "Tablero / zona con despeje", 0));
+        }
+        if has(&|p| p.building.len() >= 3) {
+            items.push(("#1f2422", "Contorno del edificio", 1));
+        }
+        items.push(("#1a9c3b", "Puerta principal", 1));
+        if has(&|p| p.doors.iter().any(|d| d.kind == DoorKind::Exit)) {
+            items.push(("#e07b12", "Salida", 1));
+        }
+        if has(&|p| p.doors.iter().any(|d| d.kind == DoorKind::Office)) {
+            items.push(("#2a8fb0", "Puerta de oficina", 1));
+        }
+        let x0 = margin + text_w(if opts.title.is_empty() { "Plano" } else { &opts.title }, 13.0).max(300.0) + 30.0;
+        let x_max = pw - margin - 190.0;
+        // filas de arriba hacia abajo
+        let mut rows = 1;
+        {
+            let mut x = x0;
+            for (_, name, _) in &items {
+                let wdt = 24.0 + text_w(name, 7.0);
+                if x + wdt > x_max && x > x0 {
+                    x = x0;
+                    rows += 1;
+                }
+                x += wdt;
+            }
+        }
+        let (mut x, mut y) = (x0, margin + 9.0 + 12.0 * (rows - 1) as f64);
+        for (col, name, kind) in items {
+            let wdt = 24.0 + text_w(name, 7.0);
+            if x + wdt > x_max && x > x0 {
+                x = x0;
+                y -= 12.0;
+            }
+            c.fill_rgb(hex_rgb(col));
+            c.stroke_rgb((0.3, 0.3, 0.3));
+            c.lw(0.3);
+            if kind == 0 {
+                let _ = writeln!(c.s, "{x:.2} {y:.2} 9 7 re B");
+            } else {
+                let _ = writeln!(c.s, "{x:.2} {:.2} 9 3 re f", y + 2.0);
+            }
+            c.fill_rgb((0.1, 0.1, 0.1));
+            c.text(x + 12.0, y + 1.0, 7.0, false, name);
+            x += wdt;
+        }
+        scale_bar(&mut c, pw - margin - 170.0, margin + 10.0, k, 160.0);
     } else {
         let x0 = pw - margin - side;
         let mut y = ph - margin - 8.0;
@@ -408,7 +459,15 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
                 c.text(x0 + 14.0, y, 7.5, false, &name);
                 y -= 11.0;
             }
-            for (col, name) in [("#1a9c3b", "Puerta principal"), ("#e07b12", "Salida"), ("#6fa8c4", "Pasillo principal"), ("#3aa7d9", "Ventana")] {
+            let has_exit = plan.map(|p| p.doors.iter().any(|d| d.kind == DoorKind::Exit)).unwrap_or(false);
+            let mut marks: Vec<(&str, &str)> = vec![("#1a9c3b", "Puerta principal")];
+            if has_exit {
+                marks.push(("#e07b12", "Salida"));
+            }
+            if !l.corridors.is_empty() {
+                marks.push(("#6fa8c4", "Pasillo principal"));
+            }
+            for (col, name) in marks {
                 if y < margin + 60.0 {
                     break;
                 }
@@ -435,7 +494,7 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
                 }
             }
         }
-        scale_bar(&mut c, x0, margin + 12.0, k, n);
+        scale_bar(&mut c, x0, margin + 12.0, k, side - 10.0);
     }
 
     // ------------------------------------------------ documento
@@ -444,7 +503,14 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     let f1 = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding" });
     let f2 = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica-Bold", "Encoding" => "WinAnsiEncoding" });
     let gs = doc.add_object(dictionary! { "Type" => "ExtGState", "ca" => 0.35, "CA" => 0.35 });
-    let resources = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => f1, "F2" => f2 }, "ExtGState" => dictionary! { "GS1" => gs } });
+    let mut props = lopdf::Dictionary::new();
+    let mut ocgs: Vec<Object> = Vec::new();
+    for (i, name) in c.layers.iter().enumerate() {
+        let id = doc.add_object(dictionary! { "Type" => "OCG", "Name" => Object::string_literal(name.clone()) });
+        props.set(format!("L{i}"), id);
+        ocgs.push(id.into());
+    }
+    let resources = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => f1, "F2" => f2 }, "ExtGState" => dictionary! { "GS1" => gs }, "Properties" => props });
     let mut stream = Stream::new(dictionary! {}, c.s.into_bytes());
     let _ = stream.compress();
     let content = doc.add_object(stream);
@@ -456,20 +522,171 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
         "Resources" => resources,
     });
     doc.objects.insert(pages_id, Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 }));
-    let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    let mut cat = dictionary! { "Type" => "Catalog", "Pages" => pages_id };
+    if !ocgs.is_empty() {
+        cat.set("OCProperties", dictionary! { "OCGs" => ocgs.clone(), "D" => dictionary! { "Order" => ocgs.clone(), "ON" => ocgs } });
+    }
+    let catalog = doc.add_object(cat);
     doc.trailer.set("Root", catalog);
-    let info = doc.add_object(dictionary! { "Title" => Object::string_literal(opts.title.clone()), "Producer" => "Optimizador de Puestos" });
+    // escala guardada: al reimportar, la app la usa sin pedir calibración
+    let info = doc.add_object(dictionary! {
+        "Title" => Object::string_literal(opts.title.clone()),
+        "Producer" => "Optimizador de Puestos",
+        "SeatoptMmPerPt" => Object::Real((1.0 / k) as f32),
+        "SeatoptScale" => Object::Real(n as f32),
+    });
     doc.trailer.set("Info", info);
     let mut out = Vec::new();
     doc.save_to(&mut out).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
-fn scale_bar(c: &mut Canvas, x: f64, y: f64, k: f64, n: f64) {
-    // barra de 0 a 5 m (o 10 m si la escala es pequeña)
-    let total_m = if n >= 300.0 { 20.0 } else if n >= 150.0 { 10.0 } else { 5.0 };
-    let seg = total_m / 5.0;
-    let w = seg * 1000.0 * k;
+/// Lado hacia el que abre una puerta: hacia el área amoblable.
+fn door_inward(plan: &Plan, d: &Door) -> Pt {
+    let u = (d.b - d.a).norm();
+    let n = u.perp();
+    let m = d.mid();
+    if point_in_region(m + n * 300.0, &plan.region) {
+        n
+    } else if point_in_region(m - n * 300.0, &plan.region) {
+        -n
+    } else {
+        n
+    }
+}
+
+fn draw_minimal_plan(c: &mut Canvas, plan: &Plan, layout: Option<&Layout>) {
+    let ink = (0.12, 0.14, 0.13);
+    // área amoblable
+    c.layer("A-MURO-EXT");
+    c.fill_rgb((0.965, 0.975, 0.965));
+    for r in &plan.region {
+        c.path(r, true);
+    }
+    c.raw("f*");
+    c.end_layer();
+    // pasillo principal (translúcido)
+    if let Some(l) = layout {
+        c.layer("SO-PASILLO-PRINCIPAL");
+        c.raw("q /GS1 gs");
+        c.fill_rgb(hex_rgb("#6fa8c4"));
+        for p in &l.corridors {
+            c.path(p, true);
+            c.raw("f");
+        }
+        c.raw("Q");
+        c.end_layer();
+    }
+    // oficinas y recintos cerrados
+    for rm in &plan.rooms {
+        c.layer("A-RECINTOS");
+        c.fill_rgb((0.88, 0.90, 0.93));
+        c.stroke_rgb((0.35, 0.38, 0.42));
+        c.lw(0.5);
+        c.path(&rm.poly, true);
+        c.raw("B");
+        c.end_layer();
+        if !rm.label.is_empty() {
+            let (x, y) = c.p(centroid(&rm.poly));
+            c.layer("A-TEXTO");
+            c.fill_rgb(ink);
+            c.text_c(x, y, 6.0, false, &rm.label);
+            c.end_layer();
+        }
+    }
+    // contorno del área amoblable
+    c.layer("A-MURO-EXT");
+    c.stroke_rgb(ink);
+    c.lw(0.9);
+    for r in &plan.region {
+        c.path(r, true);
+        c.raw("S");
+    }
+    c.end_layer();
+    // edificio
+    if plan.building.len() >= 3 {
+        c.layer("A-EDIFICIO");
+        c.stroke_rgb(ink);
+        c.lw(1.6);
+        c.path(&plan.building, true);
+        c.raw("S");
+        c.end_layer();
+    }
+    for o in &plan.obstacles {
+        let col = match o.kind {
+            ObstacleKind::Column => "#5c615e",
+            ObstacleKind::FixedOffice => "#c8d3e0",
+            ObstacleKind::Restricted => "#e3b3da",
+            ObstacleKind::Reserved => "#e2d99a",
+        };
+        c.layer(match o.kind {
+            ObstacleKind::Column => "A-COLUMNA",
+            ObstacleKind::FixedOffice => "A-OFICINA-FIJA",
+            ObstacleKind::Restricted => "A-ZONA-RESTRINGIDA",
+            ObstacleKind::Reserved => "A-ZONA-RESERVADA",
+        });
+        c.fill_rgb(hex_rgb(col));
+        c.stroke_rgb(ink);
+        c.lw(0.4);
+        c.path(&o.poly, true);
+        c.raw("B");
+        c.end_layer();
+        if !o.label.is_empty() {
+            let (x, y) = c.p(centroid(&o.poly));
+            c.layer("A-TEXTO");
+            c.fill_rgb(ink);
+            c.text_c(x, y, 6.0, false, &o.label);
+            c.end_layer();
+        }
+    }
+    // puertas: vano + hoja + barrido
+    for d in &plan.doors {
+        let col = match d.kind {
+            DoorKind::Main => "#1a9c3b",
+            DoorKind::Exit => "#e07b12",
+            DoorKind::Office => "#2a8fb0",
+            DoorKind::Ignore => continue,
+        };
+        let w = d.width();
+        let inward = door_inward(plan, d);
+        let leaf_end = d.a + inward * w;
+        // arco de a+u*w a a+inward*w
+        let u = (d.b - d.a).norm();
+        let a0 = u.y.atan2(u.x);
+        let a1 = inward.y.atan2(inward.x);
+        let mut da = a1 - a0;
+        while da > std::f64::consts::PI {
+            da -= std::f64::consts::TAU;
+        }
+        while da < -std::f64::consts::PI {
+            da += std::f64::consts::TAU;
+        }
+        c.layer(match d.kind {
+            DoorKind::Main => "A-PUERTA-PPAL",
+            DoorKind::Exit => "A-PUERTA-SALIDA",
+            _ => "A-PUERTA-OFICINA",
+        });
+        c.stroke_rgb(hex_rgb(col));
+        c.lw(0.5);
+        c.raw("[2 1.5] 0 d");
+        c.arc(d.a, w, a0, da);
+        c.raw("S [] 0 d");
+        c.lw(0.8);
+        c.path(&[d.a, leaf_end], false);
+        c.raw("S");
+        c.end_layer();
+        c.layer("A-PUERTA-VANO");
+        c.lw(if d.kind == DoorKind::Main { 3.0 } else { 2.0 });
+        c.path(&[d.a, d.b], false);
+        c.raw("S");
+        c.end_layer();
+    }
+}
+
+/// Barra de escala que cabe en `max_w` puntos; `x` es el borde izquierdo.
+fn scale_bar(c: &mut Canvas, x: f64, y: f64, k: f64, max_w: f64) {
+    let total_m = [50.0, 20.0, 10.0, 5.0, 2.0, 1.0].iter().copied().find(|m| m * 1000.0 * k <= max_w).unwrap_or(1.0);
+    let w = total_m * 1000.0 * k / 5.0;
     c.lw(0.4);
     c.stroke_rgb((0.1, 0.1, 0.1));
     for i in 0..5 {
@@ -482,7 +699,7 @@ fn scale_bar(c: &mut Canvas, x: f64, y: f64, k: f64, n: f64) {
     }
     c.fill_rgb((0.1, 0.1, 0.1));
     c.text(x - 2.0, y + 7.0, 6.5, false, "0");
-    c.text(x + 5.0 * w - 8.0, y + 7.0, 6.5, false, &format!("{total_m:.0} m"));
+    c.text(x + 5.0 * w - 12.0, y + 7.0, 6.5, false, &format!("{total_m:.0} m"));
 }
 
 fn wrap(s: &str, width: f64, size: f64) -> Vec<String> {

@@ -21,7 +21,7 @@ export async function importPlan() {
     if (!out) return;
     const roles: Record<string, typeof out.layers[number]['role']> = {};
     out.layers.forEach((l) => (roles[l.name] = l.role));
-    S().set({ drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
+    S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
     await ensureConfig();
     await loadBackground();
     await analyzePlan(null);
@@ -35,7 +35,9 @@ export async function loadBackground() {
   if (!d) return;
   const bg = await call<BgLayer[]>('background', { drawingId: d.drawingId, mmPerUnit: S().mmPerUnit });
   // capas ignoradas o de mobiliario, ocultas al inicio para que el plano se lea mejor
-  const hidden = bg.filter((l) => S().roles[l.name] === 'ignore').map((l) => l.name);
+  let hidden = bg.filter((l) => S().roles[l.name] === 'ignore').map((l) => l.name);
+  // nunca ocultar todo el dibujo (PDF sin capas)
+  if (hidden.length >= bg.length) hidden = [];
   S().set({ background: bg, hiddenLayers: hidden });
 }
 
@@ -44,9 +46,11 @@ export async function analyzePlan(seed: Pt | null) {
   if (!drawing) return;
   try {
     const r = await call<AnalyzeResult>('analyze', { drawingId: drawing.drawingId, options: { mmPerUnit, roles, seed, gapClose } });
-    S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, capacity: null, suggestions: null, variants: [] });
+    const auto = r.notes.some((n) => n.includes('más ancha'));
+    S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
+    S().set({ notes: [drawing.scale.reason, String(e instanceof Error ? e.message : e)] });
   }
 }
 
@@ -232,23 +236,43 @@ export async function openProject() {
   }
 }
 
-export async function exportPdf(o: { clean?: boolean }) {
+/** PDF del layout, del plano simplificado (clean) o del dibujo completo sin mobiliario (clean + full). */
+export async function exportPdf(o: { clean?: boolean; full?: boolean }) {
   const s = S();
   const clean = !!o.clean;
+  const full = !!o.full;
   if (!clean && !s.layout) return;
-  const title = clean ? `${baseName()} — planta sin mobiliario` : `${baseName()} — distribución de puestos`;
-  // capas ocultas en el lienzo + mobiliario existente
+  const title = full ? `${baseName()} — planta sin mobiliario` : clean ? `${baseName()} — planta para optimización` : `${baseName()} — distribución de puestos`;
   const furniture = (s.drawing?.layers ?? []).filter((l) => s.roles[l.name] === 'furniture').map((l) => l.name);
-  const hidden = clean ? furniture : Array.from(new Set([...s.hiddenLayers, ...furniture]));
+  const hidden = Array.from(new Set([...s.hiddenLayers, ...furniture]));
+  const p = problem();
   try {
     const b64 = await call<string>('export_pdf', {
-      problem: clean ? null : problem(),
+      problem: full ? null : p,
       layout: clean ? null : s.layout,
       drawingId: s.drawing?.drawingId ?? '',
       mmPerUnit: s.mmPerUnit,
-      opts: { paper: s.pdfPaper, scale: s.pdfScale > 0 ? s.pdfScale : null, title, colorBy: s.colorBy, background: s.showBackground, hiddenLayers: hidden, clean, numbers: true },
+      opts: {
+        paper: s.pdfPaper, scale: s.pdfScale > 0 ? s.pdfScale : null, title, colorBy: s.colorBy,
+        background: full || (!clean && s.pdfBackground), hiddenLayers: full ? furniture : hidden, clean, numbers: true,
+      },
     });
-    const path = await saveBase64(`${baseName()}_${clean ? 'sin_mobiliario' : 'puestos'}_${s.pdfPaper}.pdf`, b64, 'pdf');
+    const suffix = full ? 'sin_mobiliario' : clean ? 'plano_base' : 'puestos';
+    const path = await saveBase64(`${baseName()}_${suffix}_${s.pdfPaper}.pdf`, b64, 'pdf');
+    if (path) S().say(`Guardado: ${path}`);
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
+}
+
+/** DXF del plano simplificado, con capas estándar (en mm, o en las unidades del DXF original). */
+export async function exportPlanDxf() {
+  const s = S();
+  if (!s.plan) return;
+  const outMm = s.drawing?.source === 'pdf' || !s.drawing ? 1 : s.mmPerUnit;
+  try {
+    const txt = await call<string>('export_plan_dxf', { plan: s.plan, outMm });
+    const path = await saveText(`${baseName()}_plano_base.dxf`, txt, 'dxf');
     if (path) S().say(`Guardado: ${path}`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');

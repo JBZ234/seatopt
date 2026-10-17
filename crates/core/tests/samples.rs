@@ -68,3 +68,35 @@ fn e5_apagada_mezcla_tipos_en_la_fila() {
     let l = search::optimize(&Problem { plan: r.plan, config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap();
     assert_eq!(l.kpis.seats_placed, 28);
 }
+
+#[test]
+fn plano_simplificado_ida_y_vuelta() {
+    use seat_core::{export, pdf_out};
+    let path = format!("{}/../../samples/03_planta_L_oficinas.dxf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let count = |p: &Plan, k: DoorKind| p.doors.iter().filter(|x| x.kind == k).count();
+    // DXF
+    let dxf = export::plan_dxf(&r.plan, 1.0);
+    let d2 = import::import_bytes("base.dxf", dxf.as_bytes()).unwrap();
+    let ro2 = suggest_roles(&d2);
+    let sg2 = guess_scale(&d2, &ro2);
+    assert_eq!(sg2.mm_per_unit, 1.0);
+    let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: 1.0, roles: ro2, seed: None, gap_close: 1200.0 }).unwrap();
+    assert!((r2.area_m2 - r.area_m2).abs() < r.area_m2 * 0.03, "área {} vs {}", r2.area_m2, r.area_m2);
+    assert_eq!(count(&r2.plan, DoorKind::Main), 1);
+    assert_eq!(count(&r2.plan, DoorKind::Exit), count(&r.plan, DoorKind::Exit));
+    assert_eq!(r2.plan.doors.len(), r.plan.doors.len());
+    // PDF (capas + escala guardada)
+    let opts = pdf_out::PdfOpts { paper: "A3".into(), scale: None, title: "t".into(), color_by: "type".into(), background: false, hidden_layers: vec![], clean: true, numbers: false };
+    let pdf = pdf_out::render_pdf(Some(&r.plan), None, None, None, &opts).unwrap();
+    let d3 = import::import_bytes("base.pdf", &pdf).unwrap();
+    let ro3 = suggest_roles(&d3);
+    let sg3 = guess_scale(&d3, &ro3);
+    assert!(sg3.reason.contains("guardada"));
+    let r3 = analyze(&d3, &AnalyzeOptions { mm_per_unit: sg3.mm_per_unit, roles: ro3, seed: None, gap_close: 1200.0 }).unwrap();
+    assert!((r3.area_m2 - r.area_m2).abs() < r.area_m2 * 0.03, "área {} vs {}", r3.area_m2, r.area_m2);
+    assert_eq!(count(&r3.plan, DoorKind::Main), 1);
+    assert_eq!(r3.plan.doors.len(), r.plan.doors.len());
+}

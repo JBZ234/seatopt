@@ -12,6 +12,17 @@ pub fn read_pdf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     let (&_num, &page_id) = pages.iter().next().ok_or("El PDF no tiene páginas")?;
     let mut d = Drawing::new(name, SourceKind::Pdf);
     d.unit_note = "PDF: las unidades son puntos de papel; hay que fijar la escala (calibrar).".into();
+    // escala guardada por esta app al exportar
+    if let Ok(info) = doc.trailer.get(b"Info").and_then(|i| doc.dereference(i).map(|(_, o)| o)).and_then(|o| o.as_dict()) {
+        if let Ok(v) = info.get(b"SeatoptMmPerPt") {
+            let mm = num(v);
+            if mm > 0.0 {
+                d.declared_unit_mm = Some(mm);
+                let sc = info.get(b"SeatoptScale").map(num).unwrap_or(mm / (25.4 / 72.0));
+                d.unit_note = format!("Escala guardada en el PDF: 1:{sc:.0}");
+            }
+        }
+    }
 
     let content = doc.get_page_content(page_id).map_err(|e| format!("Contenido ilegible: {e}"))?;
     let (inline_res, res_ids) = doc.get_page_resources(page_id).map_err(|e| format!("{e}"))?;

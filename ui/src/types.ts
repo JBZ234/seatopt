@@ -9,7 +9,8 @@ export type DoorKind = 'main' | 'exit' | 'office' | 'ignore';
 export interface Door { id: string; kind: DoorKind; a: Pt; b: Pt; label: string }
 export interface Window { a: Pt; b: Pt }
 
-export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[] }
+export interface Room { poly: Pt[]; label: string }
+export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[]; rooms?: Room[]; building?: Pt[] }
 
 export type DeskShape = 'straight' | 'l';
 export interface DeskType {
@@ -90,7 +91,7 @@ export interface Capacity { typeId: string; maxSeats: number; maxUnits: number }
 
 export type LayerRole =
   | 'outline' | 'wall' | 'column' | 'office' | 'restricted' | 'reserved'
-  | 'door' | 'mainDoor' | 'exitDoor' | 'officeDoor' | 'window' | 'furniture' | 'ignore';
+  | 'door' | 'mainDoor' | 'exitDoor' | 'officeDoor' | 'window' | 'furniture' | 'room' | 'building' | 'ignore';
 export interface LayerOut { name: string; color: string; paths: number; role: LayerRole }
 export interface ScaleGuess { mmPerUnit: number; paperScale: number | null; reason: string }
 export interface ImportOut {

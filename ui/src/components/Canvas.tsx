@@ -34,6 +34,8 @@ export function boundsOf(plan: Plan | null, bg: { paths: number[][] }[] | null):
   const add = (x: number, y: number) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
   if (plan && plan.region.length) {
     for (const r of plan.region) for (const p of r) add(p.x, p.y);
+    for (const p of plan.building ?? []) add(p.x, p.y);
+    for (const r of plan.rooms ?? []) for (const p of r.poly) add(p.x, p.y);
   } else if (bg) {
     for (const l of bg) for (const p of l.paths) for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]);
   }
@@ -88,6 +90,64 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   });
 
   const toWorld = (sx: number, sy: number): Pt => ({ x: (sx - view.tx) / view.k, y: -(sy - view.ty) / view.k });
+
+  // ------------------------------------------------ enganche a vértices (como OSNAP)
+  const snapIndex = useMemo(() => {
+    const cell = 1000;
+    const idx = new Map<string, number[]>();
+    const add = (x: number, y: number) => {
+      const k = `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
+      const a = idx.get(k);
+      if (a) a.push(x, y); else idx.set(k, [x, y]);
+    };
+    background?.forEach((l) => { if (!hiddenLayers.includes(l.name)) l.paths.forEach((p) => { for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]); }); });
+    plan?.region.forEach((r) => r.forEach((q) => add(q.x, q.y)));
+    plan?.obstacles.forEach((o) => o.poly.forEach((q) => add(q.x, q.y)));
+    plan?.doors.forEach((d) => { add(d.a.x, d.a.y); add(d.b.x, d.b.y); });
+    return { idx, cell };
+  }, [background, hiddenLayers, plan]);
+  const SNAP_TOOLS: string[] = ['outline', 'drawDoor', 'window', 'column', 'fixedOffice', 'restricted', 'reserved', 'calibrate'];
+  const snapPt = (w: Pt): Pt | null => {
+    const r = 10 / view.k;
+    const { idx, cell } = snapIndex;
+    let best: Pt | null = null, bd = r;
+    const cx = Math.floor(w.x / cell), cy = Math.floor(w.y / cell), span = Math.ceil(r / cell);
+    for (let i = -span; i <= span; i++) for (let j = -span; j <= span; j++) {
+      const a = idx.get(`${cx + i},${cy + j}`);
+      if (!a) continue;
+      for (let t = 0; t < a.length; t += 2) {
+        const d = Math.hypot(a[t] - w.x, a[t + 1] - w.y);
+        if (d < bd) { bd = d; best = { x: a[t], y: a[t + 1] }; }
+      }
+    }
+    return best;
+  };
+  const worldAt = (sx: number, sy: number): Pt => {
+    const w = toWorld(sx, sy);
+    return SNAP_TOOLS.includes(tool) ? snapPt(w) ?? w : w;
+  };
+  // contorno dibujado a mano
+  const [outline, setOutline] = useState<Pt[]>([]);
+  const [snapMark, setSnapMark] = useState<Pt | null>(null);
+  useEffect(() => { if (tool !== 'outline') setOutline([]); }, [tool]);
+  const finishOutline = (pts: Pt[]) => {
+    if (pts.length < 3) return;
+    const area = Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + p.x * q.y - q.x * p.y; }, 0)) / 2e6;
+    const cur = st.plan;
+    if (cur) st.snapshot();
+    st.set({ plan: { region: [pts], obstacles: cur?.obstacles ?? [], doors: cur?.doors ?? [], windows: cur?.windows ?? [] }, areaM2: area, tool: 'select' });
+    setOutline([]);
+    st.say((cur?.doors.some((d) => d.kind === 'main') ? 'Contorno listo.' : 'Contorno listo. Ahora marca la puerta principal con «Dibujar puerta».'));
+  };
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (tool !== 'outline') return;
+      if (e.key === 'Enter') finishOutline(outline);
+      if (e.key === 'Backspace') setOutline((o) => o.slice(0, -1));
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  });
   const evPt = (e: React.MouseEvent | React.WheelEvent) => {
     const r = svgRef.current!.getBoundingClientRect();
     return { sx: e.clientX - r.left, sy: e.clientY - r.top };
@@ -119,6 +179,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     if (!plan) return null;
     return (
       <>
+        {plan.building && plan.building.length > 2 && <path className="building" d={ringD(plan.building)} />}
+        {plan.rooms?.map((r, i) => <path key={'r' + i} className="room" d={ringD(r.poly)} />)}
         <path className="region" d={plan.region.map(ringD).join('')} fillRule="evenodd" />
         {showKeepouts && layout?.keepouts.map((k, i) => <path key={'k' + i} className="keepout" d={ringD(k)} />)}
         {layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />)}
@@ -208,7 +270,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onDown = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
-    const w = toWorld(x, y);
+    const w = worldAt(x, y);
     if (e.button === 1 || e.button === 2 || tool === 'pan') {
       panRef.current = { sx: x, sy: y, tx: view.tx, ty: view.ty };
       return;
@@ -222,15 +284,19 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
-    if (['column', 'fixedOffice', 'restricted', 'reserved', 'window'].includes(tool)) {
+    if (['column', 'fixedOffice', 'restricted', 'reserved', 'window', 'drawDoor'].includes(tool)) {
       setDrag({ a: w, b: w });
     }
   };
 
   const onMove = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
-    const w = toWorld(x, y);
+    const w = worldAt(x, y);
     setCursor(w);
+    if (SNAP_TOOLS.includes(tool)) {
+      const sp = snapPt(toWorld(x, y));
+      if (sp?.x !== snapMark?.x || sp?.y !== snapMark?.y) setSnapMark(sp);
+    } else if (snapMark) setSnapMark(null);
     if (panRef.current) {
       const p = panRef.current;
       setView((v) => ({ ...v, tx: p.tx + x - p.sx, ty: p.ty + y - p.sy }));
@@ -255,7 +321,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onUp = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
-    const w = toWorld(x, y);
+    const w = worldAt(x, y);
     if (panRef.current) {
       const moved = Math.hypot(x - panRef.current.sx, y - panRef.current.sy) > 4;
       panRef.current = null;
@@ -298,6 +364,13 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       if (Math.hypot(a.x - b.x, a.y - b.y) < 100) return;
       if (tool === 'window') {
         st.updatePlan((p) => { p.windows.push({ a, b }); });
+      } else if (tool === 'drawDoor') {
+        const kind: DoorKind = st.plan?.doors.some((d) => d.kind === 'main') ? 'office' : 'main';
+        st.updatePlan((p) => {
+          p.doors.push({ id: uid('d'), kind, a, b, label: '' });
+        });
+        if (kind === 'main') st.set({ mainConfirmed: true, tool: 'select' });
+        st.say(kind === 'main' ? 'Puerta principal agregada. Las siguientes que dibujes serán de oficina; cámbialas con «Cambiar tipo».' : 'Puerta agregada.');
       } else {
         const kind = tool as ObstacleKind;
         const label = kind === 'reserved' ? (prompt('Nombre de la zona reservada (p. ej. Impresoras):') ?? '') : '';
@@ -312,12 +385,24 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     if (e.button !== 0) return;
     switch (tool) {
+      case 'outline': {
+        if (outline.length >= 3 && Math.hypot((outline[0].x - w.x) * view.k, (outline[0].y - w.y) * view.k) < 12) {
+          finishOutline(outline);
+        } else {
+          setOutline([...outline, w]);
+        }
+        break;
+      }
       case 'seed':
         onSeed(w);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
         const d = nearestDoor(w);
-        if (!d) { st.say('Haz clic sobre una puerta (línea de color en el borde).'); return; }
+        if (!d) { st.say('No hay una puerta ahí: haz clic sobre una línea de color en el borde, o usa «Dibujar puerta».'); return; }
+        if (tool === 'mainDoor') {
+          st.set({ mainConfirmed: true, tool: 'select' });
+          st.say('Puerta principal marcada.');
+        }
         st.updatePlan((p) => {
           const dd = p.doors.find((x) => x.id === d.id)!;
           if (tool === 'mainDoor') {
@@ -354,6 +439,15 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
   };
 
+  const zoomBy = (f: number) => {
+    setView((v) => {
+      const k = Math.min(2, Math.max(0.0005, v.k * f));
+      const x = size.w / 2, y = size.h / 2;
+      const wx = (x - v.tx) / v.k, wy = (y - v.ty) / v.k;
+      return { k, tx: x - wx * k, ty: y - wy * k };
+    });
+  };
+
   const onWheel = (e: React.WheelEvent) => {
     const { sx: x, sy: y } = evPt(e);
     const f = Math.exp(-e.deltaY * 0.0015);
@@ -372,7 +466,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     <div className={'canvas ' + cursorCls}>
       <svg ref={svgRef} width={size.w} height={size.h} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
         onMouseLeave={() => { panRef.current = null; setHover(null); setCursor(null); }} onWheel={onWheel}
-        onContextMenu={(e) => e.preventDefault()} role="img" aria-label="Plano de la oficina">
+        onContextMenu={(e) => e.preventDefault()} onDoubleClick={() => { if (tool === 'outline') finishOutline(outline); }} role="img" aria-label="Plano de la oficina">
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k} ${-view.k})`}>
           {showBackground && <g className="bg">{bgEls}</g>}
           {planEls}
@@ -380,10 +474,20 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {moveOff ? <g transform={`translate(${moveOff.x} ${moveOff.y})`} opacity={0.7}>{selEls}</g> : selEls}
           {drag && (tool === 'window'
             ? <line className="draft" x1={drag.a.x} y1={drag.a.y} x2={drag.b.x} y2={drag.b.y} />
+            : tool === 'drawDoor' ? <line className="draft door-draft" x1={drag.a.x} y1={drag.a.y} x2={drag.b.x} y2={drag.b.y} />
             : <rect className="draft" x={Math.min(drag.a.x, drag.b.x)} y={Math.min(drag.a.y, drag.b.y)} width={Math.abs(drag.b.x - drag.a.x)} height={Math.abs(drag.b.y - drag.a.y)} />)}
           {st.calib.length === 1 && cursor && <line className="draft" x1={st.calib[0].x} y1={st.calib[0].y} x2={cursor.x} y2={cursor.y} />}
+          {outline.length > 0 && (
+            <polyline className="draft outline-draft" points={[...outline, ...(cursor ? [cursor] : [])].map((p) => `${p.x},${p.y}`).join(' ')} />
+          )}
         </g>
         <g className="labels">
+          {snapMark && <rect className="snap" x={sx(snapMark) - 5} y={sy(snapMark) - 5} width={10} height={10} />}
+          {outline.length > 0 && <circle className="snap-start" cx={sx(outline[0])} cy={sy(outline[0])} r={6} />}
+          {plan?.rooms?.filter((r) => r.label).map((r, i) => {
+            const c = r.poly.reduce((a, p) => ({ x: a.x + p.x / r.poly.length, y: a.y + p.y / r.poly.length }), { x: 0, y: 0 });
+            return <text key={'rl' + i} x={sx(c)} y={sy(c)} className="ob-label">{r.label}</text>;
+          })}
           {plan?.obstacles.filter((o) => o.label).map((o) => {
             const c = o.poly.reduce((a, p) => ({ x: a.x + p.x / o.poly.length, y: a.y + p.y / o.poly.length }), { x: 0, y: 0 });
             return <text key={o.id} x={sx(c)} y={sy(c)} className="ob-label">{o.label}</text>;
@@ -407,9 +511,28 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Quitar selección</button>
         </div>
       )}
-      <div className="readout">
-        {cursor ? `x ${(cursor.x / 1000).toFixed(2)} m · y ${(cursor.y / 1000).toFixed(2)} m` : ''}
-        <button className="ghost small" onClick={fit} title="Encajar el plano en la vista">Encuadrar</button>
+      <div className="canvas-tools" role="toolbar" aria-label="Vista">
+        <button className={tool === 'select' ? 'on' : ''} aria-pressed={tool === 'select'} title="Seleccionar (Esc)" onClick={() => st.set({ tool: 'select' })}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M5 3l10 7-4.5 1 2.5 5-2 1-2.5-5L5 15z" /></svg><span>Seleccionar</span>
+        </button>
+        <button className={tool === 'pan' ? 'on' : ''} aria-pressed={tool === 'pan'} title="Mover el plano (también con botón derecho)" onClick={() => st.set({ tool: tool === 'pan' ? 'select' : 'pan' })}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2v16M2 10h16M10 2l-2.5 2.5M10 2l2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5" /></svg><span>Mover</span>
+        </button>
+        <hr />
+        <button title="Acercar (rueda del mouse)" onClick={() => zoomBy(1.4)}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M10 4v12M4 10h12" /></svg><span>Acercar</span>
+        </button>
+        <button title="Alejar" onClick={() => zoomBy(1 / 1.4)}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M4 10h12" /></svg><span>Alejar</span>
+        </button>
+        <button title="Encuadrar todo el plano" onClick={fit}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg><span>Encuadrar</span>
+        </button>
+      </div>
+      <div className="readout" aria-live="off">
+        <span>x</span><b>{cursor ? (cursor.x / 1000).toFixed(2) : '—'}</b>
+        <span>y</span><b>{cursor ? (cursor.y / 1000).toFixed(2) : '—'}</b>
+        <span>m</span>
       </div>
       {hover && <SeatTip layout={layout} seat={hover.seat} x={hover.sx} y={hover.sy} />}
     </div>

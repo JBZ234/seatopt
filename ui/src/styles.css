@@ -23,8 +23,45 @@
   --radius: 4px;
   --f: 'Barlow', system-ui, sans-serif;
   --fc: 'Barlow Condensed', 'Barlow', sans-serif;
+  --bg-ink: none;
+  --sel: #2e78dc;
+  --shadow: rgba(37, 48, 43, 0.15);
   color-scheme: light;
 }
+
+/* ---------------------------------------------------------------- modo oscuro */
+:root[data-theme='dark'] {
+  --vellum: #141917;
+  --paper: #1d2421;
+  --panel: #181e1b;
+  --graphite: #e4ebe7;
+  --graphite-2: #a9b5ae;
+  --muted: #74817a;
+  --rule: #2f3a35;
+  --mat: #45b08f;
+  --mat-ink: #0d1f18;
+  --red: #ec7358;
+  --egress: #3cc163;
+  --exit: #f09a3a;
+  --office-door: #4bb1d3;
+  --column: #c0675b;
+  --office: #4d5f78;
+  --restricted: #b064a2;
+  --reserved: #a49a3e;
+  --desk-neutral: #59655f;
+  --window: #4bb7e6;
+  --corridor: #3f86aa;
+  --keep: #c9a640;
+  --sel: #6aa8ff;
+  --shadow: rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+:root[data-theme='dark'] .bg path { stroke: #7e8b85; opacity: 0.5; }
+:root[data-theme='dark'] .region { fill: #222b27; }
+:root[data-theme='dark'] .desk { stroke: #0c100e; }
+:root[data-theme='dark'] .chair { fill-opacity: 1; }
+:root[data-theme='dark'] button.primary:hover:not(:disabled) { background: #3a9a7c; }
+:root[data-theme='dark'] .desk-shape { stroke: #0c100e; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -314,8 +351,20 @@ table.matrix thead th { font-weight: 500; color: var(--graphite-2); }
 .flag { fill: var(--red); }
 .viol { fill: none; stroke: var(--exit); stroke-width: 2; }
 .viol.hard { stroke: var(--red); stroke-width: 2.5; }
-.readout { position: absolute; left: 10px; bottom: 8px; font: 500 13px var(--fc); color: var(--graphite-2); display: flex; gap: 10px; align-items: center; }
-.tool-banner { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: var(--graphite); color: var(--paper); padding: 4px 12px; border-radius: 999px; font-size: 13px; pointer-events: none; }
+.readout {
+  position: absolute; left: 10px; bottom: 8px; display: grid;
+  grid-template-columns: auto 5.5ch auto 5.5ch auto; gap: 4px; align-items: baseline;
+  font: 500 13px var(--fc); color: var(--graphite-2); font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.readout b { font-weight: 500; color: var(--graphite); text-align: right; }
+.tool-banner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 140px);
+  display: flex; align-items: center; gap: 12px;
+  background: var(--mat); color: var(--mat-ink); padding: 7px 8px 7px 16px; border-radius: 8px;
+  font-size: 14px; font-weight: 600; box-shadow: 0 4px 16px var(--shadow);
+}
+.banner-x { background: transparent; border: 1px solid currentColor; color: inherit; font-size: 12px; padding: 3px 8px; white-space: nowrap; font-weight: 500; }
+.banner-x:hover:not(:disabled) { border-color: currentColor; background: rgba(255, 255, 255, 0.15); }
 .tip {
   position: absolute; pointer-events: none;
   background: var(--graphite); color: var(--paper);
@@ -344,7 +393,7 @@ table.matrix thead th { font-weight: 500; color: var(--graphite-2); }
 
 /* ---------------------------------------------------------------- selección estilo CAD */
 .canvas.arrow svg { cursor: default; }
-.sel { fill: none; stroke: #2e78dc; stroke-width: 2.2; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; }
+.sel { fill: none; stroke: var(--sel); stroke-width: 2.2; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; }
 .sel.thin { stroke-width: 1; }
 .selbox { position: absolute; pointer-events: none; }
 .selbox.window { background: rgba(46, 120, 220, 0.12); border: 1px solid #2e78dc; }
@@ -353,6 +402,55 @@ table.matrix thead th { font-weight: 500; color: var(--graphite-2); }
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px;
   background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
-  box-shadow: 0 2px 10px rgba(37, 48, 43, 0.15); font-size: 13px; white-space: nowrap;
+  box-shadow: 0 2px 10px var(--shadow); font-size: 13px; white-space: nowrap;
 }
 .selbar span { margin-right: 6px; font-weight: 500; }
+.snap { fill: none; stroke: #e0a100; stroke-width: 2; pointer-events: none; }
+.snap-start { fill: none; stroke: var(--mat); stroke-width: 2; pointer-events: none; }
+.outline-draft { fill: rgba(31, 111, 92, 0.08); stroke: var(--mat); stroke-width: 2; stroke-dasharray: none; vector-effect: non-scaling-stroke; }
+.door-draft { stroke: var(--egress); stroke-width: 6; stroke-dasharray: none; vector-effect: non-scaling-stroke; }
+
+/* ---------------------------------------------------------------- barra del lienzo */
+.canvas-tools {
+  position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 4px;
+  box-shadow: 0 2px 10px var(--shadow);
+}
+.canvas-tools button {
+  display: flex; align-items: center; gap: 8px; border: none; background: transparent;
+  padding: 6px 8px; border-radius: 5px; font-size: 13px; color: var(--graphite); text-align: left;
+}
+.canvas-tools button:hover { background: var(--vellum); }
+.canvas-tools button.on { background: var(--mat); color: var(--mat-ink); }
+.canvas-tools svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.canvas-tools button:first-child svg { fill: currentColor; stroke: none; }
+.canvas-tools hr { border: none; border-top: 1px solid var(--rule); margin: 3px 2px; }
+@media (max-width: 1200px) { .canvas-tools span { display: none; } }
+
+/* ---------------------------------------------------------------- tareas guiadas */
+.tasks { list-style: none; padding: 0; margin: 14px 0 6px; display: flex; flex-direction: column; gap: 8px; }
+.task { display: grid; grid-template-columns: 26px 1fr; gap: 10px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
+.task.current { border-color: var(--mat); box-shadow: inset 3px 0 0 var(--mat); }
+.task-mark {
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  font: 600 13px var(--fc); border: 1.5px solid var(--muted); color: var(--graphite-2);
+}
+.task.current .task-mark { border-color: var(--mat); color: var(--mat); }
+.task.done .task-mark { background: var(--mat); border-color: var(--mat); color: var(--mat-ink); }
+.task.done.unsure .task-mark { background: var(--keep); border-color: var(--keep); color: #2a2208; }
+.task-title { font: 600 16px var(--fc); margin: 2px 0 4px; }
+.task .row { margin: 6px 0 0; }
+.task .hint { margin: 2px 0 0; }
+.task .stat-line { margin: 0; }
+button.active-tool { outline: 2px solid var(--mat); outline-offset: 1px; }
+.section-label { margin-top: 26px; color: var(--graphite-2); font-size: 14px; }
+
+/* ---------------------------------------------------------------- tema */
+.theme-switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; margin-left: 8px; }
+.theme-switch button { border: none; background: transparent; padding: 2px 9px; border-radius: 999px; font-size: 12px; color: var(--graphite-2); }
+.theme-switch button.on { background: var(--graphite); color: var(--paper); }
+
+/* ---------------------------------------------------------------- referencia: edificio y recintos */
+.building { fill: none; stroke: var(--graphite); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+.room { fill: var(--office); fill-opacity: 0.35; stroke: var(--graphite-2); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.task.unsure .task-mark { border-color: var(--keep); color: var(--keep); }

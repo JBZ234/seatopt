@@ -4,7 +4,7 @@ import { backendName } from './api';
 import Canvas from './components/Canvas';
 import { Bar } from './components/ui';
 import { deleteSelection, evaluateSoon, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
-import { emptySel, requestedSeats, selCount, useApp } from './store';
+import { emptySel, requestedSeats, selCount, useApp, type Theme, type Tool } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
 import OrgStep from './steps/OrgStep';
@@ -13,6 +13,24 @@ import RulesStep from './steps/RulesStep';
 import type { Pt } from './types';
 
 const STEPS = ['Plano', 'Escritorios', 'Reglas', 'Organización', 'Optimizar'];
+
+/** Qué hacer con cada herramienta: se muestra sobre el plano. */
+const TOOL_HELP: Partial<Record<Tool, string>> = {
+  seed: 'Haz clic dentro del área que vas a amoblar',
+  outline: 'Clic en cada esquina del área · clic en el primer punto, doble clic o Enter para cerrar · Retroceso borra el último punto',
+  mainDoor: 'Haz clic sobre la puerta de acceso del personal (líneas de color en el borde)',
+  exitDoor: 'Haz clic sobre las salidas de emergencia',
+  door: 'Cada clic sobre una puerta cambia su tipo: oficina → salida → principal → ignorada',
+  drawDoor: 'Arrastra de un lado al otro del vano de la puerta',
+  calibrate: 'Haz clic en los dos extremos de una medida que conozcas (un muro, una puerta)',
+  column: 'Arrastra para dibujar la columna',
+  fixedOffice: 'Arrastra para dibujar la oficina o sala fija',
+  restricted: 'Arrastra sobre el tablero o gabinete',
+  reserved: 'Arrastra para reservar el área',
+  window: 'Arrastra a lo largo de la ventana',
+  erase: 'Haz clic sobre lo que quieras borrar',
+  pan: 'Arrastra para mover el plano',
+};
 
 export default function App() {
   const st = useApp();
@@ -47,9 +65,22 @@ export default function App() {
     if (useApp.getState().layout && planRef) evaluateSoon();
   }, [planRef]);
 
+  // tema claro / oscuro
+  useEffect(() => {
+    const apply = () => {
+      const dark = st.theme === 'dark' || (st.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    };
+    apply();
+    try { localStorage.setItem('seatopt-theme', st.theme); } catch { /* sin almacenamiento */ }
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [st.theme]);
+
   const onSeed = (p: Pt) => { st.set({ tool: 'select' }); analyzePlan(p); };
   const onCalibrated = (a: Pt, b: Pt) => {
-    st.set({ tool: 'select' });
+    st.set({ tool: 'select', scaleConfirmed: true });
     const measured = Math.hypot(a.x - b.x, a.y - b.y);
     const ans = prompt(`Medida real entre los dos puntos, en metros (ahora mide ${(measured / 1000).toFixed(3)} m):`);
     const real = parseFloat((ans ?? '').replace(',', '.')) * 1000;
@@ -78,6 +109,11 @@ export default function App() {
           <button className="ghost small" onClick={importPlan}>Abrir plano</button>
           <button className="ghost small" onClick={openProject}>Abrir proyecto</button>
           <button className="ghost small" disabled={!st.plan} onClick={saveProject}>Guardar</button>
+          <div className="theme-switch" role="radiogroup" aria-label="Tema">
+            {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l]) => (
+              <button key={t} role="radio" aria-checked={st.theme === t} className={st.theme === t ? 'on' : ''} onClick={() => st.set({ theme: t })}>{l}</button>
+            ))}
+          </div>
         </div>
       </header>
       <aside className="panel">
@@ -95,7 +131,12 @@ export default function App() {
             <p>El plano aparece aquí.</p>
           </div>
         )}
-        {st.tool !== 'select' && <div className="tool-banner">Herramienta activa · Esc para volver a seleccionar</div>}
+        {st.tool !== 'select' && TOOL_HELP[st.tool] && (st.background || st.plan) && (
+          <div className="tool-banner" role="status">
+            <span>{TOOL_HELP[st.tool]}</span>
+            <button className="banner-x" onClick={() => st.set({ tool: 'select', calib: [] })}>Cancelar (Esc)</button>
+          </div>
+        )}
       </main>
       <footer className="status">
         {job ? (

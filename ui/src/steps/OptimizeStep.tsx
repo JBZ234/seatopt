@@ -171,6 +171,9 @@ export default function OptimizeStep() {
             </label>
             <button className="primary" onClick={() => exportPdf({})}>Exportar PDF</button>
           </div>
+          {st.drawing?.drawingId && (
+            <label className="check"><input type="checkbox" checked={st.pdfBackground} onChange={(e) => st.set({ pdfBackground: e.target.checked })} /> Incluir el dibujo original de fondo en el PDF</label>
+          )}
           <div className="row wrap">
             <button onClick={saveProject}>Guardar proyecto</button>
           </div>

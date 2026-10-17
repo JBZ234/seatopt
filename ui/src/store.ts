@@ -5,9 +5,18 @@ import type {
 
 export type Tool =
   | 'select' | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
-  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase';
+  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor';
 
 export type ColorBy = 'type' | 'role' | 'client';
+export type Theme = 'system' | 'light' | 'dark';
+
+function loadTheme(): Theme {
+  try {
+    const t = localStorage.getItem('seatopt-theme');
+    if (t === 'light' || t === 'dark' || t === 'system') return t;
+  } catch { /* sin almacenamiento */ }
+  return 'system';
+}
 
 /** Selección múltiple (como AutoCAD). Ventanas por índice. */
 export interface Selection { modules: string[]; obstacles: string[]; doors: string[]; windows: number[] }
@@ -48,8 +57,12 @@ export interface AppState {
   autoExplore: boolean;
   gapClose: number;
  converter: string;
-  pdfPaper: string;
+ pdfPaper: string;
   pdfScale: number;
+  pdfBackground: boolean;
+  scaleConfirmed: boolean;
+  mainConfirmed: boolean;
+  theme: Theme;
   set: (p: Partial<AppState>) => void;
   updateConfig: (f: (c: Config) => void) => void;
   updatePlan: (f: (p: Plan) => void) => void;
@@ -98,6 +111,10 @@ export const useApp = create<AppState>((set, get) => ({
   converter: '',
   pdfPaper: 'A3',
   pdfScale: 0,
+  pdfBackground: false,
+  scaleConfirmed: false,
+  mainConfirmed: true,
+  theme: loadTheme(),
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;
@@ -107,8 +124,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ config: n });
   },
   updatePlan: (f) => {
-    const p = get().plan;
-    if (!p) return;
+    const p = get().plan ?? { region: [], obstacles: [], doors: [], windows: [] };
     get().snapshot();
     const n = clone(p);
     f(n);
