@@ -12,7 +12,7 @@ import PlanStep from './steps/PlanStep';
 import RulesStep from './steps/RulesStep';
 import type { Pt } from './types';
 
-const STEPS = ['Plano', 'Escritorios', 'Reglas', 'Organización', 'Optimizar'];
+const STEPS = ['Plano', 'Escritorios', 'Espacios', 'Organización', 'Optimizar'];
 
 /** Qué hacer con cada herramienta: se muestra sobre el plano. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
@@ -143,13 +143,13 @@ export default function App() {
           <div className="job">
             <span>{job.progress?.phase || job.kind}{job.progress?.message ? ` · ${job.progress.message}` : ''}</span>
             <Bar value={job.progress?.fraction ?? 0} />
-            {job.progress && job.progress.seatsRequested > 0 && <span className="mono">{job.progress.seatsPlaced} / {job.progress.seatsRequested}</span>}
+            {job.progress && job.progress.seatsPlaced > 0 && <span className="mono">{job.progress.seatsPlaced} / {job.progress.seatsRequested}</span>}
           </div>
         ) : (
-          <span className="muted">{st.plan ? `${st.areaM2.toFixed(0)} m² útiles` : 'Sin plano'}{req ? ` · ${req} puestos pedidos` : ''}</span>
+          <span className="muted">{st.plan ? `${st.areaM2.toFixed(0)} m² útiles` : 'Sin plano'}{req ? ` · ${req} puestos fijos` : ''}{st.config?.demand.some((d) => d.max) ? ' · + máximo posible' : ''}</span>
         )}
         <span className="counter">
-          {k ? <><b>{k.seatsPlaced}</b> / {k.seatsRequested} ubicados</> : null}
+          {k ? (k.maxMode ? <><b>{k.seatsPlaced}</b> puestos</> : <><b>{k.seatsPlaced}</b> / {k.seatsRequested} ubicados</>) : null}
         </span>
         <span className="muted small">modo {backendName}</span>
       </footer>

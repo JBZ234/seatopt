@@ -31,15 +31,48 @@ pub struct WModule {
     pub people: Vec<SeatPerson>,
 }
 
+/// Puesto que falta de un tipo en «máximo posible» (maximizar).
 pub const W_UNPLACED: f64 = 10_000.0;
-pub const W_HARD: f64 = 50_000.0;
+/// Peso relativo de un puesto de relleno frente a uno en fila flexible.
+pub const W_FILLER: f64 = 0.7;
+/// Puesto que falta de un tipo con cantidad fija: siempre antes que maximizar.
+pub const W_FIXED: f64 = 100_000.0;
+/// Regla dura incumplida: lo primero.
+pub const W_HARD: f64 = 1_000_000.0;
+
+/// Penalización por unidades sin ubicar, según el tipo (fijo o máximo).
+/// Con «máximo posible», los tipos de largo flexible (filas, islas) son los principales y los
+/// escritorios sueltos (1–2 personas) rellenan: un puesto de relleno vale `W_FILLER`.
+pub fn deficit(ctx: &Ctx, remaining: &[u32]) -> f64 {
+    let flex_max = ctx.catalog.iter().zip(&ctx.is_max).any(|(t, &m)| m && t.flexible);
+    remaining
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| {
+            let t = &ctx.catalog[i];
+            let seats = if t.flexible && t.shape == DeskShape::Straight { r } else { r * t.seats_per_module(t.per_side) };
+            let w = if !ctx.is_max[i] {
+                W_FIXED
+            } else if flex_max && !t.flexible {
+                W_UNPLACED * W_FILLER
+            } else {
+                W_UNPLACED
+            };
+            seats as f64 * w
+        })
+        .sum()
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Eval {
     pub score: f64,
     pub seats_requested: u32,
     pub seats_placed: u32,
+    /// Puestos fijos sin ubicar.
     pub unplaced_seats: u32,
+    /// Puestos ubicados de tipos «máximo posible».
+    pub max_seats: u32,
+    pub deficit: f64,
     pub hard: u32,
     pub module_ok: Vec<bool>,
     pub seat_flags: Vec<Vec<String>>,
@@ -265,13 +298,20 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     }
     let mut unplaced = 0u32;
     let mut requested = 0u32;
+    let mut remaining = vec![0u32; nt];
     for ti in 0..nt {
         let t = &ctx.catalog[ti];
         let seats_per_unit = if t.flexible && t.shape == DeskShape::Straight { 1 } else { t.seats_per_module(t.per_side) };
-        requested += ctx.demand[ti] * seats_per_unit;
         let missing_units = ctx.demand[ti].saturating_sub(placed_units[ti]);
+        remaining[ti] = missing_units;
+        if ctx.is_max[ti] {
+            ev.max_seats += placed_seats_t[ti];
+            continue;
+        }
+        requested += ctx.demand[ti] * seats_per_unit;
         unplaced += missing_units * seats_per_unit;
     }
+    ev.deficit = deficit(ctx, &remaining);
     let pinned_seats: u32 = mods.iter().filter(|m| m.pinned).map(|m| m.seats.len() as u32).sum();
     ev.seats_requested = requested + pinned_seats;
     let valid_seats: Vec<usize> = (0..seats.len()).filter(|&i| ev.module_ok[seats[i].module]).collect();
@@ -498,6 +538,10 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     soft += density_pen * 10.0;
     soft += custom_pen;
     ev.soft = soft * 10.0;
-    ev.score = W_UNPLACED * ev.unplaced_seats as f64 + W_HARD * ev.hard as f64 + ev.soft;
+    // a igual cantidad de puestos, preferir menos módulos (islas grandes en vez de muchos sueltos)
+    if ctx.is_max.iter().any(|&m| m) {
+        ev.soft += mods.iter().filter(|m| !m.pinned).count() as f64 * 40.0;
+    }
+    ev.score = ev.deficit + W_HARD * ev.hard as f64 + ev.soft;
     (ev, mods, seats)
 }

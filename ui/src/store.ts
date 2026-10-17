@@ -142,11 +142,13 @@ export const useApp = create<AppState>((set, get) => ({
 export const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 8)}`;
 
 /** Puestos que pide la demanda actual. */
+export const hasDemand = (c: Config) => c.demand.some((d) => d.max || d.quantity > 0);
+
 export function requestedSeats(c: Config): number {
   let s = 0;
   for (const d of c.demand) {
     const t = c.catalog.find((t) => t.id === d.typeId);
-    if (!t) continue;
+    if (!t || d.max) continue;
     s += t.flexible ? d.quantity : d.quantity * seatsPerModule(t.shape, t.sides, t.perSide);
   }
   return s;

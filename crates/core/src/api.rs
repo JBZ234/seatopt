@@ -398,6 +398,18 @@ pub fn export_clean_dxf(id: &str, mm_per_unit: f64, exclude: &[String]) -> Resul
     Ok(crate::pdf_out::clean_dxf(&d, mm_per_unit, out_mm, exclude))
 }
 
+/// Plano de líneas simples (muros a eje, columnas, puertas, oficinas) en DXF (texto, mm) o PDF (base64).
+pub fn export_simple(id: &str, opts: &AnalyzeOptions, plan: &Plan, format: &str, paper: &str, title: &str) -> Result<String, String> {
+    let d = drawing(id)?;
+    let sp = crate::simple::simple_plan(&d, opts, plan, &crate::simple::SimpleOpts::default());
+    if format == "dxf" {
+        return Ok(crate::simple::simple_dxf(&sp, 1.0));
+    }
+    let dd = crate::simple::simple_drawing(&sp, title);
+    let o = crate::pdf_out::PdfOpts { paper: paper.into(), scale: None, title: title.into(), color_by: "type".into(), background: true, hidden_layers: vec![], clean: true, numbers: false };
+    crate::pdf_out::render_pdf(None, None, None, Some((&dd, 1.0)), &o).map(|b| b64(&b))
+}
+
 /// Despacho genérico por nombre de comando con argumentos JSON (servidor de desarrollo y pruebas).
 pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
     let get = |k: &str| args.get(k).cloned().unwrap_or(Value::Null);
@@ -450,6 +462,15 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
             let mm = get("mmPerUnit").as_f64().unwrap_or(1.0);
             let ex: Vec<String> = serde_json::from_value(get("exclude")).unwrap_or_default();
             export_clean_dxf(&id, mm, &ex).map(Value::String)
+        }
+        "export_simple" => {
+            let id = get("drawingId").as_str().unwrap_or("").to_string();
+            let opts: AnalyzeOptions = serde_json::from_value(get("options")).map_err(|e| e.to_string())?;
+            let plan: Plan = serde_json::from_value(get("plan")).map_err(|e| format!("Datos inválidos: {e}"))?;
+            let fmt = get("format").as_str().unwrap_or("dxf").to_string();
+            let paper = get("paper").as_str().unwrap_or("A3").to_string();
+            let title = get("title").as_str().unwrap_or("Plano").to_string();
+            export_simple(&id, &opts, &plan, &fmt, &paper, &title).map(Value::String)
         }
         "export_dxf" | "export_csv" => {
             let r: ExportReq = serde_json::from_value(args).map_err(|e| e.to_string())?;

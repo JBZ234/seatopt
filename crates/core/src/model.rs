@@ -183,6 +183,10 @@ pub struct Demand {
     pub type_id: String,
     /// Módulos (tipos fijos) o puestos (tipos flexibles).
     pub quantity: u32,
+    /// «Máximo posible»: ignora la cantidad y ubica todos los que quepan
+    /// (después de asegurar los tipos con cantidad fija).
+    #[serde(default)]
+    pub max: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +415,8 @@ pub struct Weights {
 
 impl Default for Weights {
     fn default() -> Self {
-        Self { order: 5.0, daylight: 4.0, window_side: 3.0, privacy: 3.0, travel: 2.0, compact: 1.0, reserve: 1.0, grouping: 6.0 }
+        // foco: la mayor cantidad de puestos; solo un leve orden visual de desempate
+        Self { order: 1.0, daylight: 0.0, window_side: 0.0, privacy: 0.0, travel: 0.0, compact: 0.0, reserve: 0.0, grouping: 6.0 }
     }
 }
 
@@ -543,7 +548,14 @@ pub struct Seat {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Kpis {
+    /// Puestos pedidos con cantidad fija (los de «máximo posible» no cuentan).
     pub seats_requested: u32,
+    /// Hay tipos en «máximo posible».
+    #[serde(default)]
+    pub max_mode: bool,
+    /// Puestos ubicados de los tipos en «máximo posible».
+    #[serde(default)]
+    pub max_seats: u32,
     pub seats_placed: u32,
     pub modules_requested: u32,
     pub modules_placed: u32,

@@ -2,7 +2,7 @@
 
 use super::ctx::Ctx;
 use super::decode::{decode, random_genome, Genome, Rng};
-use super::eval::{evaluate, Eval, W_UNPLACED};
+use super::eval::{deficit, evaluate, Eval};
 use crate::model::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -144,15 +144,11 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
         None => greedy_init(ctx, &mut base_rng),
     };
     // multi-inicio barato: solo decodificador
-    let lb_of = |g: &Genome| -> (u32, u32) {
+    let lb_of = |g: &Genome| -> (u64, u32) {
         let d = decode(ctx, g, true);
-        let lb: u32 = d.remaining.iter().enumerate().map(|(i, &r)| {
-            let t = &ctx.catalog[i];
-            if t.flexible { r } else { r * t.seats_per_module(t.per_side) }
-        }).sum();
-        (lb, d.reserve_seats)
+        (deficit(ctx, &d.remaining) as u64, d.reserve_seats)
     };
-    let mut starts: Vec<(u32, u32, Genome)> = Vec::new();
+    let mut starts: Vec<(u64, u32, Genome)> = Vec::new();
     for v in 0..ctx.variants.len() {
         let mut g0 = base.clone();
         g0.variant = v;
@@ -173,7 +169,7 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
     let best: Mutex<Option<(Genome, Eval)>> = Mutex::new(None);
     let iters = AtomicU64::new(0);
     let last_report = Mutex::new(Instant::now());
-    let requested = ctx.demand.iter().enumerate().map(|(i, &d)| {
+    let requested = ctx.demand.iter().enumerate().filter(|(i, _)| !ctx.is_max[*i]).map(|(i, &d)| {
         let t = &ctx.catalog[i];
         if t.flexible { d } else { d * t.seats_per_module(t.per_side) }
     }).sum::<u32>();
@@ -186,7 +182,7 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
             let want_var = c % ctx.variants.len().max(1);
             let best_lb = starts[0].0;
             for st in &starts {
-                if st.2.variant == want_var && st.0 <= best_lb + 8 {
+                if st.2.variant == want_var && st.0 as f64 <= best_lb as f64 + 8.0 * super::eval::W_UNPLACED {
                     picked = Some(&st.2);
                     break;
                 }
@@ -218,12 +214,9 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
             }
             let d = decode(ctx, &cand, weights.reserve > 0.0);
             // cota inferior barata: lo que el decodificador no pudo ubicar
-            let lb: u32 = d.remaining.iter().enumerate().map(|(i, &r)| {
-                let t = &ctx.catalog[i];
-                if t.flexible { r } else { r * t.seats_per_module(t.per_side) }
-            }).sum();
+            let lb = deficit(ctx, &d.remaining);
             iters.fetch_add(1, Ordering::Relaxed);
-            if lb as f64 * W_UNPLACED > cur_ev.score + temp * 4.0 {
+            if lb > cur_ev.score + temp * 4.0 {
                 continue;
             }
             let key = decode_hash(&d, cand.variant);
@@ -364,6 +357,9 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
     }
     let mut modules_requested = 0;
     for (i, t) in ctx.catalog.iter().enumerate() {
+        if ctx.is_max[i] {
+            continue;
+        }
         let miss = ctx.demand[i].saturating_sub(placed_units[i]);
         if !t.flexible {
             modules_requested += ctx.demand[i];
@@ -374,6 +370,8 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
     }
     let corridor_area = var.corridor.iter().filter(|&&b| b).count() as f64 * ctx.res * ctx.res / 1e6;
     let kpis = Kpis {
+        max_mode: ctx.is_max.iter().any(|&m| m),
+        max_seats: ev.max_seats,
         seats_requested: ev.seats_requested,
         seats_placed: ev.seats_placed,
         modules_requested,
@@ -608,7 +606,7 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
     // cambio de tipo: probar los tipos con menos área por puesto (también de un lado ↔ dos lados)
     let area_per_seat = |t: &DeskType| t.module_length(t.per_side_range().1) * t.module_depth() / t.seats_per_module(t.per_side_range().1).max(1) as f64;
     for d in &problem.config.demand {
-        if d.quantity == 0 {
+        if d.quantity == 0 || d.max {
             continue;
         }
         let Some(t) = problem.config.catalog.iter().find(|t| t.id == d.type_id) else { continue };
@@ -623,7 +621,7 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
             if let Some(x) = p.config.demand.iter_mut().find(|x| x.type_id == alt.id) {
                 x.quantity += qty_alt;
             } else {
-                p.config.demand.push(Demand { type_id: alt.id.clone(), quantity: qty_alt });
+                p.config.demand.push(Demand { type_id: alt.id.clone(), quantity: qty_alt, max: false });
             }
             cands.push((Suggestion { rule_id: "TIPO".into(), item_id: format!("{}>{}", t.id, alt.id), description: format!("Usar «{}» en lugar de «{}»", alt.name, t.name), new_value: None, disable: false, gain_seats: 0, seats_placed: 0 }, p));
         }

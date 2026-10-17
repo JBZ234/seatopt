@@ -9,7 +9,7 @@ fn run(file: &str, demand: &[(&str, u32)], secs: f64) -> Layout {
     let sg = guess_scale(&d, &roles);
     let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
-    cfg.demand = demand.iter().map(|(t, q)| Demand { type_id: t.to_string(), quantity: *q }).collect();
+    cfg.demand = demand.iter().map(|(t, q)| Demand { type_id: t.to_string(), quantity: *q, max: false }).collect();
     cfg.settings.time_limit = secs;
     search::optimize(&Problem { plan: r.plan, config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap()
 }
@@ -62,7 +62,7 @@ fn e5_apagada_mezcla_tipos_en_la_fila() {
     let roles = suggest_roles(&d);
     let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
-    cfg.demand = vec![Demand { type_id: "isla_8".into(), quantity: 2 }, Demand { type_id: "pareja".into(), quantity: 6 }];
+    cfg.demand = vec![Demand { type_id: "isla_8".into(), quantity: 2, max: false }, Demand { type_id: "pareja".into(), quantity: 6, max: false }];
     cfg.rules.iter_mut().find(|r| r.id == "E5").unwrap().enabled = false;
     cfg.settings.time_limit = 2.0;
     let l = search::optimize(&Problem { plan: r.plan, config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap();
@@ -99,4 +99,42 @@ fn plano_simplificado_ida_y_vuelta() {
     assert!((r3.area_m2 - r.area_m2).abs() < r.area_m2 * 0.03, "área {} vs {}", r3.area_m2, r.area_m2);
     assert_eq!(count(&r3.plan, DoorKind::Main), 1);
     assert_eq!(r3.plan.doors.len(), r.plan.doors.len());
+}
+
+#[test]
+fn maximo_posible_supera_lo_fijo() {
+    let path = format!("{}/../../samples/02_columnas_grilla.dxf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let sg = guess_scale(&d, &roles);
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let mut cfg = seat_core::defaults::default_config();
+    cfg.demand = vec![
+        Demand { type_id: "l_150".into(), quantity: 2, max: false },
+        Demand { type_id: "isla_flex".into(), quantity: 0, max: true },
+        Demand { type_id: "recto_120".into(), quantity: 0, max: true },
+    ];
+    cfg.settings.time_limit = 3.0;
+    let l = seat_core::engine::search::optimize(&Problem { plan: r.plan, config: cfg }, &std::sync::atomic::AtomicBool::new(false), &seat_core::engine::search::no_progress).unwrap();
+    assert!(l.kpis.max_mode);
+    assert!(l.kpis.unplaced_by_type.is_empty(), "los fijos deben caber");
+    assert_eq!(l.seats.iter().filter(|s| s.type_id == "l_150").count(), 2);
+    assert!(l.kpis.max_seats >= 50, "máximo: {}", l.kpis.max_seats);
+}
+
+#[test]
+fn lineas_simples_misma_area() {
+    let path = format!("{}/../../samples/real_oficina401.pdf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let sg = guess_scale(&d, &roles);
+    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 };
+    let r = analyze(&d, &opts).unwrap();
+    let sp = seat_core::simple::simple_plan(&d, &opts, &r.plan, &Default::default());
+    let dxf = seat_core::simple::simple_dxf(&sp, 1.0);
+    let d2 = import::import_bytes("x.dxf", dxf.as_bytes()).unwrap();
+    let ro = suggest_roles(&d2);
+    let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: 1.0, roles: ro, seed: None, gap_close: 1200.0 }).unwrap();
+    assert!((r2.area_m2 - r.area_m2).abs() / r.area_m2 < 0.05, "{} vs {}", r2.area_m2, r.area_m2);
+    assert!(sp.walls.len() < 400);
 }

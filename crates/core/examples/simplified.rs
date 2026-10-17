@@ -19,7 +19,7 @@ fn summary(tag: &str, r: &AnalyzeResult) {
 
 fn optimize(plan: &Plan, demand: &[(&str, u32)]) -> Layout {
     let mut cfg = default_config();
-    cfg.demand = demand.iter().map(|(t, q)| Demand { type_id: t.to_string(), quantity: *q }).collect();
+    cfg.demand = demand.iter().map(|(t, q)| Demand { type_id: t.to_string(), quantity: *q, max: false }).collect();
     cfg.settings.time_limit = 8.0;
     search::optimize(&Problem { plan: plan.clone(), config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap()
 }

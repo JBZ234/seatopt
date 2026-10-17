@@ -19,7 +19,7 @@ export interface DeskType {
   flexible: boolean; minPerSide: number; maxPerSide: number;
   returnLength: number; returnDepth: number;
 }
-export interface Demand { typeId: string; quantity: number }
+export interface Demand { typeId: string; quantity: number; max?: boolean }
 
 export interface RuleItem {
   id: string; label: string; enabled: boolean; value: number | null; unit: string;
@@ -70,6 +70,7 @@ export interface Seat {
   roleId: string; clientId: string; flags: string[]; locked?: boolean;
 }
 export interface Kpis {
+  maxMode?: boolean; maxSeats: number;
   seatsRequested: number; seatsPlaced: number; modulesRequested: number; modulesPlaced: number;
   unplacedByType: [string, number][]; areaM2: number; m2PerSeat: number;
   avgTravelExitM: number; maxTravelExitM: number; daylightPct: number; windowSidePct: number;

@@ -1,12 +1,12 @@
 # Optimizador de Puestos
 
-App de escritorio (Tauri 2 + Rust + React) que recibe la planta de una oficina en **DXF, DWG o PDF vectorial** y propone la mejor ubicación de los escritorios según su geometría y un conjunto de reglas configurables. Después sienta a las personas por **rol** y **cliente**.
+App de escritorio (Tauri 2 + Rust + React) que recibe la planta de una oficina en **DXF, DWG o PDF vectorial** y calcula **cuántos puestos caben como máximo** según la geometría de los escritorios, los espacios para caminar y las entradas. Después sienta a las personas por **rol** y **cliente**.
 
 ```
-Plano ──▶ Escritorios ──▶ Reglas ──▶ Organización ──▶ Optimizar
-(capas,    (catálogo y     (31 reglas   (roles, clientes,   (sliders, variantes,
- escala,    cantidades,     + reglas     equipos, afinidad)   sugerencias, exportar)
- recinto)   capacidad)      propias)
+Plano ──▶ Escritorios ──▶ Espacios ──▶ Organización ──▶ Optimizar
+(capas,    (cantidades o    (pasillos,    (roles, clientes,   (resultado,
+ escala,    «máximo          sillas,       opcional)           sugerencias,
+ recinto)   posible»)        puertas)                          exportar)
 ```
 
 ## Instalar y compilar en Windows
@@ -43,18 +43,18 @@ Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo
    - **Puerta principal:** si la app eligió la más ancha, pide confirmar. **Marcar en el plano** o **Dibujar puerta** si no se detectó.
    - Ajustes opcionales: salidas, obstáculos y zonas, roles de capas y **Exportar plano base**.
 2. **Escritorios**
-   - Se muestran los tipos disponibles con su vista previa y tú escribes cuántos ubicar.
-   - Las islas **flexibles** se piden en *puestos* y el optimizador arma islas de distinto largo. Los demás tipos se piden en *unidades*.
-   - **Estimar capacidad** calcula cuántos caben de cada tipo.
-3. **Reglas**
-   - Cada regla tiene un interruptor y sub-reglas con mini interruptores y medidas.
-   - El **candado** impide que el sugeridor proponga relajarla.
-   - En *Tus reglas* creas reglas propias sin tocar código: «[quién] [condición] [referencia] [valor]».
+   - Para los tipos que ya sabes cuántos van (por ejemplo 5 en L y 5 parejas), escribe la cantidad: se ubican primero y siempre.
+   - Para los demás activa **Máximo posible**: el optimizador mete todos los que quepan.
+   - Si marcas un tipo **flexible** (isla o bench, que se arma del largo que haga falta) y uno **suelto** (individual o pareja), el flexible llena las áreas grandes y el suelto rellena los huecos pequeños (un puesto de relleno vale 0,7 de uno en fila).
+   - **Estimar capacidad** calcula cuántos caben de cada tipo por separado.
+3. **Espacios**: solo las medidas que deciden la capacidad, cada una con un dibujo: pasillo principal, pasillos hacia los puestos, espacio para la silla, separación entre filas, corte de filas largas, entrada libre, frente de las puertas y separación a columnas y oficinas.
+   - Siempre se cumple que todos los puestos se alcancen desde la entrada y que ninguna puerta quede bloqueada.
+   - **Calcular cuántos puestos gana cada medida** prueba cada ajuste y muestra la ganancia junto a la medida, con **Aplicar**.
 4. **Organización** (opcional): roles con color, tipo de escritorio, nivel de ruido y elemento al que deben estar cerca; clientes; matriz de cuántas personas de cada rol tiene cada cliente; afinidad entre roles.
 5. **Optimizar**
-   - Mueve los sliders y presiona **Optimizar**.
-   - Si no caben todos, la app prueba relajar cada regla (que no esté bloqueada) y cambiar de tipo de escritorio, y muestra cuántos puestos gana cada cambio, con el botón **Aplicar**.
-   - **Explorar variantes** corre el optimizador con otros pesos y muestra el frente de Pareto.
+   - Elige el tiempo de búsqueda y presiona **Optimizar**. El resultado muestra el total de puestos y el desglose por tipo (fijos y «máximo»).
+   - Si no caben los fijos, la app prueba relajar cada medida y cambiar de tipo de escritorio, y muestra cuántos puestos gana cada cambio, con el botón **Aplicar**.
+   - Con equipos cargados en *Organización* aparece un único control: cuánto pesa sentar a cada equipo junto.
    - **Bloquear puestos:** selecciona escritorios y usa «Fijar y bloquear». En la próxima optimización se conservan en su sitio con sus personas (rol y cliente) y se optimiza el resto.
    - **Exportar** genera:
      - un DXF en las coordenadas del plano original, para insertarlo como referencia externa;
@@ -88,7 +88,10 @@ En *Plano → Exportar plano base* se genera el plano mínimo para optimizar, en
 - **Capas estándar:** `A-MURO-EXT`, `A-OFICINA-FIJA`, `A-RECINTOS`, `A-EDIFICIO`, `A-COLUMNA`, `A-PUERTA-PPAL`, `A-PUERTA-SALIDA`, `A-PUERTA-OFICINA`, `A-PUERTA-VANO`.
 - **Escala:** el PDF guarda capas y escala, así que reimportarlo no pide asignar capas ni calibrar.
 
-También se puede exportar el dibujo original completo quitando solo las capas de «Mobiliario existente».
+También se puede exportar:
+
+- **Líneas simples:** el dibujo original reducido a lo esencial. Cada muro (doble línea, fachada o vidrio) queda como **una sola línea** a eje; además columnas, escaleras y ascensores como bloque, puertas (hoja + arco) y el rótulo de las oficinas. Capas `MUROS`, `COLUMNAS`, `NUCLEO`, `PUERTAS`, `A-PUERTA-PPAL`, `TEXTO`. Delimita la misma área que el original, así que también sirve para reimportar.
+- El dibujo original completo quitando solo las capas de «Mobiliario existente».
 
 ### Tema
 
@@ -123,16 +126,16 @@ Es un enfoque de *test-fit* / diseño generativo, como el de las herramientas co
    - Cada silla debe alcanzarse desde la puerta principal por pasillos del ancho mínimo (transformada de distancia + Dijkstra por cubetas).
    - Se verifican el recorrido máximo a una salida, el recorrido común, las puertas no bloqueadas y los puestos accesibles en silla de ruedas.
    - Un módulo con un puesto inválido se descarta.
-5. **Puntaje lexicográfico.** `10 000 × puestos sin ubicar + 50 000 × reglas duras incumplidas + Σ pesos × métricas blandas`. Ubicar a todos siempre domina.
+5. **Puntaje lexicográfico.** `100 000 × puestos fijos sin ubicar + 10 000 × puestos «máximo posible» que faltan (7 000 si es relleno) + 1 000 000 × reglas duras incumplidas + métricas blandas`. Ubicar los fijos siempre domina; después, más puestos; a igual cantidad, menos módulos sueltos.
 6. **Búsqueda.**
    - Recocido simulado en paralelo sobre el «genoma»: ángulo, desfase, lado de inicio, alineación, emparejamiento y orden de tipos por zona, más la variante de pasillo.
    - Arranca con un multi-inicio barato que usa solo el decodificador.
    - Usa caché de disposiciones ya evaluadas.
 7. **Asignación de personas.** Recocido por intercambios con costos unarios (rol ↔ tipo de escritorio, rol cerca de un elemento, reglas propias) y por pares (bloques por cliente, afinidad, separación acústica).
 
-**Por qué la exploración de sliders no es circular.** Si el optimizador ajustara los sliders para mejorar su propio puntaje, bajaría los pesos de lo que no logra cumplir. Por eso cada variante se mide con **indicadores fijos** (puestos, recorrido, luz, privacidad, direcciones, capacidad libre, agrupación) y se muestra el **frente de Pareto**: las variantes que no se pueden mejorar en algo sin empeorar otra cosa. Tú eliges, y «Usar pesos» copia los sliders de esa variante.
+## Reglas del motor
 
-## Reglas incluidas
+La pantalla *Espacios* muestra solo las medidas de capacidad. El motor conserva el catálogo completo de reglas (en el proyecto `.puestos.json`), pero por defecto solo están activas las de circulación, sillas, puertas, columnas y oficinas; las de evacuación por distancia, luz, privacidad y densidad vienen apagadas.
 
 | ID | Regla | ID | Regla |
 |---|---|---|---|
@@ -162,6 +165,7 @@ crates/core        núcleo en Rust (sin interfaz)
   assign.rs          roles y clientes
   export.rs          DXF R12 y CSV
   pdf_out.rs         PDF vectorial a escala y DXF sin mobiliario
+  simple.rs          plano de líneas simples (muros a eje por adelgazamiento)
   api.rs             fachada JSON + trabajos en segundo plano
 crates/devserver   servidor HTTP con la misma API (modo navegador)
 src-tauri          app de escritorio

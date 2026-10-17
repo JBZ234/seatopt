@@ -126,6 +126,8 @@ impl P {
 }
 
 pub const F_HARD: u8 = 1;
+/// Cantidad «infinita» para tipos en «máximo posible».
+pub const MAX_UNITS: u32 = 20_000;
 pub const F_KEEP: u8 = 2;
 
 /// Rejilla en el marco rotado de un ángulo θ (filas paralelas al eje x local).
@@ -201,6 +203,8 @@ pub struct Ctx {
     pub catalog: Vec<DeskType>,
     /// Demanda por tipo (unidades del tipo: módulos o puestos).
     pub demand: Vec<u32>,
+    /// Tipos en «máximo posible».
+    pub is_max: Vec<bool>,
     pub area_m2: f64,
     pub config: Config,
     pub plan: Plan,
@@ -495,9 +499,19 @@ impl Ctx {
         // ------------------------------------------------ catálogo y demanda
         let catalog = cfg.catalog.clone();
         let mut demand = vec![0u32; catalog.len()];
+        let mut is_max = vec![false; catalog.len()];
         for d in &cfg.demand {
             if let Some(i) = catalog.iter().position(|t| t.id == d.type_id) {
-                demand[i] += d.quantity;
+                if d.max {
+                    is_max[i] = true;
+                } else {
+                    demand[i] += d.quantity;
+                }
+            }
+        }
+        for i in 0..catalog.len() {
+            if is_max[i] {
+                demand[i] = MAX_UNITS;
             }
         }
         // los fijados descuentan demanda
@@ -529,6 +543,7 @@ impl Ctx {
             variants: vec![],
             catalog,
             demand,
+            is_max,
             area_m2,
             config: cfg.clone(),
             plan: plan.clone(),

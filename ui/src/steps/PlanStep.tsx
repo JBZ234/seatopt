@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { analyzePlan, exportCleanDxf, exportPdf, exportPlanDxf, importPlan, loadBackground, openProject, setScale } from '../actions';
+import { analyzePlan, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setScale } from '../actions';
 import { Fold, Num } from '../components/ui';
 import { useApp, type Tool } from '../store';
 import type { DoorKind, LayerRole, ObstacleKind } from '../types';
@@ -235,6 +235,11 @@ export default function PlanStep() {
           </div>
           {drawing?.drawingId && (
             <>
+              <p className="hint">Dibujo original en líneas simples: cada muro como una sola línea, más columnas, puertas y oficinas. Sin mobiliario, textos ni detalles.</p>
+              <div className="row wrap">
+                <button onClick={() => exportSimple('dxf')}>DXF líneas simples</button>
+                <button onClick={() => exportSimple('pdf')}>PDF líneas simples</button>
+              </div>
               <p className="hint">Dibujo original completo sin las capas de mobiliario ({drawing.layers.filter((l) => roles[l.name] === 'furniture').map((l) => l.name).join(', ') || 'ninguna'}):</p>
               <div className="row wrap">
                 <button className="ghost" onClick={exportCleanDxf}>DXF completo sin mobiliario</button>

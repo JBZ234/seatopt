@@ -43,11 +43,18 @@ export default function DesksStep() {
   const c = st.config;
   if (!c) return null;
   const qty = (id: string) => c.demand.find((d) => d.typeId === id)?.quantity ?? 0;
+  const isMax = (id: string) => !!c.demand.find((d) => d.typeId === id)?.max;
   const setQty = (id: string, q: number) => st.updateConfig((cc) => {
     const d = cc.demand.find((d) => d.typeId === id);
     if (d) d.quantity = Math.max(0, Math.round(q)); else cc.demand.push({ typeId: id, quantity: Math.max(0, Math.round(q)) });
-    cc.demand = cc.demand.filter((d) => d.quantity > 0);
+    cc.demand = cc.demand.filter((d) => d.quantity > 0 || d.max);
   });
+  const setMax = (id: string, on: boolean) => st.updateConfig((cc) => {
+    const d = cc.demand.find((d) => d.typeId === id);
+    if (d) d.max = on; else if (on) cc.demand.push({ typeId: id, quantity: 0, max: true });
+    cc.demand = cc.demand.filter((d) => d.quantity > 0 || d.max);
+  });
+  const maxNames = c.catalog.filter((t) => isMax(t.id)).map((t) => t.name);
   const upd = (id: string, f: (t: DeskType) => void) => st.updateConfig((cc) => { const t = cc.catalog.find((t) => t.id === id); if (t) f(t); });
   const req = requestedSeats(c);
   const cap = (id: string) => st.capacity?.find((x) => x.typeId === id);
@@ -55,11 +62,12 @@ export default function DesksStep() {
   return (
     <div className="step-body">
       <h2>¿Cuántos escritorios ubicamos?</h2>
-      <p className="hint">Estas son las geometrías disponibles. Las islas flexibles se piden en puestos y el optimizador arma islas de distinto largo; las demás, en unidades. Las medidas son estándar y puedes cambiarlas.</p>
+      <p className="hint">Pon la cantidad de los que ya sabes que van (por ejemplo 5 en L). En los demás marca <b>Máximo posible</b>: el optimizador mete todos los que quepan. Si marcas un tipo flexible (islas, bench) y uno suelto (individual, pareja), el flexible llena las áreas grandes y el suelto rellena los huecos pequeños.</p>
 
       <div className="totals">
-        <span className="big">{req}</span> puestos pedidos
-        {st.areaM2 > 0 && req > 0 && <span className="sub"> · {(st.areaM2 / req).toFixed(1)} m² por puesto</span>}
+        <span className="big">{req}</span> puestos fijos
+        {maxNames.length > 0 && <span className="sub"> + el máximo posible de {maxNames.join(', ')}</span>}
+        {st.areaM2 > 0 && req > 0 && !maxNames.length && <span className="sub"> · {(st.areaM2 / req).toFixed(1)} m² por puesto</span>}
       </div>
       <div className="row">
         <button onClick={capacity} disabled={!!st.job || !st.plan}>Estimar capacidad por tipo</button>
@@ -68,15 +76,17 @@ export default function DesksStep() {
       <div className="catalog">
         {c.catalog.map((t) => {
           const q = qty(t.id);
+          const mx = isMax(t.id);
           const unit = t.flexible ? 'puestos' : t.shape === 'l' || t.sides * t.perSide === 1 ? 'escritorios' : `módulos de ${t.sides * t.perSide}`;
           const cp = cap(t.id);
           return (
-            <article key={t.id} className={'desk-card' + (q > 0 ? ' used' : '')}>
+            <article key={t.id} className={'desk-card' + (q > 0 || mx ? ' used' : '') + (mx ? ' maxed' : '')}>
               <Preview t={t} />
               <div className="desk-main">
                 <input className="desk-name" value={t.name} aria-label="Nombre del tipo" onChange={(e) => upd(t.id, (x) => { x.name = e.target.value; })} />
                 <div className="qty">
-                  <Num value={q} unit={unit} width={56} min={0} label={`Cantidad de ${t.name}`} onChange={(v) => setQty(t.id, v)} />
+                  {mx ? <span className="max-badge">{t.flexible || !c.catalog.some((o) => o.flexible && isMax(o.id)) ? 'máximo posible' : 'máximo · relleno'}</span> : <Num value={q} unit={unit} width={56} min={0} label={`Cantidad de ${t.name}`} onChange={(v) => setQty(t.id, v)} />}
+                  <label className="inline max-toggle">Máximo posible <Switch small on={mx} label={`Máximo posible de ${t.name}`} onChange={(v) => setMax(t.id, v)} /></label>
                   {cp && <span className="cap" title="Capacidad estimada si se usara solo este tipo">caben ~{cp.maxUnits}{t.flexible ? '' : ` (${cp.maxSeats} puestos)`}</span>}
                 </div>
                 <details>
@@ -121,8 +131,8 @@ export default function DesksStep() {
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio en L', color: '#a0613f', shape: 'l', seatWidth: 1600, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 1200, returnDepth: 600 }); })}>Agregar tipo en L</button>
       </div>
       <div className="next">
-        <button onClick={() => st.set({ step: 2 })}>Revisar reglas</button>
-        <button className="primary" disabled={req === 0} onClick={() => st.set({ step: 4 })}>Ir a optimizar</button>
+        <button onClick={() => st.set({ step: 2 })}>Revisar espacios</button>
+        <button className="primary" disabled={req === 0 && !maxNames.length} onClick={() => st.set({ step: 4 })}>Ir a optimizar</button>
       </div>
     </div>
   );

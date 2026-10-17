@@ -317,11 +317,11 @@ pub struct AnalyzeResult {
     pub area_m2: f64,
 }
 
-struct Geo {
-    paths: Vec<(LayerRole, Vec<Pt>, bool)>,
+pub(crate) struct Geo {
+    pub(crate) paths: Vec<(LayerRole, Vec<Pt>, bool)>,
 }
 
-fn to_mm(d: &Drawing, opts: &AnalyzeOptions) -> Geo {
+pub(crate) fn to_mm(d: &Drawing, opts: &AnalyzeOptions) -> Geo {
     let s = opts.mm_per_unit;
     let mut paths = Vec::new();
     for p in &d.paths {

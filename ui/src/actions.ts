@@ -1,5 +1,5 @@
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
-import { requestedSeats, useApp, type ProjectFile } from './store';
+import { hasDemand, useApp, type ProjectFile } from './store';
 import type {
   AnalyzeResult, BgLayer, Capacity, Config, Defaults, Layout, Problem, Pt, Suggestion, Variant,
 } from './types';
@@ -76,8 +76,8 @@ function startJobUi(kind: string) {
 export async function optimize() {
   const p = problem();
   if (!p) return;
-  if (requestedSeats(p.config) === 0) {
-    S().say('Indica cuántos escritorios ubicar en el paso «Escritorios».', 'error');
+  if (!hasDemand(p.config)) {
+    S().say('Indica cuántos escritorios ubicar, o marca «Máximo posible», en el paso «Escritorios».', 'error');
     S().set({ step: 1 });
     return;
   }
@@ -86,14 +86,13 @@ export async function optimize() {
     const layout = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizando', progress: st.progress, signal } }), { signal });
     S().set({ layout, suggestions: null });
     const k = layout.kpis;
-    if (k.seatsPlaced < k.seatsRequested) {
-      S().say(`Se ubicaron ${k.seatsPlaced} de ${k.seatsRequested} puestos. Buscando qué reglas ajustar…`);
+    if (k.unplacedByType.length > 0) {
+      S().say(`No caben todos los escritorios con cantidad fija. Buscando qué medidas ajustar…`);
       S().set({ job: null });
       await suggest();
     } else {
-      S().say(`Listo: ${k.seatsPlaced} puestos ubicados.`);
+      S().say(k.maxMode ? `Listo: caben ${k.seatsPlaced} puestos.` : `Listo: ${k.seatsPlaced} puestos ubicados.`);
       S().set({ job: null });
-      if (S().autoExplore) await explore();
     }
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
@@ -290,4 +289,24 @@ export async function exportCleanDxf() {
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
+}
+
+/** Plano de líneas simples del dibujo original: muros a eje, columnas, puertas y oficinas. */
+export async function exportSimple(format: 'dxf' | 'pdf') {
+  const s = S();
+  if (!s.drawing?.drawingId || !s.plan) return;
+  const args = { drawingId: s.drawing.drawingId, options: { mmPerUnit: s.mmPerUnit, roles: s.roles, seed: null, gapClose: s.gapClose }, plan: s.plan, format, paper: s.pdfPaper, title: `${baseName()} — líneas simples` };
+  const job = startJobUi('Simplificando el dibujo');
+  try {
+    const out = await call<string>('export_simple', args);
+    S().set({ job: null });
+    const path = format === 'dxf'
+      ? await saveText(`${baseName()}_lineas_simples.dxf`, out, 'dxf')
+      : await saveBase64(`${baseName()}_lineas_simples_${s.pdfPaper}.pdf`, out, 'pdf');
+    if (path) S().say(`Guardado: ${path}`);
+  } catch (e) {
+    S().set({ job: null });
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
+  void job;
 }

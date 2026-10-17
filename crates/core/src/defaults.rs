@@ -235,11 +235,40 @@ pub fn default_rules() -> Vec<Rule> {
     ]
 }
 
+/// Configuración por defecto enfocada en capacidad: solo espacios de circulación y acceso.
+/// Las demás reglas existen pero vienen apagadas.
+fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
+    const ON: [&str; 13] = ["C1", "C2", "C3", "C4", "C7", "E1", "E2", "E3", "E6", "E8", "O1", "O2", "O4"];
+    const ORG: [&str; 5] = ["R1", "R2", "R3", "R4", "R5"];
+    for r in rules.iter_mut() {
+        r.enabled = ON.contains(&r.id.as_str()) || ORG.contains(&r.id.as_str());
+        let set = |r: &mut Rule, item: &str, v: f64| {
+            if let Some(i) = r.items.iter_mut().find(|i| i.id == item) {
+                i.value = Some(v);
+            }
+        };
+        match r.id.as_str() {
+            "C1" => set(r, "ancho", 1200.0),
+            "C3" => {
+                set(r, "profundidad", 1500.0);
+                set(r, "ancho", 2000.0);
+            }
+            "C4" => set(r, "extra", 900.0),
+            "O3" => {
+                r.enabled = true;
+                set(r, "dist", 300.0);
+            }
+            _ => {}
+        }
+    }
+    rules
+}
+
 pub fn default_config() -> Config {
     Config {
         catalog: default_catalog(),
         demand: vec![],
-        rules: default_rules(),
+        rules: capacity_focus(default_rules()),
         custom_rules: vec![],
         weights: Weights::default(),
         org: Organization::default(),
