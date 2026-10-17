@@ -1,0 +1,233 @@
+import { call, openPlan, openText, runJob, saveText } from './api';
+import { requestedSeats, useApp, type ProjectFile } from './store';
+import type {
+  AnalyzeResult, BgLayer, Capacity, Config, Defaults, Layout, Problem, Pt, Suggestion, Variant,
+} from './types';
+
+const S = () => useApp.getState();
+
+export async function loadDefaults(): Promise<Config> {
+  const d = await call<Defaults>('defaults');
+  return { catalog: d.catalog, demand: [], rules: d.rules, customRules: [], weights: d.weights, org: { roles: [], clients: [], teams: [], affinities: [] }, settings: { ...d.settings, timeLimit: 10 }, pinned: [] };
+}
+
+export async function ensureConfig() {
+  if (!S().config) S().set({ config: await loadDefaults() });
+}
+
+export async function importPlan() {
+  try {
+    const out = await openPlan(S().converter);
+    if (!out) return;
+    const roles: Record<string, typeof out.layers[number]['role']> = {};
+    out.layers.forEach((l) => (roles[l.name] = l.role));
+    S().set({ drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
+    await ensureConfig();
+    await loadBackground();
+    await analyzePlan(null);
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
+}
+
+export async function loadBackground() {
+  const d = S().drawing;
+  if (!d) return;
+  const bg = await call<BgLayer[]>('background', { drawingId: d.drawingId, mmPerUnit: S().mmPerUnit });
+  // capas ignoradas o de mobiliario, ocultas al inicio para que el plano se lea mejor
+  const hidden = bg.filter((l) => S().roles[l.name] === 'ignore').map((l) => l.name);
+  S().set({ background: bg, hiddenLayers: hidden });
+}
+
+export async function analyzePlan(seed: Pt | null) {
+  const { drawing, mmPerUnit, roles, gapClose } = S();
+  if (!drawing) return;
+  try {
+    const r = await call<AnalyzeResult>('analyze', { drawingId: drawing.drawingId, options: { mmPerUnit, roles, seed, gapClose } });
+    S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, capacity: null, suggestions: null, variants: [] });
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
+}
+
+export async function setScale(mm: number) {
+  if (!(mm > 0)) return;
+  S().set({ mmPerUnit: mm });
+  await loadBackground();
+  await analyzePlan(null);
+}
+
+export function problem(): Problem | null {
+  const { plan, config } = S();
+  if (!plan || !config) return null;
+  return { plan, config };
+}
+
+function startJobUi(kind: string) {
+  const signal = { cancel: false };
+  S().set({ job: { kind, progress: null, signal } });
+  return signal;
+}
+
+export async function optimize() {
+  const p = problem();
+  if (!p) return;
+  if (requestedSeats(p.config) === 0) {
+    S().say('Indica cuántos escritorios ubicar en el paso «Escritorios».', 'error');
+    S().set({ step: 1 });
+    return;
+  }
+  const signal = startJobUi('Optimizando');
+  try {
+    const layout = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizando', progress: st.progress, signal } }), { signal });
+    S().set({ layout, suggestions: null });
+    const k = layout.kpis;
+    if (k.seatsPlaced < k.seatsRequested) {
+      S().say(`Se ubicaron ${k.seatsPlaced} de ${k.seatsRequested} puestos. Buscando qué reglas ajustar…`);
+      S().set({ job: null });
+      await suggest();
+    } else {
+      S().say(`Listo: ${k.seatsPlaced} puestos ubicados.`);
+      S().set({ job: null });
+      if (S().autoExplore) await explore();
+    }
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  } finally {
+    if (S().job?.signal === signal) S().set({ job: null });
+  }
+}
+
+export async function explore(n = 10) {
+  const p = problem();
+  if (!p) return;
+  const signal = startJobUi('Explorando pesos');
+  try {
+    const vars = await runJob<Variant[]>('explore', p, (st) => S().set({ job: { kind: 'Explorando pesos', progress: st.progress, signal } }), { n, signal });
+    S().set({ variants: vars });
+    S().say(`${vars.length} variantes; las del primer frente de Pareto no se pueden mejorar en un indicador sin empeorar otro.`);
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  } finally {
+    S().set({ job: null });
+  }
+}
+
+export async function suggest() {
+  const p = problem();
+  if (!p) return;
+  const signal = startJobUi('Buscando sugerencias');
+  try {
+    const sg = await runJob<Suggestion[]>('suggest', p, (st) => S().set({ job: { kind: 'Buscando sugerencias', progress: st.progress, signal } }), { signal });
+    S().set({ suggestions: sg });
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  } finally {
+    S().set({ job: null });
+  }
+}
+
+export async function capacity() {
+  const p = problem();
+  if (!p) return;
+  const signal = startJobUi('Estimando capacidad');
+  try {
+    const c = await runJob<Capacity[]>('capacity', p, (st) => S().set({ job: { kind: 'Estimando capacidad', progress: st.progress, signal } }), { signal });
+    S().set({ capacity: c });
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  } finally {
+    S().set({ job: null });
+  }
+}
+
+export function applySuggestion(s: Suggestion) {
+  S().updateConfig((c) => {
+    if (s.ruleId === 'TIPO') {
+      const [from, to] = s.itemId.split('>');
+      const tf = c.catalog.find((t) => t.id === from)!;
+      const tt = c.catalog.find((t) => t.id === to)!;
+      const d = c.demand.find((d) => d.typeId === from);
+      if (!d || !tf || !tt) return;
+      const seats = tf.flexible ? d.quantity : d.quantity * (tf.shape === 'l' ? 1 : tf.sides * tf.perSide);
+      const per = tt.flexible ? 1 : tt.shape === 'l' ? 1 : tt.sides * tt.perSide;
+      const q = Math.ceil(seats / per);
+      c.demand = c.demand.filter((x) => x.typeId !== from);
+      const ex = c.demand.find((x) => x.typeId === to);
+      if (ex) ex.quantity += q; else c.demand.push({ typeId: to, quantity: q });
+      return;
+    }
+    const r = c.rules.find((r) => r.id === s.ruleId);
+    if (!r) return;
+    if (!s.itemId) {
+      r.enabled = !s.disable;
+      return;
+    }
+    const it = r.items.find((i) => i.id === s.itemId);
+    if (!it) return;
+    if (s.newValue !== null) it.value = s.newValue;
+    else it.enabled = !s.disable;
+  });
+  S().set({ suggestions: (S().suggestions ?? []).filter((x) => x !== s) });
+  S().say('Regla ajustada. Vuelve a optimizar para ver el resultado.');
+}
+
+export async function reassign() {
+  const p = problem();
+  const l = S().layout;
+  if (!p || !l) return;
+  try {
+    const nl = await call<Layout>('reassign', { problem: p, layout: l });
+    S().set({ layout: nl, colorBy: S().colorBy === 'type' ? 'client' : S().colorBy });
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
+}
+
+const baseName = () => (S().drawing?.name ?? 'oficina').replace(/\.[a-z0-9]+$/i, '');
+
+export async function exportDxf(includePlan: boolean) {
+  const p = problem();
+  const l = S().layout;
+  if (!p || !l) return;
+  // en DXF/DWG se exporta en las unidades del archivo original para poder superponerlo
+  const src = S().drawing?.source;
+  const mm = src === 'pdf' ? 1 : S().mmPerUnit;
+  const txt = await call<string>('export_dxf', { problem: p, layout: l, mmPerUnit: mm, includePlan });
+  const path = await saveText(`${baseName()}_puestos.dxf`, txt, 'dxf');
+  if (path) S().say(`Guardado: ${path}`);
+}
+
+export async function exportCsv() {
+  const p = problem();
+  const l = S().layout;
+  if (!p || !l) return;
+  const txt = await call<string>('export_csv', { problem: p, layout: l, mmPerUnit: 1 });
+  const path = await saveText(`${baseName()}_puestos.csv`, '﻿' + txt, 'csv');
+  if (path) S().say(`Guardado: ${path}`);
+}
+
+export async function saveProject() {
+  const s = S();
+  const pf: ProjectFile = { version: 1, drawingName: s.drawing?.name ?? '', mmPerUnit: s.mmPerUnit, roles: s.roles, plan: s.plan, config: s.config, layout: s.layout, background: s.background };
+  const path = await saveText(`${baseName()}.puestos.json`, JSON.stringify(pf), 'json');
+  if (path) S().say(`Proyecto guardado: ${path}`);
+}
+
+export async function openProject() {
+  try {
+    const txt = await openText('json');
+    if (!txt) return;
+    const pf = JSON.parse(txt) as ProjectFile;
+    const def = await loadDefaults();
+    const config = pf.config ? { ...def, ...pf.config } : def;
+    S().set({
+      drawing: pf.drawingName ? { drawingId: '', name: pf.drawingName, source: 'dxf', layers: [], scale: { mmPerUnit: pf.mmPerUnit, paperScale: null, reason: '' }, bounds: [0, 0, 0, 0], unitNote: '' } : null,
+      mmPerUnit: pf.mmPerUnit, roles: pf.roles ?? {}, plan: pf.plan, config, layout: pf.layout, background: pf.background, hiddenLayers: [],
+      step: pf.layout ? 4 : pf.plan ? 1 : 0, variants: [], suggestions: null, capacity: null,
+      notes: ['Proyecto abierto. Para volver a detectar el recinto o cambiar capas, vuelve a importar el plano.'],
+    });
+  } catch (e) {
+    S().say('No se pudo abrir el proyecto: ' + String(e instanceof Error ? e.message : e), 'error');
+  }
+}

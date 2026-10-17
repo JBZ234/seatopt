@@ -1,0 +1,356 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useApp, uid } from '../store';
+import type { Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
+
+const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
+const OBS_FILL: Record<ObstacleKind, string> = { column: 'var(--column)', fixedOffice: 'var(--office)', restricted: 'var(--restricted)', reserved: 'var(--reserved)' };
+
+function ringD(r: Pt[]) {
+  if (!r.length) return '';
+  let s = `M${r[0].x.toFixed(0)} ${r[0].y.toFixed(0)}`;
+  for (let i = 1; i < r.length; i++) s += `L${r[i].x.toFixed(0)} ${r[i].y.toFixed(0)}`;
+  return s + 'Z';
+}
+
+function distSeg(p: Pt, a: Pt, b: Pt) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+}
+
+function pip(p: Pt, poly: Pt[]) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+
+export function boundsOf(plan: Plan | null, bg: { paths: number[][] }[] | null): [number, number, number, number] | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (x: number, y: number) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
+  if (plan && plan.region.length) {
+    for (const r of plan.region) for (const p of r) add(p.x, p.y);
+  } else if (bg) {
+    for (const l of bg) for (const p of l.paths) for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]);
+  }
+  return isFinite(x0) ? [x0, y0, x1, y1] : null;
+}
+
+interface Props {
+  onSeed: (p: Pt) => void;
+  onCalibrated: (a: Pt, b: Pt) => void;
+}
+
+export default function Canvas({ onSeed, onCalibrated }: Props) {
+  const st = useApp();
+  const { plan, layout, config, background, hiddenLayers, tool, colorBy, showKeepouts, showBackground } = st;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [size, setSize] = useState({ w: 800, h: 600 });
+  const [view, setView] = useState({ tx: 0, ty: 0, k: 0.02 });
+  const [drag, setDrag] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [hover, setHover] = useState<{ seat: Seat; sx: number; sy: number } | null>(null);
+  const [cursor, setCursor] = useState<Pt | null>(null);
+  const panRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
+
+  // tamaño
+  useEffect(() => {
+    const el = svgRef.current?.parentElement;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // encuadre al cambiar de dibujo / recinto
+  const fitKey = `${st.drawing?.drawingId}|${plan ? plan.region.length + ':' + (plan.region[0]?.length ?? 0) : 'np'}|${st.mmPerUnit}`;
+  const fit = () => {
+    const b = boundsOf(plan, background);
+    if (!b) return;
+    const [x0, y0, x1, y1] = b;
+    const m = 40;
+    const k = Math.min((size.w - 2 * m) / Math.max(1, x1 - x0), (size.h - 2 * m) / Math.max(1, y1 - y0));
+    setView({ k, tx: size.w / 2 - ((x0 + x1) / 2) * k, ty: size.h / 2 + ((y0 + y1) / 2) * k });
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(fit, [fitKey, size.w > 0 && size.h > 0, background]);
+  useEffect(() => {
+    const h = () => fit();
+    window.addEventListener('seatopt:fit', h);
+    return () => window.removeEventListener('seatopt:fit', h);
+  });
+
+  const toWorld = (sx: number, sy: number): Pt => ({ x: (sx - view.tx) / view.k, y: -(sy - view.ty) / view.k });
+  const evPt = (e: React.MouseEvent | React.WheelEvent) => {
+    const r = svgRef.current!.getBoundingClientRect();
+    return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+  };
+
+  // ------------------------------------------------ capas memorizadas
+  const bgEls = useMemo(() => {
+    if (!background) return null;
+    return background.filter((l) => !hiddenLayers.includes(l.name)).map((l) => {
+      let d = '';
+      for (const p of l.paths) {
+        if (p.length < 4) continue;
+        d += `M${p[0]} ${p[1]}`;
+        for (let i = 2; i < p.length; i += 2) d += `L${p[i]} ${p[i + 1]}`;
+      }
+      return <path key={l.name} d={d} stroke={l.color} />;
+    });
+  }, [background, hiddenLayers]);
+
+  const typeColor = useMemo(() => {
+    const m: Record<string, string> = {};
+    config?.catalog.forEach((t) => (m[t.id] = t.color));
+    return m;
+  }, [config?.catalog]);
+  const roleColor = useMemo(() => Object.fromEntries((config?.org.roles ?? []).map((r) => [r.id, r.color])), [config?.org.roles]);
+  const clientColor = useMemo(() => Object.fromEntries((config?.org.clients ?? []).map((r) => [r.id, r.color])), [config?.org.clients]);
+  const pinnedIds = useMemo(() => new Set((config?.pinned ?? []).map((m) => m.id)), [config?.pinned]);
+
+  const planEls = useMemo(() => {
+    if (!plan) return null;
+    return (
+      <>
+        <path className="region" d={plan.region.map(ringD).join('')} fillRule="evenodd" />
+        {showKeepouts && layout?.keepouts.map((k, i) => <path key={'k' + i} className="keepout" d={ringD(k)} />)}
+        {layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />)}
+        {plan.obstacles.map((o) => <path key={o.id} className="obstacle" d={ringD(o.poly)} fill={OBS_FILL[o.kind]} />)}
+        {plan.windows.map((w, i) => <line key={'w' + i} className="window" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
+        {plan.doors.map((d) => <line key={d.id} className={'door ' + d.kind} x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} stroke={DOOR_COLOR[d.kind]} />)}
+      </>
+    );
+  }, [plan, layout?.keepouts, layout?.corridors, showKeepouts]);
+
+  const layoutEls = useMemo(() => {
+    if (!layout) return null;
+    const seatFill = (s: Seat) => {
+      if (colorBy === 'role') return roleColor[s.roleId] ?? 'var(--paper)';
+      if (colorBy === 'client') return clientColor[s.clientId] ?? 'var(--paper)';
+      return 'var(--paper)';
+    };
+    const allMods: Module[] = [...layout.modules];
+    // porción de escritorio de cada persona (para colorear por rol o cliente)
+    const tile = (s: Seat): Pt[] => {
+      const t = config?.catalog.find((t) => t.id === s.typeId);
+      const w = (t?.seatWidth ?? 1200) * 0.5, d = t?.shape === 'l' ? (t?.depth ?? 600) : (t?.depth ?? 600);
+      const f = s.facing, u = { x: -f.y, y: f.x };
+      const near = 250; // del centro de la silla al borde del escritorio
+      const c0 = { x: s.pos.x + f.x * near, y: s.pos.y + f.y * near };
+      const c1 = { x: c0.x + f.x * d, y: c0.y + f.y * d };
+      return [
+        { x: c0.x - u.x * w, y: c0.y - u.y * w }, { x: c0.x + u.x * w, y: c0.y + u.y * w },
+        { x: c1.x + u.x * w, y: c1.y + u.y * w }, { x: c1.x - u.x * w, y: c1.y - u.y * w },
+      ];
+    };
+    return (
+      <>
+        {allMods.map((m) => (
+          <path key={m.id} className={'desk' + (pinnedIds.has(m.id) || m.pinned ? ' pinned' : '')} d={ringD(m.body)}
+            fill={colorBy === 'type' ? typeColor[m.typeId] ?? '#777' : 'var(--desk-neutral)'} />
+        ))}
+        {colorBy !== 'type' && layout.seats.filter((s) => (colorBy === 'role' ? s.roleId : s.clientId)).map((s) => (
+          <path key={'t' + s.id} className="seat-tile" d={ringD(tile(s))} fill={seatFill(s)} />
+        ))}
+        {layout.seats.map((s) => <path key={s.id} className="chair" d={ringD(s.chair)} fill={seatFill(s)} />)}
+      </>
+    );
+  }, [layout, colorBy, typeColor, roleColor, clientColor, pinnedIds, config?.catalog]);
+
+  // textos (fuera del grupo invertido)
+  const sx = (p: Pt) => p.x * view.k + view.tx;
+  const sy = (p: Pt) => -p.y * view.k + view.ty;
+  const showNums = view.k * 1000 > 18;
+
+  // ------------------------------------------------ interacción
+  const nearestDoor = (p: Pt): Door | null => {
+    if (!plan) return null;
+    let best: Door | null = null, bd = 900 / Math.min(1, view.k * 50);
+    for (const d of plan.doors) {
+      const dd = distSeg(p, d.a, d.b);
+      if (dd < bd) { bd = dd; best = d; }
+    }
+    return best;
+  };
+  const moduleAt = (p: Pt): Module | null => layout?.modules.find((m) => pip(p, m.body)) ?? null;
+  const seatAt = (p: Pt): Seat | null => {
+    if (!layout) return null;
+    let best: Seat | null = null, bd = 700;
+    for (const s of layout.seats) {
+      const d = Math.hypot(s.pos.x - p.x, s.pos.y - p.y);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  };
+
+  const onDown = (e: React.MouseEvent) => {
+    const { sx: x, sy: y } = evPt(e);
+    const w = toWorld(x, y);
+    if (e.button === 1 || e.button === 2 || tool === 'pan' || e.shiftKey) {
+      panRef.current = { sx: x, sy: y, tx: view.tx, ty: view.ty };
+      return;
+    }
+    if (['column', 'fixedOffice', 'restricted', 'reserved', 'window'].includes(tool)) {
+      setDrag({ a: w, b: w });
+    }
+  };
+
+  const onMove = (e: React.MouseEvent) => {
+    const { sx: x, sy: y } = evPt(e);
+    const w = toWorld(x, y);
+    setCursor(w);
+    if (panRef.current) {
+      const p = panRef.current;
+      setView((v) => ({ ...v, tx: p.tx + x - p.sx, ty: p.ty + y - p.sy }));
+      return;
+    }
+    if (drag) {
+      setDrag({ a: drag.a, b: w });
+      return;
+    }
+    const s = seatAt(w);
+    setHover(s ? { seat: s, sx: x, sy: y } : null);
+  };
+
+  const onUp = (e: React.MouseEvent) => {
+    const { sx: x, sy: y } = evPt(e);
+    const w = toWorld(x, y);
+    if (panRef.current) {
+      const moved = Math.hypot(x - panRef.current.sx, y - panRef.current.sy) > 4;
+      panRef.current = null;
+      if (moved || tool === 'pan') return;
+    }
+    if (drag) {
+      const { a, b } = drag;
+      setDrag(null);
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 100) return;
+      if (tool === 'window') {
+        st.updatePlan((p) => { p.windows.push({ a, b }); });
+      } else {
+        const kind = tool as ObstacleKind;
+        const label = kind === 'reserved' ? (prompt('Nombre de la zona reservada (p. ej. Impresoras):') ?? '') : '';
+        st.updatePlan((p) => {
+          p.obstacles.push({
+            id: uid('ob'), kind, label,
+            poly: [{ x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y }],
+          });
+        });
+      }
+      return;
+    }
+    if (e.button !== 0) return;
+    switch (tool) {
+      case 'seed':
+        onSeed(w);
+        break;
+      case 'door': case 'mainDoor': case 'exitDoor': {
+        const d = nearestDoor(w);
+        if (!d) { st.say('Haz clic sobre una puerta (línea de color en el borde).'); return; }
+        st.updatePlan((p) => {
+          const dd = p.doors.find((x) => x.id === d.id)!;
+          if (tool === 'mainDoor') {
+            p.doors.forEach((x) => { if (x.kind === 'main') x.kind = 'office'; });
+            dd.kind = 'main';
+          } else if (tool === 'exitDoor') {
+            dd.kind = dd.kind === 'exit' ? 'office' : 'exit';
+          } else {
+            const order: DoorKind[] = ['office', 'exit', 'main', 'ignore'];
+            const next = order[(order.indexOf(dd.kind) + 1) % order.length];
+            if (next === 'main') p.doors.forEach((x) => { if (x.kind === 'main') x.kind = 'office'; });
+            dd.kind = next;
+          }
+        });
+        break;
+      }
+      case 'calibrate': {
+        const c = [...st.calib, w];
+        if (c.length === 2) { st.set({ calib: [] }); onCalibrated(c[0], c[1]); } else st.set({ calib: c });
+        break;
+      }
+      case 'pin': {
+        const m = moduleAt(w);
+        if (!m) return;
+        st.updateConfig((c) => {
+          const i = c.pinned.findIndex((x) => x.id === m.id);
+          if (i >= 0) c.pinned.splice(i, 1); else c.pinned.push({ ...m, pinned: true });
+        });
+        break;
+      }
+      case 'erase': {
+        if (!plan) return;
+        const ob = [...plan.obstacles].reverse().find((o) => pip(w, o.poly));
+        if (ob) { st.updatePlan((p) => { p.obstacles = p.obstacles.filter((o) => o.id !== ob.id); }); return; }
+        const wi = plan.windows.findIndex((x) => distSeg(w, x.a, x.b) < 400);
+        if (wi >= 0) { st.updatePlan((p) => { p.windows.splice(wi, 1); }); return; }
+        const d = nearestDoor(w);
+        if (d) st.updatePlan((p) => { p.doors = p.doors.filter((x) => x.id !== d.id); });
+        break;
+      }
+      case 'pan':
+        break;
+    }
+  };
+
+  const onWheel = (e: React.WheelEvent) => {
+    const { sx: x, sy: y } = evPt(e);
+    const f = Math.exp(-e.deltaY * 0.0015);
+    setView((v) => {
+      const k = Math.min(2, Math.max(0.0005, v.k * f));
+      const wx = (x - v.tx) / v.k, wy = (y - v.ty) / v.k;
+      return { k, tx: x - wx * k, ty: y - wy * k };
+    });
+  };
+
+  const cursorCls = tool === 'pan' ? 'grab' : 'cross';
+  const flagged = (s: Seat) => s.flags.some((f) => f.startsWith('Sin acceso') || f.startsWith('Recorrido') || f.startsWith('Regla'));
+
+  return (
+    <div className={'canvas ' + cursorCls}>
+      <svg ref={svgRef} width={size.w} height={size.h} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onMouseLeave={() => { panRef.current = null; setHover(null); setCursor(null); }} onWheel={onWheel}
+        onContextMenu={(e) => e.preventDefault()} role="img" aria-label="Plano de la oficina">
+        <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k} ${-view.k})`}>
+          {showBackground && <g className="bg">{bgEls}</g>}
+          {planEls}
+          {layoutEls}
+          {drag && (tool === 'window'
+            ? <line className="draft" x1={drag.a.x} y1={drag.a.y} x2={drag.b.x} y2={drag.b.y} />
+            : <rect className="draft" x={Math.min(drag.a.x, drag.b.x)} y={Math.min(drag.a.y, drag.b.y)} width={Math.abs(drag.b.x - drag.a.x)} height={Math.abs(drag.b.y - drag.a.y)} />)}
+          {st.calib.length === 1 && cursor && <line className="draft" x1={st.calib[0].x} y1={st.calib[0].y} x2={cursor.x} y2={cursor.y} />}
+        </g>
+        <g className="labels">
+          {plan?.obstacles.filter((o) => o.label).map((o) => {
+            const c = o.poly.reduce((a, p) => ({ x: a.x + p.x / o.poly.length, y: a.y + p.y / o.poly.length }), { x: 0, y: 0 });
+            return <text key={o.id} x={sx(c)} y={sy(c)} className="ob-label">{o.label}</text>;
+          })}
+          {showNums && layout?.seats.map((s) => <text key={s.id} x={sx(s.pos)} y={sy(s.pos) + 3.5} className="seat-num">{s.number}</text>)}
+          {layout?.seats.filter(flagged).map((s) => <circle key={'f' + s.id} cx={sx(s.pos)} cy={sy(s.pos)} r={4} className="flag" />)}
+          {layout?.violations.filter((v) => v.at).map((v, i) => <circle key={'v' + i} cx={sx(v.at!)} cy={sy(v.at!)} r={14} className={'viol' + (v.hard ? ' hard' : '')} />)}
+        </g>
+      </svg>
+      <div className="readout">
+        {cursor ? `x ${(cursor.x / 1000).toFixed(2)} m · y ${(cursor.y / 1000).toFixed(2)} m` : ''}
+        <button className="ghost small" onClick={fit} title="Encajar el plano en la vista">Encuadrar</button>
+      </div>
+      {hover && <SeatTip layout={layout} seat={hover.seat} x={hover.sx} y={hover.sy} />}
+    </div>
+  );
+}
+
+function SeatTip({ seat, x, y }: { layout: Layout | null; seat: Seat; x: number; y: number }) {
+  const config = useApp((s) => s.config);
+  const t = config?.catalog.find((t) => t.id === seat.typeId);
+  const r = config?.org.roles.find((r) => r.id === seat.roleId);
+  const c = config?.org.clients.find((c) => c.id === seat.clientId);
+  return (
+    <div className="tip" style={{ left: x + 14, top: y + 14 }}>
+      <strong>Puesto {seat.number}</strong>
+      <div>{t?.name}</div>
+      {(r || c) && <div>{[r?.name, c?.name].filter(Boolean).join(', ')}</div>}
+      {seat.flags.length > 0 && <ul>{seat.flags.map((f, i) => <li key={i}>{f}</li>)}</ul>}
+    </div>
+  );
+}

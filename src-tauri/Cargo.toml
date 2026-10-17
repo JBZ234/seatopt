@@ -1,0 +1,18 @@
+[package]
+name = "seatopt"
+version = "0.1.0"
+description = "Optimizador de distribución de puestos de trabajo"
+edition = "2021"
+
+[lib]
+name = "seatopt_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+seat_core = { path = "../crates/core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde_json = { workspace = true }

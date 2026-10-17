@@ -1,0 +1,11 @@
+[package]
+name = "seat_core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }
+dxf = "0.6"
+lopdf = "0.36"
