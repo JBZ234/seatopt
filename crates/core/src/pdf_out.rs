@@ -243,13 +243,18 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
         let col = if opts.clean { (0.0, 0.0, 0.0) } else { (0.62, 0.65, 0.63) };
         c.stroke_rgb(col);
         c.lw(if opts.clean { 0.3 } else { 0.25 });
-        for p in &d.paths {
-            if opts.hidden_layers.contains(&d.layers[p.layer as usize].name) {
+        // cada capa del dibujo original como capa del PDF (se conserva al reimportar)
+        for (li, layer) in d.layers.iter().enumerate() {
+            if opts.hidden_layers.contains(&layer.name) || layer.paths == 0 {
                 continue;
             }
-            let pts: Vec<Pt> = p.pts.iter().map(|q| *q * s).collect();
-            c.path(&pts, p.closed);
-            c.raw("S");
+            c.layer(&layer.name);
+            for p in d.paths.iter().filter(|p| p.layer as usize == li) {
+                let pts: Vec<Pt> = p.pts.iter().map(|q| *q * s).collect();
+                c.path(&pts, p.closed);
+                c.raw("S");
+            }
+            c.end_layer();
         }
         if opts.clean {
             c.fill_rgb((0.0, 0.0, 0.0));
@@ -326,11 +331,15 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     if opts.clean {
         c.fill_rgb((0.1, 0.1, 0.1));
         c.text(margin, margin + 22.0, 13.0, true, if opts.title.is_empty() { "Plano" } else { &opts.title });
+        if plan.is_none() {
+            c.text(margin, margin + 8.0, 8.0, false, &format!("Dibujo original · Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
+        } else {
         let area_m2: f64 = plan.map(|p| p.region.iter().map(|r| polygon_area(r).abs()).sum::<f64>() / 1e6 - p.obstacles.iter().filter(|o| point_in_region(centroid(&o.poly), &p.region)).map(|o| polygon_area(&o.poly).abs() / 1e6).sum::<f64>()).unwrap_or(0.0);
         c.text(margin, margin + 8.0, 8.0, false, &format!("Planta para optimización · área amoblable {area_m2:.0} m² · Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
+        }
         // convenciones (solo lo que hay en el plano), en filas
         let has = |f: &dyn Fn(&Plan) -> bool| plan.map(f).unwrap_or(false);
-        let mut items: Vec<(&str, &str, u8)> = vec![("#f6f9f6", "Área amoblable", 0)];
+        let mut items: Vec<(&str, &str, u8)> = if plan.is_some() { vec![("#f6f9f6", "Área amoblable", 0)] } else { vec![] };
         if has(&|p| !p.rooms.is_empty() || p.obstacles.iter().any(|o| o.kind == ObstacleKind::FixedOffice)) {
             items.push(("#e0e6ed", "Oficinas y recintos", 0));
         }
@@ -343,7 +352,9 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
         if has(&|p| p.building.len() >= 3) {
             items.push(("#1f2422", "Contorno del edificio", 1));
         }
-        items.push(("#1a9c3b", "Puerta principal", 1));
+        if plan.is_some() {
+            items.push(("#1a9c3b", "Puerta principal", 1));
+        }
         if has(&|p| p.doors.iter().any(|d| d.kind == DoorKind::Exit)) {
             items.push(("#e07b12", "Salida", 1));
         }
@@ -750,6 +761,8 @@ pub fn clean_dxf(d: &Drawing, mm_per_unit: f64, out_mm: f64, exclude: &[String])
     pair(2, "HEADER", &mut s);
     pair(9, "$ACADVER", &mut s);
     pair(1, "AC1009", &mut s);
+    pair(9, "$INSUNITS", &mut s);
+    pair(70, &crate::export::insunits_code(out_mm).to_string(), &mut s);
     pair(0, "ENDSEC", &mut s);
     pair(0, "SECTION", &mut s);
     pair(2, "TABLES", &mut s);
