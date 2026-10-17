@@ -26,6 +26,9 @@ pub struct WModule {
     pub body: Vec<Pt>,
     pub seats: std::ops::Range<usize>,
     pub pinned: bool,
+    /// id del módulo fijado (se conserva en el resultado)
+    pub fixed_id: Option<String>,
+    pub people: Vec<SeatPerson>,
 }
 
 pub const W_UNPLACED: f64 = 10_000.0;
@@ -63,7 +66,7 @@ pub fn world_geometry_var(ctx: &Ctx, dec: &Decoded, variant: usize) -> (Vec<WMod
         let p = PModule { t: ti, k: pm.per_side, grid: 0, x0: 0.0, y0: 0.0, len: pm.length, dep: pm.depth, seats_up: pm.seats_up, zone: 0 };
         let s0 = seats.len();
         let body = module_shapes(ctx, t, &p, pm.center, pm.angle.to_radians(), &mut seats, mods.len());
-        mods.push(WModule { pm: p, center: pm.center, angle: pm.angle, body, seats: s0..seats.len(), pinned: true });
+        mods.push(WModule { pm: p, center: pm.center, angle: pm.angle, body, seats: s0..seats.len(), pinned: true, fixed_id: Some(pm.id.clone()), people: pm.people.clone() });
     }
     let var = &ctx.variants[variant];
     for pm in &dec.modules {
@@ -73,7 +76,7 @@ pub fn world_geometry_var(ctx: &Ctx, dec: &Decoded, variant: usize) -> (Vec<WMod
         let center = g.to_world(c_rot.x, c_rot.y);
         let s0 = seats.len();
         let body = module_shapes(ctx, t, pm, center, g.theta, &mut seats, mods.len());
-        mods.push(WModule { pm: pm.clone(), center, angle: g.theta.to_degrees(), body, seats: s0..seats.len(), pinned: false });
+        mods.push(WModule { pm: pm.clone(), center, angle: g.theta.to_degrees(), body, seats: s0..seats.len(), pinned: false, fixed_id: None, people: vec![] });
     }
     (mods, seats)
 }
@@ -404,6 +407,42 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
 
     // ------------------------------------------------ reglas personalizadas (etapa de distribución)
     let custom_pen = super::custom::layout_penalty(ctx, &mods, &seats, &valid_seats, &ev.module_ok, var, &mut ev.seat_flags, &mut ev.violations, &mut ev.hard);
+
+    // ------------------------------------------------ módulos fijados / editados a mano: superposiciones
+    if mods.iter().any(|m| m.pinned) {
+        let mut count = vec![0u8; n];
+        for m in &mods {
+            let mut tmp = vec![false; n];
+            raster::fill_polygon(f, &mut tmp, &m.body, true);
+            for i in 0..n {
+                if tmp[i] {
+                    count[i] = count[i].saturating_add(1);
+                }
+            }
+        }
+        for (mi, m) in mods.iter().enumerate() {
+            if !m.pinned {
+                continue;
+            }
+            let mut tmp = vec![false; n];
+            raster::fill_polygon(f, &mut tmp, &m.body, true);
+            for s in &seats[m.seats.clone()] {
+                raster::fill_polygon(f, &mut tmp, &s.chair, true);
+            }
+            let cells = tmp.iter().filter(|&&b| b).count().max(1);
+            let outside = (0..n).filter(|&i| tmp[i] && !ctx.free_base[i]).count();
+            let overlap = (0..n).filter(|&i| tmp[i] && count[i] > 1).count();
+            let _ = mi;
+            if outside * 10 > cells {
+                ev.hard += 1;
+                ev.violations.push(Violation { rule_id: "O1".into(), message: "Un escritorio quedó sobre un muro, columna u obstáculo.".into(), at: Some(m.center), hard: true });
+            }
+            if overlap * 20 > cells {
+                ev.hard += 1;
+                ev.violations.push(Violation { rule_id: "E2".into(), message: "Dos escritorios se superponen.".into(), at: Some(m.center), hard: true });
+            }
+        }
+    }
 
     // ------------------------------------------------ violaciones globales
     for v in &var.violations {

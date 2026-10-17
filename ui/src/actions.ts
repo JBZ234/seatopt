@@ -1,4 +1,4 @@
-import { call, openPlan, openText, runJob, saveText } from './api';
+import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { requestedSeats, useApp, type ProjectFile } from './store';
 import type {
   AnalyzeResult, BgLayer, Capacity, Config, Defaults, Layout, Problem, Pt, Suggestion, Variant,
@@ -229,5 +229,41 @@ export async function openProject() {
     });
   } catch (e) {
     S().say('No se pudo abrir el proyecto: ' + String(e instanceof Error ? e.message : e), 'error');
+  }
+}
+
+export async function exportPdf(o: { clean?: boolean }) {
+  const s = S();
+  const clean = !!o.clean;
+  if (!clean && !s.layout) return;
+  const title = clean ? `${baseName()} — planta sin mobiliario` : `${baseName()} — distribución de puestos`;
+  // capas ocultas en el lienzo + mobiliario existente
+  const furniture = (s.drawing?.layers ?? []).filter((l) => s.roles[l.name] === 'furniture').map((l) => l.name);
+  const hidden = clean ? furniture : Array.from(new Set([...s.hiddenLayers, ...furniture]));
+  try {
+    const b64 = await call<string>('export_pdf', {
+      problem: clean ? null : problem(),
+      layout: clean ? null : s.layout,
+      drawingId: s.drawing?.drawingId ?? '',
+      mmPerUnit: s.mmPerUnit,
+      opts: { paper: s.pdfPaper, scale: s.pdfScale > 0 ? s.pdfScale : null, title, colorBy: s.colorBy, background: s.showBackground, hiddenLayers: hidden, clean, numbers: true },
+    });
+    const path = await saveBase64(`${baseName()}_${clean ? 'sin_mobiliario' : 'puestos'}_${s.pdfPaper}.pdf`, b64, 'pdf');
+    if (path) S().say(`Guardado: ${path}`);
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
+}
+
+export async function exportCleanDxf() {
+  const s = S();
+  if (!s.drawing?.drawingId) return;
+  const exclude = s.drawing.layers.filter((l) => s.roles[l.name] === 'furniture').map((l) => l.name);
+  try {
+    const txt = await call<string>('export_clean_dxf', { drawingId: s.drawing.drawingId, mmPerUnit: s.mmPerUnit, exclude });
+    const path = await saveText(`${baseName()}_sin_mobiliario.dxf`, txt, 'dxf');
+    if (path) S().say(`Guardado: ${path} (${exclude.length} capas de mobiliario quitadas)`);
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
   }
 }

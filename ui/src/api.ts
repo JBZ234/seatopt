@@ -68,6 +68,26 @@ export async function saveText(defaultName: string, content: string, ext: string
   return defaultName;
 }
 
+/** Guarda bytes en base64 (PDF). */
+export async function saveBase64(defaultName: string, b64: string, ext: string): Promise<string | null> {
+  if (isTauri) {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const path = await save({ defaultPath: defaultName, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
+    if (!path) return null;
+    await tauriInvoke('save_base64', { path, data: b64 });
+    return path;
+  }
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes], { type: ext === 'pdf' ? 'application/pdf' : 'application/octet-stream' }));
+  a.download = defaultName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  return defaultName;
+}
+
 export async function openText(ext: string): Promise<string | null> {
   if (isTauri) {
     const { open } = await import('@tauri-apps/plugin-dialog');

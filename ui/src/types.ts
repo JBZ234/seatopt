@@ -61,11 +61,12 @@ export interface Problem { plan: Plan; config: Config }
 
 export interface Module {
   id: string; typeId: string; center: Pt; angle: number; length: number; depth: number;
-  perSide: number; seatsUp: boolean; body: Pt[]; pinned: boolean;
+  perSide: number; seatsUp: boolean; body: Pt[]; pinned: boolean; people?: SeatPerson[];
 }
+export interface SeatPerson { pos: Pt; roleId: string; clientId: string }
 export interface Seat {
   id: string; number: number; moduleId: string; typeId: string; pos: Pt; facing: Pt; chair: Pt[];
-  roleId: string; clientId: string; flags: string[];
+  roleId: string; clientId: string; flags: string[]; locked?: boolean;
 }
 export interface Kpis {
   seatsRequested: number; seatsPlaced: number; modulesRequested: number; modulesPlaced: number;

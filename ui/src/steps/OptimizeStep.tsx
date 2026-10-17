@@ -1,4 +1,4 @@
-import { applySuggestion, explore, exportCsv, exportDxf, optimize, reassign, saveProject, suggest } from '../actions';
+import { applySuggestion, explore, exportCsv, exportDxf, exportPdf, optimize, reassign, saveProject, suggest } from '../actions';
 import { Fold, Slider } from '../components/ui';
 import { requestedSeats, useApp, type ColorBy } from '../store';
 import type { Variant, Weights } from '../types';
@@ -85,10 +85,10 @@ export default function OptimizeStep() {
             ))}
           </div>
           {st.colorBy !== 'type' && <Legend />}
+          <p className="hint">Para bloquear puestos: selecciona escritorios en el plano (arrastra de izquierda a derecha para una ventana azul o de derecha a izquierda para una captura verde) y usa «Fijar y bloquear». Se conservan con sus personas y se optimiza el resto. Arrastra para mover, R gira, Supr borra, Ctrl+Z deshace.</p>
           <label className="check"><input type="checkbox" checked={st.showKeepouts} onChange={(e) => st.set({ showKeepouts: e.target.checked })} /> Mostrar despejes de puertas</label>
           <div className="row wrap">
-            <button className={'chip' + (st.tool === 'pin' ? ' active' : '')} onClick={() => { st.set({ tool: st.tool === 'pin' ? 'pan' : 'pin' }); if (st.tool !== 'pin') st.say('Haz clic sobre un escritorio para fijarlo: se conservará en las próximas corridas.'); }}>Fijar escritorios</button>
-            {c.pinned.length > 0 && <button className="ghost small" onClick={() => st.updateConfig((cc) => { cc.pinned = []; })}>Soltar {c.pinned.length} fijados</button>}
+            {c.pinned.length > 0 && <button className="ghost small" onClick={() => { st.snapshot(); st.updateConfig((cc) => { cc.pinned = []; }); if (st.layout) st.set({ layout: { ...st.layout, modules: st.layout.modules.map((m) => ({ ...m, pinned: false })), seats: st.layout.seats.map((s) => ({ ...s, locked: false })) } }); }}>Soltar los {c.pinned.length} fijados</button>}
             {hasPeople && <button className="ghost small" onClick={reassign}>Volver a sentar a las personas</button>}
           </div>
 
@@ -156,6 +156,22 @@ export default function OptimizeStep() {
             <button onClick={() => exportDxf(false)} title="Solo escritorios, sillas, números y pasillos, en las coordenadas del plano original: se puede insertar como referencia externa.">DXF para superponer</button>
             <button onClick={() => exportDxf(true)}>DXF con el recinto</button>
             <button onClick={exportCsv}>Lista de puestos (CSV)</button>
+          </div>
+          <div className="field-row">
+            <label>PDF
+              <select value={st.pdfPaper} onChange={(e) => st.set({ pdfPaper: e.target.value })}>
+                {['A4', 'A3', 'A2', 'A1', 'A0'].map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </label>
+            <label>Escala 1:
+              <select value={st.pdfScale} onChange={(e) => st.set({ pdfScale: parseFloat(e.target.value) })}>
+                <option value={0}>automática</option>
+                {[50, 75, 100, 125, 150, 200, 250].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <button className="primary" onClick={() => exportPdf({})}>Exportar PDF</button>
+          </div>
+          <div className="row wrap">
             <button onClick={saveProject}>Guardar proyecto</button>
           </div>
         </section>

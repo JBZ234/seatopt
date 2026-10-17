@@ -184,6 +184,8 @@ pub struct Ctx {
     pub res: f64,
     pub p: P,
     pub free: Vec<bool>,
+    /// Libre antes de restar los escritorios fijados.
+    pub free_base: Vec<bool>,
     pub keep0: Vec<bool>,
     pub keep_polys: Vec<Vec<Pt>>,
     pub doors: Vec<DoorInfo>,
@@ -339,6 +341,7 @@ impl Ctx {
         }
         let area_m2 = free.iter().filter(|&&b| b).count() as f64 * res * res / 1e6;
 
+        let free_base = free.clone();
         // pinned: cuerpos como obstáculos duros
         for m in &cfg.pinned {
             let mut tmp = vec![false; n];
@@ -512,6 +515,7 @@ impl Ctx {
             res,
             p,
             free,
+            free_base,
             keep0,
             keep_polys,
             doors,

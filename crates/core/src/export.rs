@@ -54,7 +54,7 @@ impl Dxf {
         self.pair(20, format!("{:.3}", p.y / self.k));
         self.pair(30, 0.0);
         self.pair(40, format!("{:.3}", h / self.k));
-        self.pair(1, t.replace('\n', " "));
+        self.pair(1, dxf_text(&t.replace('\n', " ")));
         self.pair(50, format!("{:.2}", rot));
         self.pair(72, 1);
         self.pair(73, 2);
@@ -62,6 +62,19 @@ impl Dxf {
         self.pair(21, format!("{:.3}", p.y / self.k));
         self.pair(31, 0.0);
     }
+}
+
+/// Texto para DXF R12: caracteres no ASCII como \U+XXXX (AutoCAD los interpreta).
+pub fn dxf_text(s: &str) -> String {
+    let mut o = String::new();
+    for c in s.chars() {
+        if c.is_ascii() {
+            o.push(c);
+        } else {
+            let _ = write!(o, "\\U+{:04X}", c as u32);
+        }
+    }
+    o
 }
 
 fn layer_name(s: &str) -> String {

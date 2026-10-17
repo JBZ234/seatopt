@@ -56,11 +56,34 @@ Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo
    - Mueve los sliders y presiona **Optimizar**.
    - Si no caben todos, la app prueba relajar cada regla (que no esté bloqueada) y cambiar de tipo de escritorio, y muestra cuántos puestos gana cada cambio, con el botón **Aplicar**.
    - **Explorar variantes** corre el optimizador con otros pesos y muestra el frente de Pareto.
-   - **Fijar escritorios** conserva los que elijas en las próximas corridas.
+   - **Bloquear puestos:** selecciona escritorios y usa «Fijar y bloquear». En la próxima optimización se conservan en su sitio con sus personas (rol y cliente) y se optimiza el resto.
    - **Exportar** genera:
      - un DXF en las coordenadas del plano original, para insertarlo como referencia externa;
+     - un **PDF vectorial a escala** (A4 a A0, escala automática o 1:N) con plano, puestos numerados, colores por tipo/rol/cliente, convenciones e indicadores;
      - un CSV con número, tipo, rol, cliente, posición y avisos de cada puesto;
      - el proyecto `.puestos.json`.
+
+### Edición y selección como en AutoCAD
+
+| Acción | Cómo |
+|---|---|
+| Selección por ventana (azul) | Arrastrar de **izquierda a derecha**: toma lo que queda completamente adentro |
+| Selección por captura (verde) | Arrastrar de **derecha a izquierda**: toma todo lo que toque |
+| Agregar / quitar | Clic agrega; **Shift** + clic o barrido quita |
+| Mover | Arrastrar lo seleccionado, o flechas (100 mm; Shift = 500 mm) |
+| Girar 90° | **R** |
+| Fijar y bloquear personas | **P** o botón de la barra de selección |
+| Borrar | **Supr** |
+| Deshacer | **Ctrl+Z** |
+| Seleccionar todos los escritorios | **Ctrl+A** |
+| Limpiar selección / salir de herramienta | **Esc** |
+| Desplazar / zoom | Botón derecho o central + arrastrar / rueda |
+
+Lo que se mueve o gira a mano queda fijado. Después de cada edición la app recalcula los avisos (superposiciones, accesos, recorridos) sin mover nada.
+
+### Plano sin mobiliario
+
+En *Plano → Plano sin mobiliario* se exporta el dibujo original (DXF y PDF a escala) quitando las capas marcadas como «Mobiliario existente». Antes de exportar, revisa qué capas tienen ese rol.
 
 ## Convención de capas recomendada
 
@@ -129,6 +152,7 @@ crates/core        núcleo en Rust (sin interfaz)
                      search (recocido, exploración, capacidad, sugerencias), custom (reglas propias)
   assign.rs          roles y clientes
   export.rs          DXF R12 y CSV
+  pdf_out.rs         PDF vectorial a escala y DXF sin mobiliario
   api.rs             fachada JSON + trabajos en segundo plano
 crates/devserver   servidor HTTP con la misma API (modo navegador)
 src-tauri          app de escritorio

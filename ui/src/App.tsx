@@ -3,7 +3,8 @@ import { analyzePlan, ensureConfig, importPlan, openProject, saveProject, setSca
 import { backendName } from './api';
 import Canvas from './components/Canvas';
 import { Bar } from './components/ui';
-import { requestedSeats, useApp } from './store';
+import { deleteSelection, evaluateSoon, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
+import { emptySel, requestedSeats, selCount, useApp } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
 import OrgStep from './steps/OrgStep';
@@ -17,15 +18,38 @@ export default function App() {
   const st = useApp();
   useEffect(() => {
     ensureConfig().catch((e) => st.say('No se pudo conectar con el motor: ' + e, 'error'));
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') useApp.getState().set({ tool: 'pan', calib: [] }); };
+    const esc = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      const s = useApp.getState();
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (e.key === 'Escape') s.set({ tool: 'select', calib: [], selection: emptySel() });
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && selCount(s.selection)) { e.preventDefault(); deleteSelection(); }
+      else if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); s.undo(); evaluateSoon(); }
+      else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
+      else if (!ctrl && e.key.toLowerCase() === 'r' && selCount(s.selection)) rotateSelection(90);
+      else if (!ctrl && e.key.toLowerCase() === 'p' && s.selection.modules.length) pinSelection(true);
+      else if (!ctrl && e.key.startsWith('Arrow') && selCount(s.selection)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 500 : 100;
+        const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key] ?? [0, 0];
+        moveSelection(d[0], d[1]);
+      }
+    };
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onSeed = (p: Pt) => { st.set({ tool: 'pan' }); analyzePlan(p); };
+  // si se edita el plano con un resultado en pantalla, recalcular sus avisos
+  const planRef = st.plan;
+  useEffect(() => {
+    if (useApp.getState().layout && planRef) evaluateSoon();
+  }, [planRef]);
+
+  const onSeed = (p: Pt) => { st.set({ tool: 'select' }); analyzePlan(p); };
   const onCalibrated = (a: Pt, b: Pt) => {
-    st.set({ tool: 'pan' });
+    st.set({ tool: 'select' });
     const measured = Math.hypot(a.x - b.x, a.y - b.y);
     const ans = prompt(`Medida real entre los dos puntos, en metros (ahora mide ${(measured / 1000).toFixed(3)} m):`);
     const real = parseFloat((ans ?? '').replace(',', '.')) * 1000;
@@ -45,7 +69,7 @@ export default function App() {
         <nav className="steps" aria-label="Pasos">
           {STEPS.map((s, i) => (
             <button key={s} className={'step' + (st.step === i ? ' cur' : '')} disabled={!canGo(i)} aria-current={st.step === i ? 'step' : undefined}
-              onClick={() => st.set({ step: i, tool: 'pan' })}>
+              onClick={() => st.set({ step: i, tool: 'select' })}>
               <span className="n">{i + 1}</span>{s}
             </button>
           ))}
@@ -71,7 +95,7 @@ export default function App() {
             <p>El plano aparece aquí.</p>
           </div>
         )}
-        {st.tool !== 'pan' && <div className="tool-banner">Herramienta activa · Esc para salir</div>}
+        {st.tool !== 'select' && <div className="tool-banner">Herramienta activa · Esc para volver a seleccionar</div>}
       </main>
       <footer className="status">
         {job ? (

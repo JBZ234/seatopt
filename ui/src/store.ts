@@ -1,15 +1,20 @@
 import { create } from 'zustand';
 import type {
-  BgLayer, Capacity, Config, ImportOut, LayerRole, Layout, Plan, Progress, Pt, Suggestion, Variant,
+  BgLayer, Capacity, Config, ImportOut, LayerRole, Layout, Module, Plan, Progress, Pt, Suggestion, Variant,
 } from './types';
 
 export type Tool =
-  | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
-  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'pin' | 'erase';
+  | 'select' | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
+  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase';
 
 export type ColorBy = 'type' | 'role' | 'client';
 
-export interface Selection { kind: 'door' | 'obstacle' | 'seat' | 'module'; id: string }
+/** Selección múltiple (como AutoCAD). Ventanas por índice. */
+export interface Selection { modules: string[]; obstacles: string[]; doors: string[]; windows: number[] }
+export const emptySel = (): Selection => ({ modules: [], obstacles: [], doors: [], windows: [] });
+export const selCount = (s: Selection) => s.modules.length + s.obstacles.length + s.doors.length + s.windows.length;
+
+interface Snapshot { plan: Plan | null; layout: Layout | null; pinned: Module[] }
 
 export interface JobUi { kind: string; progress: Progress | null; signal: { cancel: boolean } }
 
@@ -33,12 +38,18 @@ export interface AppState {
   colorBy: ColorBy;
   showKeepouts: boolean;
   showBackground: boolean;
-  selection: Selection | null;
+  selection: Selection;
+  history: Snapshot[];
+  /** Guarda el estado actual para poder deshacer. */
+  snapshot: () => void;
+  undo: () => void;
   toast: { text: string; tone: 'info' | 'error' } | null;
   calib: Pt[];
   autoExplore: boolean;
   gapClose: number;
-  converter: string;
+ converter: string;
+  pdfPaper: string;
+  pdfScale: number;
   set: (p: Partial<AppState>) => void;
   updateConfig: (f: (c: Config) => void) => void;
   updatePlan: (f: (p: Plan) => void) => void;
@@ -63,16 +74,30 @@ export const useApp = create<AppState>((set, get) => ({
   suggestions: null,
   capacity: null,
   job: null,
-  tool: 'pan',
+  tool: 'select',
   colorBy: 'type',
   showKeepouts: true,
   showBackground: true,
-  selection: null,
+  selection: emptySel(),
+  history: [],
+  snapshot: () => {
+    const { plan, layout, config, history } = get();
+    set({ history: [...history.slice(-29), clone({ plan, layout, pinned: config?.pinned ?? [] })] });
+  },
+  undo: () => {
+    const h = get().history;
+    if (!h.length) return;
+    const last = h[h.length - 1];
+    const c = get().config;
+    set({ history: h.slice(0, -1), plan: last.plan, layout: last.layout, config: c ? { ...c, pinned: last.pinned } : c, selection: emptySel() });
+  },
   toast: null,
   calib: [],
   autoExplore: false,
   gapClose: 1200,
   converter: '',
+  pdfPaper: 'A3',
+  pdfScale: 0,
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;
@@ -84,9 +109,10 @@ export const useApp = create<AppState>((set, get) => ({
   updatePlan: (f) => {
     const p = get().plan;
     if (!p) return;
+    get().snapshot();
     const n = clone(p);
     f(n);
-    set({ plan: n, layout: null, capacity: null, suggestions: null });
+    set({ plan: n, capacity: null, suggestions: null });
   },
   say: (text, tone = 'info') => {
     set({ toast: { text, tone } });

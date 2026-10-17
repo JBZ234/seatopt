@@ -1,4 +1,4 @@
-import { analyzePlan, importPlan, loadBackground, openProject, setScale } from '../actions';
+import { analyzePlan, exportCleanDxf, exportPdf, importPlan, loadBackground, openProject, setScale } from '../actions';
 import { Fold, Num } from '../components/ui';
 import { useApp, type Tool } from '../store';
 import type { DoorKind, LayerRole, ObstacleKind } from '../types';
@@ -33,7 +33,7 @@ export default function PlanStep() {
   const isPdf = drawing?.source === 'pdf';
   const paper = isPdf ? mmPerUnit / (25.4 / 72) : null;
   const tool = (t: Tool, hint: string) => {
-    st.set({ tool: st.tool === t ? 'pan' : t, calib: [] });
+    st.set({ tool: st.tool === t ? 'select' : t, calib: [] });
     if (st.tool !== t) st.say(hint);
   };
   const ToolBtn = ({ t, label, hint }: { t: Tool; label: string; hint: string }) => (
@@ -156,6 +156,17 @@ export default function PlanStep() {
         <label className="check"><input type="checkbox" checked={st.showBackground} onChange={(e) => st.set({ showBackground: e.target.checked })} /> Mostrar el dibujo de fondo</label>
       )}
 
+      {drawing?.drawingId && (
+        <Fold title="Plano sin mobiliario">
+          <p className="hint">Exporta el plano original sin las capas marcadas como «Mobiliario existente» (escritorios, sillas, mesas). Revisa los roles de capa antes.</p>
+          <p className="hint">Se quitan: {drawing.layers.filter((l) => roles[l.name] === 'furniture').map((l) => l.name).join(', ') || 'ninguna capa'}.</p>
+          <div className="row wrap">
+            <button onClick={exportCleanDxf}>DXF sin mobiliario</button>
+            <button onClick={() => exportPdf({ clean: true })}>PDF sin mobiliario</button>
+          </div>
+        </Fold>
+      )}
+
       {notes.length > 0 && (
         <Fold title="Notas de la importación">
           <ul className="notes">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
@@ -170,7 +181,7 @@ export default function PlanStep() {
 
       {plan && (
         <div className="next">
-          <button className="primary" disabled={doorsBy('main') === 0} onClick={() => st.set({ step: 1, tool: 'pan' })}>Continuar: escritorios</button>
+          <button className="primary" disabled={doorsBy('main') === 0} onClick={() => st.set({ step: 1, tool: 'select' })}>Continuar: escritorios</button>
         </div>
       )}
     </div>

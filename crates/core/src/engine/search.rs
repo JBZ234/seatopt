@@ -288,11 +288,22 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
         ba.partial_cmp(&bb).unwrap().then(pa.x.partial_cmp(&pb.x).unwrap())
     });
     let mut mod_ids = vec![String::new(); mods.len()];
+    let fixed: std::collections::HashSet<String> = mods.iter().filter_map(|m| m.fixed_id.clone()).collect();
+    let mut counter = 0usize;
     for (mi, m) in mods.iter().enumerate() {
         if !ev.module_ok[mi] {
             continue;
         }
-        let id = format!("m{}", out_mods.len() + 1);
+        let id = match &m.fixed_id {
+            Some(id) => id.clone(),
+            None => loop {
+                counter += 1;
+                let c = format!("m{counter}");
+                if !fixed.contains(&c) {
+                    break c;
+                }
+            },
+        };
         mod_ids[mi] = id.clone();
         let t = &ctx.catalog[m.pm.t];
         out_mods.push(Module {
@@ -306,11 +317,18 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
             seats_up: m.pm.seats_up,
             body: m.body.clone(),
             pinned: m.pinned,
+            people: m.people.clone(),
         });
     }
     for (num, &si) in order.iter().enumerate() {
         let s = &seats[si];
         let m = &mods[s.module];
+        // persona bloqueada (módulos fijados): el puesto más cercano a la posición guardada
+        let person = if m.pinned {
+            m.people.iter().filter(|p| p.pos.dist(s.pos) < 700.0).min_by(|a, b| a.pos.dist(s.pos).partial_cmp(&b.pos.dist(s.pos)).unwrap())
+        } else {
+            None
+        };
         out_seats.push(Seat {
             id: format!("s{}", num + 1),
             number: num as u32 + 1,
@@ -319,9 +337,10 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
             pos: s.pos,
             facing: s.facing,
             chair: s.chair.clone(),
-            role_id: String::new(),
-            client_id: String::new(),
+            role_id: person.map(|p| p.role_id.clone()).unwrap_or_default(),
+            client_id: person.map(|p| p.client_id.clone()).unwrap_or_default(),
             flags: ev.seat_flags[si].clone(),
+            locked: m.pinned && person.map(|p| !p.role_id.is_empty()).unwrap_or(false),
         });
     }
     // módulos inválidos → avisos

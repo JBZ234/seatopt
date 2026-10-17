@@ -33,6 +33,17 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
     // ------------------------------------------------ tipos de persona
     let mut kinds: Vec<Kind> = Vec::new();
     let mut slots: Vec<usize> = Vec::new(); // índice de tipo por persona
+    // puestos bloqueados: conservan su persona y la descuentan de los equipos
+    let kind_of = |role_id: &str, client_id: &str| -> Option<Kind> {
+        let role = org.roles.iter().position(|r| r.id == role_id)? as i32;
+        let client = org.clients.iter().position(|c| c.id == client_id).map(|x| x as i32).unwrap_or(-1);
+        Some(Kind { client, role })
+    };
+    let locked_kind: Vec<Option<Kind>> = layout.seats.iter().map(|s| if s.locked { kind_of(&s.role_id, &s.client_id) } else { None }).collect();
+    let mut used_locked: std::collections::HashMap<(i32, i32), u32> = Default::default();
+    for k in locked_kind.iter().flatten() {
+        *used_locked.entry((k.client, k.role)).or_default() += 1;
+    }
     for t in &org.teams {
         let role = org.roles.iter().position(|r| r.id == t.role_id).map(|x| x as i32).unwrap_or(-1);
         if role < 0 {
@@ -47,15 +58,27 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
                 kinds.len() - 1
             }
         };
-        for _ in 0..t.count {
+        let taken = used_locked.get_mut(&(client, role)).map(|u| {
+            let x = (*u).min(t.count);
+            *u -= x;
+            x
+        }).unwrap_or(0);
+        for _ in 0..(t.count - taken) {
             slots.push(ki);
         }
     }
-    let people = slots.len();
+    // tipos de los puestos bloqueados que ya no estén en los equipos
+    for k in locked_kind.iter().flatten() {
+        if !kinds.contains(k) {
+            kinds.push(*k);
+        }
+    }
+    let people = slots.len() + locked_kind.iter().filter(|k| k.is_some()).count();
     if people == 0 {
         return;
     }
     let nk = kinds.len();
+    let is_locked: Vec<bool> = locked_kind.iter().map(|k| k.is_some()).collect();
 
     // ------------------------------------------------ costos unarios
     let r1_on = rv.on("R1");
@@ -164,12 +187,17 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
 
     // ------------------------------------------------ asignación inicial: bloques por cliente
     let mut seat_kind: Vec<usize> = vec![EMPTY; ns];
+    for (i, k) in locked_kind.iter().enumerate() {
+        if let Some(k) = k {
+            seat_kind[i] = kinds.iter().position(|x| x == k).unwrap();
+        }
+    }
     let mut order_clients: Vec<i32> = kinds.iter().map(|k| k.client).collect();
     order_clients.sort();
     order_clients.dedup();
     let count_client = |c: i32| slots.iter().filter(|&&k| kinds[k].client == c).count();
     order_clients.sort_by_key(|&c| std::cmp::Reverse(count_client(c)));
-    let mut free_seats: Vec<bool> = vec![true; ns];
+    let mut free_seats: Vec<bool> = is_locked.iter().map(|l| !l).collect();
     for &c in &order_clients {
         let mut need: Vec<usize> = slots.iter().copied().filter(|&k| kinds[k].client == c).collect();
         // roles con tipo preferido primero
@@ -212,7 +240,7 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
         let a = rng.below(ns);
         // vecino o puesto aleatorio
         let b = if rng.f32() < 0.6 && !nbr[a].is_empty() { nbr[a][rng.below(nbr[a].len())].0 } else { rng.below(ns) };
-        if a == b || seat_kind[a] == seat_kind[b] {
+        if a == b || seat_kind[a] == seat_kind[b] || is_locked[a] || is_locked[b] {
             continue;
         }
         let before = local(&seat_kind, a) + local(&seat_kind, b);
@@ -271,8 +299,9 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
     }
     layout.kpis.grouping_score = if same + diff > 0 { same as f64 / (same + diff) as f64 * 100.0 } else { 100.0 };
     layout.kpis.misplaced_people = misplaced;
-    if people > ns {
-        layout.violations.push(Violation { rule_id: "R".into(), message: format!("Hay {} personas sin puesto: se ubicaron {} de {}.", people - ns, ns, people), at: None, hard: false });
+    let free_ns = is_locked.iter().filter(|l| !**l).count();
+    if slots.len() > free_ns {
+        layout.violations.push(Violation { rule_id: "R".into(), message: format!("Hay {} personas sin puesto.", slots.len() - free_ns), at: None, hard: false });
     }
     // reglas personalizadas por pares / grupos: solo informe
     let infos: Vec<SeatInfo> = layout

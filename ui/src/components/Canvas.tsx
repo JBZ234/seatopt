@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useApp, uid } from '../store';
+import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
+import { emptySel, selCount, useApp, uid } from '../store';
 import type { Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
 const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
@@ -52,6 +53,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const [view, setView] = useState({ tx: 0, ty: 0, k: 0.02 });
   const [drag, setDrag] = useState<{ a: Pt; b: Pt } | null>(null);
   const [hover, setHover] = useState<{ seat: Seat; sx: number; sy: number } | null>(null);
+  // selección por ventana (azul, izq→der) o captura (verde, der→izq), en pantalla
+  const [box, setBox] = useState<{ ax: number; ay: number; bx: number; by: number } | null>(null);
+  // arrastre de lo seleccionado (mundo)
+  const [moving, setMoving] = useState<{ a: Pt; b: Pt } | null>(null);
   const [cursor, setCursor] = useState<Pt | null>(null);
   const panRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
 
@@ -109,7 +114,6 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   }, [config?.catalog]);
   const roleColor = useMemo(() => Object.fromEntries((config?.org.roles ?? []).map((r) => [r.id, r.color])), [config?.org.roles]);
   const clientColor = useMemo(() => Object.fromEntries((config?.org.clients ?? []).map((r) => [r.id, r.color])), [config?.org.clients]);
-  const pinnedIds = useMemo(() => new Set((config?.pinned ?? []).map((m) => m.id)), [config?.pinned]);
 
   const planEls = useMemo(() => {
     if (!plan) return null;
@@ -149,7 +153,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     return (
       <>
         {allMods.map((m) => (
-          <path key={m.id} className={'desk' + (pinnedIds.has(m.id) || m.pinned ? ' pinned' : '')} d={ringD(m.body)}
+          <path key={m.id} className={'desk' + (m.pinned ? ' pinned' : '')} d={ringD(m.body)}
             fill={colorBy === 'type' ? typeColor[m.typeId] ?? '#777' : 'var(--desk-neutral)'} />
         ))}
         {colorBy !== 'type' && layout.seats.filter((s) => (colorBy === 'role' ? s.roleId : s.clientId)).map((s) => (
@@ -158,7 +162,24 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         {layout.seats.map((s) => <path key={s.id} className="chair" d={ringD(s.chair)} fill={seatFill(s)} />)}
       </>
     );
-  }, [layout, colorBy, typeColor, roleColor, clientColor, pinnedIds, config?.catalog]);
+  }, [layout, colorBy, typeColor, roleColor, clientColor, config?.catalog]);
+
+  // resaltado de la selección (y vista previa al mover)
+  const sel = st.selection;
+  const selEls = useMemo(() => {
+    if (!selCount(sel)) return null;
+    const mods = layout?.modules.filter((m) => sel.modules.includes(m.id)) ?? [];
+    const seats = layout?.seats.filter((s) => sel.modules.includes(s.moduleId)) ?? [];
+    return (
+      <>
+        {mods.map((m) => <path key={'s' + m.id} className="sel" d={ringD(m.body)} />)}
+        {seats.map((s) => <path key={'sc' + s.id} className="sel thin" d={ringD(s.chair)} />)}
+        {plan?.obstacles.filter((o) => sel.obstacles.includes(o.id)).map((o) => <path key={'so' + o.id} className="sel" d={ringD(o.poly)} />)}
+        {plan?.doors.filter((d) => sel.doors.includes(d.id)).map((d) => <line key={'sd' + d.id} className="sel" x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} />)}
+        {plan?.windows.filter((_, i) => sel.windows.includes(i)).map((w, i) => <line key={'sw' + i} className="sel" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
+      </>
+    );
+  }, [sel, layout, plan]);
 
   // textos (fuera del grupo invertido)
   const sx = (p: Pt) => p.x * view.k + view.tx;
@@ -175,7 +196,6 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     return best;
   };
-  const moduleAt = (p: Pt): Module | null => layout?.modules.find((m) => pip(p, m.body)) ?? null;
   const seatAt = (p: Pt): Seat | null => {
     if (!layout) return null;
     let best: Seat | null = null, bd = 700;
@@ -189,8 +209,17 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const onDown = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
     const w = toWorld(x, y);
-    if (e.button === 1 || e.button === 2 || tool === 'pan' || e.shiftKey) {
+    if (e.button === 1 || e.button === 2 || tool === 'pan') {
       panRef.current = { sx: x, sy: y, tx: view.tx, ty: view.ty };
+      return;
+    }
+    if (tool === 'select' && e.button === 0) {
+      // ¿clic sobre algo ya seleccionado? → mover
+      const hit = pickPoint(w, 8 / view.k);
+      const already = hit.modules.some((id) => sel.modules.includes(id)) || hit.obstacles.some((id) => sel.obstacles.includes(id))
+        || hit.doors.some((id) => sel.doors.includes(id)) || hit.windows.some((i) => sel.windows.includes(i));
+      if (already && !e.shiftKey) setMoving({ a: w, b: w });
+      else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
     if (['column', 'fixedOffice', 'restricted', 'reserved', 'window'].includes(tool)) {
@@ -211,6 +240,15 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       setDrag({ a: drag.a, b: w });
       return;
     }
+    if (box) {
+      setBox({ ...box, bx: x, by: y });
+      if (hover) setHover(null);
+      return;
+    }
+    if (moving) {
+      setMoving({ a: moving.a, b: w });
+      return;
+    }
     const s = seatAt(w);
     setHover(s ? { seat: s, sx: x, sy: y } : null);
   };
@@ -222,6 +260,37 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const moved = Math.hypot(x - panRef.current.sx, y - panRef.current.sy) > 4;
       panRef.current = null;
       if (moved || tool === 'pan') return;
+    }
+    if (box) {
+      const b = box;
+      setBox(null);
+      const tiny = Math.hypot(b.bx - b.ax, b.by - b.ay) < 5;
+      let picked;
+      if (tiny) {
+        picked = pickPoint(w, 8 / view.k);
+        if (!selCount(picked)) {
+          if (!e.shiftKey) st.set({ selection: emptySel() });
+          return;
+        }
+      } else {
+        const r = normRect(toWorld(b.ax, b.ay), toWorld(b.bx, b.by));
+        picked = pickRect(r, b.bx < b.ax);
+      }
+      st.set({ selection: mergeSel(st.selection, picked, e.shiftKey) });
+      return;
+    }
+    if (moving) {
+      const m = moving;
+      setMoving(null);
+      const dx = m.b.x - m.a.x, dy = m.b.y - m.a.y;
+      if (Math.hypot(dx, dy) * view.k < 3) {
+        // clic simple sobre lo seleccionado: dejar solo ese elemento
+        const hit = pickPoint(w, 8 / view.k);
+        if (selCount(hit)) st.set({ selection: hit });
+        return;
+      }
+      moveSelection(dx, dy);
+      return;
     }
     if (drag) {
       const { a, b } = drag;
@@ -270,15 +339,6 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         if (c.length === 2) { st.set({ calib: [] }); onCalibrated(c[0], c[1]); } else st.set({ calib: c });
         break;
       }
-      case 'pin': {
-        const m = moduleAt(w);
-        if (!m) return;
-        st.updateConfig((c) => {
-          const i = c.pinned.findIndex((x) => x.id === m.id);
-          if (i >= 0) c.pinned.splice(i, 1); else c.pinned.push({ ...m, pinned: true });
-        });
-        break;
-      }
       case 'erase': {
         if (!plan) return;
         const ob = [...plan.obstacles].reverse().find((o) => pip(w, o.poly));
@@ -304,7 +364,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     });
   };
 
-  const cursorCls = tool === 'pan' ? 'grab' : 'cross';
+  const cursorCls = tool === 'pan' ? 'grab' : tool === 'select' ? (moving ? 'grab' : 'arrow') : 'cross';
+  const moveOff = moving ? { x: moving.b.x - moving.a.x, y: moving.b.y - moving.a.y } : null;
   const flagged = (s: Seat) => s.flags.some((f) => f.startsWith('Sin acceso') || f.startsWith('Recorrido') || f.startsWith('Regla'));
 
   return (
@@ -316,6 +377,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {showBackground && <g className="bg">{bgEls}</g>}
           {planEls}
           {layoutEls}
+          {moveOff ? <g transform={`translate(${moveOff.x} ${moveOff.y})`} opacity={0.7}>{selEls}</g> : selEls}
           {drag && (tool === 'window'
             ? <line className="draft" x1={drag.a.x} y1={drag.a.y} x2={drag.b.x} y2={drag.b.y} />
             : <rect className="draft" x={Math.min(drag.a.x, drag.b.x)} y={Math.min(drag.a.y, drag.b.y)} width={Math.abs(drag.b.x - drag.a.x)} height={Math.abs(drag.b.y - drag.a.y)} />)}
@@ -331,6 +393,20 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {layout?.violations.filter((v) => v.at).map((v, i) => <circle key={'v' + i} cx={sx(v.at!)} cy={sy(v.at!)} r={14} className={'viol' + (v.hard ? ' hard' : '')} />)}
         </g>
       </svg>
+      {box && (() => {
+        const crossing = box.bx < box.ax;
+        return <div className={'selbox ' + (crossing ? 'crossing' : 'window')} style={{ left: Math.min(box.ax, box.bx), top: Math.min(box.ay, box.by), width: Math.abs(box.bx - box.ax), height: Math.abs(box.by - box.ay) }} />;
+      })()}
+      {selCount(sel) > 0 && (
+        <div className="selbar" role="toolbar" aria-label="Acciones sobre la selección">
+          <span>{describeSel(sel)}</span>
+          {sel.modules.length > 0 && <button className="small" title="Conserva estos escritorios y a sus personas en las próximas optimizaciones (P)" onClick={() => pinSelection(true)}>Fijar y bloquear</button>}
+          {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Soltar</button>}
+          <button className="small" title="Girar 90° (R)" onClick={() => rotateSelection(90)}>Girar 90°</button>
+          <button className="small danger" title="Supr" onClick={deleteSelection}>Borrar</button>
+          <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Quitar selección</button>
+        </div>
+      )}
       <div className="readout">
         {cursor ? `x ${(cursor.x / 1000).toFixed(2)} m · y ${(cursor.y / 1000).toFixed(2)} m` : ''}
         <button className="ghost small" onClick={fit} title="Encajar el plano en la vista">Encuadrar</button>

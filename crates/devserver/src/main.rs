@@ -2,7 +2,6 @@
 //! y sirve la interfaz compilada (ui/dist). Uso: `cargo run -p seatopt-devserver -- [puerto] [carpeta_ui]`
 
 use seat_core::api;
-use std::io::Read;
 use tiny_http::{Header, Method, Response, Server};
 
 fn main() {

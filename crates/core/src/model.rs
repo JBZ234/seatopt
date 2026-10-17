@@ -485,6 +485,20 @@ pub struct Module {
     pub body: Vec<Pt>,
     #[serde(default)]
     pub pinned: bool,
+    /// Personas bloqueadas en los puestos de este módulo (solo para módulos fijados).
+    #[serde(default)]
+    pub people: Vec<SeatPerson>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatPerson {
+    /// Posición del puesto (para reconocerlo aunque cambie la numeración).
+    pub pos: Pt,
+    #[serde(default)]
+    pub role_id: String,
+    #[serde(default)]
+    pub client_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -507,6 +521,9 @@ pub struct Seat {
     /// Avisos sobre este puesto (reglas blandas incumplidas).
     #[serde(default)]
     pub flags: Vec<String>,
+    /// Puesto bloqueado: su escritorio está fijado y la persona no se reasigna.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

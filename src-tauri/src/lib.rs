@@ -35,6 +35,12 @@ fn save_text(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn save_base64(path: String, data: String) -> Result<(), String> {
+    let bytes = api::unb64(&data)?;
+    std::fs::write(&path, bytes).map_err(|e| format!("No se pudo guardar {path}: {e}"))
+}
+
+#[tauri::command]
 fn read_text(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("No se pudo leer {path}: {e}"))
 }
@@ -43,7 +49,7 @@ fn read_text(path: String) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![call, import_path, save_text, read_text])
+        .invoke_handler(tauri::generate_handler![call, import_path, save_text, save_base64, read_text])
         .run(tauri::generate_context!())
         .expect("error al iniciar la aplicación");
 }

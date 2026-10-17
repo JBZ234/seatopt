@@ -199,8 +199,10 @@ pub fn reassign(problem: &Problem, layout: &Layout) -> Result<Layout, String> {
     let ctx = crate::engine::ctx::Ctx::build(problem)?;
     let mut l = layout.clone();
     for s in l.seats.iter_mut() {
-        s.role_id.clear();
-        s.client_id.clear();
+        if !s.locked {
+            s.role_id.clear();
+            s.client_id.clear();
+        }
         s.flags.retain(|f| !f.contains("equipo") && !f.contains("tipo de escritorio") && !f.contains("referencia"));
     }
     if crate::assign::has_people(&problem.config.org) {
@@ -229,6 +231,171 @@ pub fn export_dxf(r: &ExportReq) -> String {
 
 pub fn export_csv(r: &ExportReq) -> String {
     crate::export::to_csv(&r.layout, &r.problem.config)
+}
+
+/// Recalcula indicadores y avisos de una distribución editada a mano (sin mover nada).
+pub fn evaluate(problem: &Problem, layout: &Layout) -> Result<Layout, String> {
+    use crate::engine::{decode, search};
+    let mut p = problem.clone();
+    let was_pinned: HashMap<String, bool> = layout.modules.iter().map(|m| (m.id.clone(), m.pinned)).collect();
+
+    // todos los módulos actuales pasan como fijados, con sus personas
+    p.config.pinned = layout
+        .modules
+        .iter()
+        .map(|m| {
+            let mut m = m.clone();
+            m.people = layout
+                .seats
+                .iter()
+                .filter(|s| s.module_id == m.id)
+                .map(|s| SeatPerson { pos: s.pos, role_id: s.role_id.clone(), client_id: s.client_id.clone() })
+                .collect();
+            m
+        })
+        .collect();
+    let mut ctx = crate::engine::ctx::Ctx::build(&p)?;
+    let requested_units = ctx.demand.clone();
+    ctx.demand = vec![0; ctx.catalog.len()];
+    let mut rng = decode::Rng(7);
+    let g = decode::random_genome(&ctx, &mut rng);
+    let mut l = search::to_layout(&ctx, &g, &problem.config.weights);
+    // la demanda real (no la de la evaluación) para "sin ubicar"
+    let mut req_seats = 0u32;
+    let mut placed = vec![0u32; ctx.catalog.len()];
+    for m in &l.modules {
+        if let Some(i) = ctx.catalog.iter().position(|t| t.id == m.type_id) {
+            let t = &ctx.catalog[i];
+            placed[i] += if t.flexible { t.seats_per_module(m.per_side) } else { 1 };
+        }
+    }
+    l.kpis.unplaced_by_type.clear();
+    for d in &problem.config.demand {
+        if let Some(i) = ctx.catalog.iter().position(|t| t.id == d.type_id) {
+            let t = &ctx.catalog[i];
+            let per = if t.flexible { 1 } else { t.seats_per_module(t.per_side) };
+            req_seats += d.quantity * per;
+            let miss = d.quantity.saturating_sub(placed[i]);
+            if miss > 0 {
+                l.kpis.unplaced_by_type.push((t.id.clone(), miss));
+            }
+        }
+    }
+    let _ = requested_units;
+    l.kpis.seats_requested = req_seats;
+    l.kpis.seats_placed = l.seats.len() as u32;
+    l.kpis.grouping_score = layout.kpis.grouping_score;
+    l.kpis.misplaced_people = layout.kpis.misplaced_people;
+    for m in l.modules.iter_mut() {
+        m.pinned = *was_pinned.get(&m.id).unwrap_or(&false);
+        if !m.pinned {
+            m.people.clear();
+        }
+    }
+    // conservar numeración, bloqueo y persona de cada puesto (se reconoce por posición)
+    let mut next = layout.seats.iter().map(|s| s.number).max().unwrap_or(0);
+    for s in l.seats.iter_mut() {
+        let old = layout.seats.iter().filter(|o| o.pos.dist(s.pos) < 300.0).min_by(|a, b| a.pos.dist(s.pos).partial_cmp(&b.pos.dist(s.pos)).unwrap());
+        match old {
+            Some(o) => {
+                s.number = o.number;
+                s.id = o.id.clone();
+                s.locked = o.locked;
+                s.role_id = o.role_id.clone();
+                s.client_id = o.client_id.clone();
+            }
+            None => {
+                next += 1;
+                s.number = next;
+                s.id = format!("s{next}");
+                s.locked = false;
+            }
+        }
+    }
+    l.seats.sort_by_key(|s| s.number);
+    Ok(l)
+}
+
+/// Codifica bytes en base64 (para devolver PDF por JSON).
+pub fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut o = String::with_capacity(data.len() * 4 / 3 + 4);
+    for ch in data.chunks(3) {
+        let b = [ch[0], *ch.get(1).unwrap_or(&0), *ch.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        o.push(T[(n >> 18) as usize & 63] as char);
+        o.push(T[(n >> 12) as usize & 63] as char);
+        o.push(if ch.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        o.push(if ch.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    o
+}
+
+/// Decodifica base64 estándar.
+pub fn unb64(s: &str) -> Result<Vec<u8>, String> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let clean: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for ch in clean.chunks(4) {
+        let mut n = 0u32;
+        let mut cnt: usize = 0;
+        for &c in ch {
+            if c == b'=' {
+                break;
+            }
+            n = (n << 6) | val(c).ok_or("base64 inválido")?;
+            cnt += 1;
+        }
+        n <<= 6 * (4 - cnt);
+        let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        out.extend_from_slice(&bytes[..cnt.saturating_sub(1).min(3)]);
+    }
+    Ok(out)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfReq {
+    #[serde(default)]
+    pub problem: Option<Problem>,
+    #[serde(default)]
+    pub layout: Option<Layout>,
+    #[serde(default)]
+    pub drawing_id: String,
+    #[serde(default = "one")]
+    pub mm_per_unit: f64,
+    pub opts: crate::pdf_out::PdfOpts,
+}
+
+/// PDF del layout (o del plano limpio si `opts.clean`), en base64.
+pub fn export_pdf(r: &PdfReq) -> Result<String, String> {
+    let d = if r.drawing_id.is_empty() { None } else { drawing(&r.drawing_id).ok() };
+    let bg = d.as_deref().map(|d| (d, r.mm_per_unit));
+    let bytes = crate::pdf_out::render_pdf(r.problem.as_ref().map(|p| &p.plan), r.layout.as_ref(), r.problem.as_ref().map(|p| &p.config), bg, &r.opts)?;
+    Ok(b64(&bytes))
+}
+
+/// Capas de mobiliario según los roles asignados.
+pub fn furniture_layers(id: &str, roles: &HashMap<String, LayerRole>) -> Result<Vec<String>, String> {
+    let d = drawing(id)?;
+    Ok(d.layers.iter().filter(|l| roles.get(&l.name) == Some(&LayerRole::Furniture)).map(|l| l.name.clone()).collect())
+}
+
+/// DXF del plano original sin las capas excluidas.
+pub fn export_clean_dxf(id: &str, mm_per_unit: f64, exclude: &[String]) -> Result<String, String> {
+    let d = drawing(id)?;
+    // PDF → milímetros; DXF/DWG → unidades originales
+    let out_mm = if d.source == SourceKind::Pdf { 1.0 } else { mm_per_unit };
+    Ok(crate::pdf_out::clean_dxf(&d, mm_per_unit, out_mm, exclude))
 }
 
 /// Despacho genérico por nombre de comando con argumentos JSON (servidor de desarrollo y pruebas).
@@ -264,10 +431,36 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
             let l: Layout = serde_json::from_value(get("layout")).map_err(|e| e.to_string())?;
             reassign(&p, &l).map(|v| serde_json::to_value(v).unwrap())
         }
+        "evaluate" => {
+            let p = de(get("problem"))?;
+            let l: Layout = serde_json::from_value(get("layout")).map_err(|e| e.to_string())?;
+            evaluate(&p, &l).map(|v| serde_json::to_value(v).unwrap())
+        }
+        "export_pdf" => {
+            let r: PdfReq = serde_json::from_value(args).map_err(|e| format!("Datos inválidos: {e}"))?;
+            export_pdf(&r).map(Value::String)
+        }
+        "export_clean_dxf" => {
+            let id = get("drawingId").as_str().unwrap_or("").to_string();
+            let mm = get("mmPerUnit").as_f64().unwrap_or(1.0);
+            let ex: Vec<String> = serde_json::from_value(get("exclude")).unwrap_or_default();
+            export_clean_dxf(&id, mm, &ex).map(Value::String)
+        }
         "export_dxf" | "export_csv" => {
             let r: ExportReq = serde_json::from_value(args).map_err(|e| e.to_string())?;
             Ok(Value::String(if cmd == "export_dxf" { export_dxf(&r) } else { export_csv(&r) }))
         }
         _ => Err(format!("Comando desconocido: {cmd}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn base64_roundtrip() {
+        for n in 0..20 {
+            let v: Vec<u8> = (0..n).map(|i| (i * 37 + 11) as u8).collect();
+            assert_eq!(super::unb64(&super::b64(&v)).unwrap(), v);
+        }
     }
 }
