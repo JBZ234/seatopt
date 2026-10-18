@@ -1,5 +1,6 @@
-import { applySuggestion, exportCsv, exportDxf, exportPdf, optimize, reassign, saveProject, suggest } from '../actions';
-import { Fold, Slider } from '../components/ui';
+import { applySuggestion, chooseAlternative, exportCsv, exportDxf, exportPdf, optimize, reassign, saveProject, suggest } from '../actions';
+import Thumb from '../components/Thumb';
+import { Fold, Num, Slider } from '../components/ui';
 import { requestedSeats, useApp, type ColorBy } from '../store';
 
 export default function OptimizeStep() {
@@ -20,19 +21,23 @@ export default function OptimizeStep() {
     <div className="step-body">
       <h2>Optimizar</h2>
       <p className="hint">
-        {req > 0 && <>Primero se ubican los {req} puestos con cantidad fija. </>}
-        {maxTypes.length > 0 ? <>Después se meten todos los que quepan de: {maxTypes.join(', ')}.</> : <>Busca la distribución que deja el mejor acceso con esas cantidades.</>}
+        {req > 0 && <>Primero se ubica{req > 1 ? 'n los' : ''} {req} puesto{req > 1 ? 's' : ''} con cantidad fija. </>}
+        {maxTypes.length > 0 ? <>{req > 0 ? 'Después se meten' : 'Se meten'} todos los que quepan de: {maxTypes.join(', ')}.</> : <>Busca la distribución que deja el mejor acceso con esas cantidades.</>}
       </p>
-      {hasPeople && (
-        <div className="sliders">
-          <Slider label="Agrupación por rol y cliente" hint="Cuánto pesa sentar a cada equipo junto." value={c.weights.grouping} onChange={(v) => st.updateConfig((cc) => { cc.weights.grouping = v; })} />
-        </div>
-      )}
       <label className="slider" title="Más tiempo = más combinaciones probadas.">
         <span className="slider-label">Tiempo de búsqueda</span>
         <input type="range" min={3} max={90} step={1} value={c.settings.timeLimit} onChange={(e) => st.updateConfig((cc) => { cc.settings.timeLimit = parseFloat(e.target.value); })} />
         <span className="slider-val">{c.settings.timeLimit} s</span>
       </label>
+      <div className="sliders">
+        <Slider label="Orden de las filas" hint="0: mete escritorios en cualquier hueco (más puestos). 10: solo filas ordenadas y escritorios apoyados en muros o espalda con espalda." value={c.weights.order} onChange={(v) => st.updateConfig((cc) => { cc.weights.order = v; })} />
+        <Slider label="Pegar a los muros" hint="Cuánto se prefiere que los escritorios de un lado queden con la espalda contra un muro." value={c.weights.wall ?? 5} onChange={(v) => st.updateConfig((cc) => { cc.weights.wall = v; })} />
+        {hasPeople && <Slider label="Agrupación por rol y cliente" hint="Cuánto pesa sentar a cada equipo junto." value={c.weights.grouping} onChange={(v) => st.updateConfig((cc) => { cc.weights.grouping = v; })} />}
+      </div>
+      <div className="field-row">
+        <span>Mostrar las mejores</span>
+        <Num value={c.settings.alternatives ?? 10} unit="soluciones" width={48} min={1} max={30} label="Cantidad de soluciones a mostrar" onChange={(v) => st.updateConfig((cc) => { cc.settings.alternatives = Math.max(1, Math.min(30, Math.round(v))); })} />
+      </div>
 
       <div className="row">
         {busy ? (
@@ -41,6 +46,21 @@ export default function OptimizeStep() {
           <button className="primary" disabled={!st.plan || !anyDemand} onClick={optimize}>{L ? 'Optimizar de nuevo' : 'Optimizar'}</button>
         )}
       </div>
+
+      {st.alternatives.length > 1 && st.plan && (
+        <section className="alts">
+          <h3>Mejores soluciones encontradas</h3>
+          <div className="alt-list">
+            {st.alternatives.map((a, i) => (
+              <button key={i} className={'alt' + (a === L ? ' cur' : '')} onClick={() => chooseAlternative(i)} aria-pressed={a === L}>
+                <Thumb plan={st.plan!} layout={a} config={c} />
+                <span className="alt-n">{a.kpis.seatsPlaced}<small> puestos</small></span>
+                <span className="alt-sub">#{i + 1} · {a.kpis.modulesPlaced} escritorios{a.kpis.unplacedByType.length ? ' · faltan fijos' : ''}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {k && (
         <section className="result">
@@ -94,25 +114,27 @@ export default function OptimizeStep() {
         </section>
       )}
 
-      {k && !st.suggestions && !busy && (
-        <button onClick={suggest}>{k.seatsPlaced < k.seatsRequested ? 'Sugerir qué medidas cambiar para que quepan' : '¿Qué medida me da más puestos?'}</button>
-      )}
-      {st.suggestions && (
-        <section className="suggestions">
-          <h3>Cambios que ganan puestos</h3>
-          {st.suggestions.length === 0 ? (
-            <p className="hint">Ningún cambio de una sola regla relajable gana puestos. Prueba quitar escritorios, cambiar de tipo o desbloquear alguna regla.</p>
+      {k && (
+        <section className="better">
+          <h3>Buscar mejores valores</h3>
+          <p className="hint">Prueba bajar cada medida de <b>Espacios</b> a su mínimo razonable (pasillos, separación entre filas, espacio de silla, columnas…) y cambiar de tipo de escritorio. Cada prueba es una optimización completa: el número que ves es el de una distribución real que puedes usar.</p>
+          {!busy && <button onClick={suggest}>{st.suggestions ? 'Buscar de nuevo' : 'Buscar mejores valores'}</button>}
+          {st.suggestions && (st.suggestions.length === 0 ? (
+            <p className="hint">Con estas medidas ningún cambio individual gana puestos: la distribución actual ya es la mejor que se encontró.</p>
           ) : (
-            <ul>
+            <ul className="better-list">
               {st.suggestions.map((s, i) => (
                 <li key={i}>
-                  <span className="gain">+{s.gainSeats}</span>
-                  <span className="desc">{s.description}</span>
-                  <button className="small" onClick={() => applySuggestion(s)}>Aplicar</button>
+                  {s.layout && st.plan && <Thumb plan={st.plan} layout={s.layout} config={c} width={96} height={64} />}
+                  <div className="better-body">
+                    <span className="gain">+{s.gainSeats}</span> <b>{s.seatsPlaced} puestos</b>
+                    <span className="desc">{s.description}</span>
+                  </div>
+                  <button className="small primary" onClick={() => applySuggestion(s)}>Usar</button>
                 </li>
               ))}
             </ul>
-          )}
+          ))}
         </section>
       )}
 

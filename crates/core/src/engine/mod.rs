@@ -5,3 +5,4 @@ pub mod decode;
 pub mod dial;
 pub mod eval;
 pub mod search;
+pub mod fill;

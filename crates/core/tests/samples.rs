@@ -138,3 +138,51 @@ fn lineas_simples_misma_area() {
     assert!((r2.area_m2 - r.area_m2).abs() / r.area_m2 < 0.05, "{} vs {}", r2.area_m2, r.area_m2);
     assert!(sp.walls.len() < 400);
 }
+
+#[test]
+fn separacion_propia_de_obstaculo_y_puerta() {
+    let path = format!("{}/../../samples/02_columnas_grilla.dxf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let sg = guess_scale(&d, &roles);
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let cfg = default_config();
+    let keep = |plan: &Plan| {
+        let ctx = seat_core::engine::ctx::Ctx::build(&Problem { plan: plan.clone(), config: cfg.clone() }).unwrap();
+        ctx.keep0.iter().filter(|&&b| b).count()
+    };
+    let base = keep(&r.plan);
+    let mut p2 = r.plan.clone();
+    let i = p2.obstacles.iter().position(|o| o.kind == ObstacleKind::Column && o.poly.len() == 4).expect("columna rectangular");
+    p2.obstacles[i].clear = vec![1500.0, 0.0, 0.0, 0.0];
+    assert!(keep(&p2) > base, "la separación por lado agranda el despeje");
+    let mut p3 = r.plan.clone();
+    p3.obstacles[i].clear = vec![1000.0];
+    assert!(keep(&p3) > base);
+    let mut p4 = r.plan.clone();
+    if let Some(dr) = p4.doors.iter_mut().find(|d| d.kind == DoorKind::Main) {
+        dr.clear_depth = Some(4000.0);
+        dr.clear_width = Some(3000.0);
+    }
+    assert!(keep(&p4) > base, "el despeje propio de la puerta se aplica");
+}
+
+#[test]
+fn relleno_de_huecos_y_alternativas() {
+    let path = format!("{}/../../samples/03_planta_L_oficinas.dxf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let sg = guess_scale(&d, &roles);
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let mut cfg = default_config();
+    cfg.demand = vec![
+        Demand { type_id: "isla_flex".into(), quantity: 0, max: true },
+        Demand { type_id: "recto_120".into(), quantity: 0, max: true },
+    ];
+    cfg.settings.time_limit = 6.0;
+    cfg.settings.alternatives = 5;
+    let l = search::optimize(&Problem { plan: r.plan, config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap();
+    assert!(l.kpis.seats_placed >= 84, "puestos: {}", l.kpis.seats_placed);
+    assert!(!l.alternatives.is_empty() && l.alternatives.len() <= 5);
+    assert!(!l.corridor_lines.is_empty(), "pasillo con ejes para dibujar");
+}

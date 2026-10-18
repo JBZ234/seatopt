@@ -29,6 +29,7 @@ fn main() {
     println!("{:?} it={}: {}/{} puestos (máx {}), {} módulos, orient {}, luz {:.0}%, recorrido prom {:.1} m máx {:.1} m, reserva {}, m2/p {:.1}, hard {}, score {:.0}",
         t.elapsed(), 0, k.seats_placed, k.seats_requested, k.max_seats, k.modules_placed, k.orientations, k.daylight_pct, k.avg_travel_exit_m, k.max_travel_exit_m, k.reserve_seats, k.m2_per_seat, k.hard_violations, k.score);
     for v in &layout.violations { println!("  ! [{}] {}", v.rule_id, v.message); }
+    println!("  alternativas: {:?}", layout.alternatives.iter().map(|l| l.kpis.seats_placed).collect::<Vec<_>>());
     println!("  sin ubicar: {:?}", k.unplaced_by_type);
     let svg = render_svg(&plan, Some(&layout), Some(&cfg), &RenderOpts { background: if path.ends_with(".pdf") { Some((&d, sg.mm_per_unit)) } else { None }, title: format!("{} — {}/{} puestos", path, k.seats_placed, k.seats_requested), ..Default::default() });
     std::fs::write(out, svg).unwrap();

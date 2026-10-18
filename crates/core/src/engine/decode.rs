@@ -122,12 +122,19 @@ impl Rng {
     }
 }
 
+/// Espacio libre del lado de la silla: el del tipo o la regla E1 (nunca menos que la silla).
+pub fn chair_clear(ctx: &Ctx, t: &DeskType) -> f64 {
+    t.clear_chair.unwrap_or(ctx.p.e1_wall).max(ctx.p.chair)
+}
+
 /// Geometría de fila para un tipo.
 struct RowSpec {
     d_cells: usize,
     chair_cells: usize,
     wall_cells: usize,
     sep_cells: usize,
+    /// Separación propia detrás del escritorio (lado sin sillas).
+    back_cells: usize,
 }
 
 fn row_spec(ctx: &Ctx, t: &DeskType) -> RowSpec {
@@ -137,8 +144,9 @@ fn row_spec(ctx: &Ctx, t: &DeskType) -> RowSpec {
     RowSpec {
         d_cells: (dep / r).ceil() as usize,
         chair_cells: (((ctx.p.chair - notch).max(0.0)) / r).ceil() as usize,
-        wall_cells: (((ctx.p.e1_wall - notch).max(0.0)) / r).ceil() as usize,
+        wall_cells: (((chair_clear(ctx, t) - notch).max(0.0)) / r).ceil() as usize,
         sep_cells: (ctx.p.e8_sep / r).ceil() as usize,
+        back_cells: (t.clear_back.max(0.0) / r).ceil() as usize,
     }
 }
 
@@ -152,6 +160,7 @@ fn column_ok(g: &RotGrid, z: u16, x0: usize, x1: usize, ya: isize, yb: isize, be
     let ch = spec.chair_cells as isize;
     let wl = spec.wall_cells as isize;
     let sp = spec.sep_cells as isize;
+    let bk = spec.back_cells as isize;
     // run "ok" (libre y de la zona z) de al menos `len` celdas empezando en y
     let ok_run = |x: usize, y: isize, len: isize| -> bool {
         if len <= 0 {
@@ -180,15 +189,17 @@ fn column_ok(g: &RotGrid, z: u16, x0: usize, x1: usize, ya: isize, yb: isize, be
         if ok {
             if below {
                 ok = nohard_run(x, ya - wl, wl - ch);
-            } else if !touch {
-                ok = nohard_run(x, ya - sp, sp);
+            } else if !touch || bk > 0 {
+                let s = if touch { bk } else { sp.max(bk) };
+                ok = nohard_run(x, ya - s, s);
             }
         }
         if ok {
             if above {
                 ok = nohard_run(x, yb + ch, wl - ch);
-            } else if !touch {
-                ok = nohard_run(x, yb, sp);
+            } else if !touch || bk > 0 {
+                let s = if touch { bk } else { sp.max(bk) };
+                ok = nohard_run(x, yb, s);
             }
         }
         out.push(ok);
@@ -200,7 +211,13 @@ fn column_ok(g: &RotGrid, z: u16, x0: usize, x1: usize, ya: isize, yb: isize, be
 fn fill_runs(ctx: &Ctx, t: &DeskType, runs: &[(f64, f64)], align: u8, anchor: f64, mut rem: u32, phantom: bool, out: &mut Vec<(f64, u32)>) -> u32 {
     out.clear();
     let p = &ctx.p;
-    let cut = p.e3_cut;
+    // separación lateral propia del tipo: entre escritorios sueltos y en los extremos de cada bloque
+    let lat = t.clear_left.max(t.clear_right).max(0.0);
+    let flex_t = t.flexible && t.shape == DeskShape::Straight;
+    let cut = if flex_t { p.e3_cut.max(lat) } else { p.e3_cut };
+    let gap = if flex_t { 0.0 } else { lat };
+    let shrunk: Vec<(f64, f64)> = runs.iter().map(|&(a, b)| (a + t.clear_left.max(0.0), b - t.clear_right.max(0.0))).filter(|r| r.1 > r.0).collect();
+    let runs = &shrunk[..];
     let sides = if t.shape == DeskShape::L { 1 } else { t.sides.max(1) as u32 };
     let eps = 1e-6;
     let mut used = 0u32;
@@ -232,7 +249,7 @@ fn fill_runs(ctx: &Ctx, t: &DeskType, runs: &[(f64, f64)], align: u8, anchor: f6
             let k = t.per_side.max(1);
             let l = t.module_length(k);
             let per_block = if t.shape == DeskShape::L { p.e3_max.max(1) } else { (p.e3_max / k).max(1) };
-            let mut n = ((len + eps) / l).floor() as u32;
+            let mut n = ((len + gap + eps) / (l + gap)).floor() as u32;
             n = n.min(per_block);
             if !phantom {
                 n = n.min(rem);
@@ -289,7 +306,7 @@ fn fill_runs(ctx: &Ctx, t: &DeskType, runs: &[(f64, f64)], align: u8, anchor: f6
                             break;
                         }
                         out.push((x, k));
-                        x += l;
+                        x += l + gap;
                         used += u;
                         rem = rem.saturating_sub(u);
                         if !phantom && rem == 0 {
@@ -326,7 +343,7 @@ fn fill_runs(ctx: &Ctx, t: &DeskType, runs: &[(f64, f64)], align: u8, anchor: f6
                         break;
                     }
                     placed.push((x, k));
-                    x += l;
+                    x += l + gap;
                     any = true;
                     let u = units(k);
                     used += u;
@@ -341,6 +358,7 @@ fn fill_runs(ctx: &Ctx, t: &DeskType, runs: &[(f64, f64)], align: u8, anchor: f6
                 x += cut;
             }
             let total = placed.last().map(|&(x, k)| x + mod_len(k)).unwrap_or(0.0);
+            let _ = gap;
             let shift = match align {
                 2 => len - total,
                 3 => (len - total) * 0.5,
@@ -354,17 +372,15 @@ fn fill_runs(ctx: &Ctx, t: &DeskType, runs: &[(f64, f64)], align: u8, anchor: f6
     used
 }
 
-fn row_gap(ctx: &Ctx, prev_far_seated: bool, near_seated: bool) -> f64 {
+fn row_gap(ctx: &Ctx, t: &DeskType, prev_far_seated: bool, near_seated: bool) -> f64 {
     let p = &ctx.p;
+    let cc = t.clear_chair.unwrap_or(0.0);
     match (prev_far_seated, near_seated) {
-        (true, true) => p.e2_ss,
-        (true, false) | (false, true) => p.e2_se,
+        (true, true) => p.e2_ss.max(cc),
+        (true, false) | (false, true) => p.e2_se.max(cc),
         (false, false) => {
-            if p.e2_backs {
-                0.0
-            } else {
-                p.e2_se
-            }
+            let b = if p.e2_backs { 0.0 } else { p.e2_se };
+            b.max(t.clear_back.max(0.0))
         }
     }
 }
@@ -439,7 +455,7 @@ pub fn decode(ctx: &Ctx, g: &Genome, with_reserve: bool) -> Decoded {
                 let far_seated = two || !near_seated;
                 let near_seated_eff = two || near_seated;
                 let gap = match prev_far {
-                    Some((_, pf)) => (row_gap(ctx, pf, near_seated_eff) / res).ceil() as isize,
+                    Some((_, pf)) => (row_gap(ctx, t, pf, near_seated_eff) / res).ceil() as isize,
                     None => 0,
                 };
                 let start = match prev_far {

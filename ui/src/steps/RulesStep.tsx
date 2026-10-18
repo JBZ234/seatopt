@@ -121,7 +121,7 @@ export default function RulesStep() {
       <p className="hint">Las medidas que necesita la gente para caminar y sentarse. Siempre se cumple que todos los puestos se alcancen desde la entrada y que ninguna puerta quede bloqueada.</p>
 
       <div className="row wrap">
-        <button className="primary" disabled={!!st.job || !st.plan} onClick={suggest}>Calcular cuántos puestos gana cada medida</button>
+        <button className="primary" disabled={!!st.job || !st.plan} onClick={suggest}>Buscar mejores valores</button>
       </div>
       {st.suggestions && st.suggestions.length === 0 && <p className="hint">Con estas medidas ningún ajuste individual gana puestos.</p>}
 
@@ -175,7 +175,7 @@ export default function RulesStep() {
 
       <div className="next">
         <button className="ghost" onClick={async () => { const d = await loadDefaults(); st.updateConfig((cc) => { cc.rules = d.rules; }); st.set({ suggestions: null }); }}>Restaurar medidas</button>
-        <button className="primary" onClick={() => st.set({ step: 4 })}>Ir a optimizar</button>
+        <button className="primary" onClick={() => st.set({ step: 3, tool: 'select' })}>Continuar: organización</button>
       </div>
     </div>
   );

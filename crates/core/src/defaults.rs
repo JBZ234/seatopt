@@ -18,22 +18,26 @@ pub fn default_catalog() -> Vec<DeskType> {
         max_per_side: per,
         return_length: 0.0,
         return_depth: 0.0,
+        clear_chair: None,
+        clear_back: 0.0,
+        clear_left: 0.0,
+        clear_right: 0.0,
     };
-    let mut isla = st("isla_flex", "Isla cara a cara (flexible)", "#2f7d6d", 1200.0, 600.0, 2, 4);
+    let mut isla = st("isla_flex", "Isla cara a cara (flexible)", "#5e9c7f", 1200.0, 600.0, 2, 4);
     isla.flexible = true;
     isla.min_per_side = 2;
     isla.max_per_side = 4;
-    let mut lineal = st("lineal_flex", "Bench lineal un lado (flexible)", "#8a6d3b", 1200.0, 600.0, 1, 4);
+    let mut lineal = st("lineal_flex", "Bench lineal un lado (flexible)", "#c49a4e", 1200.0, 600.0, 1, 4);
     lineal.flexible = true;
     lineal.min_per_side = 2;
     lineal.max_per_side = 6;
     vec![
-        st("recto_120", "Recto individual 120×60", "#4a6fa5", 1200.0, 600.0, 1, 1),
-        st("recto_140", "Recto individual 140×70", "#6b5ca5", 1400.0, 700.0, 1, 1),
+        st("recto_120", "Recto individual 120×60", "#5b80a8", 1200.0, 600.0, 1, 1),
+        st("recto_140", "Recto individual 140×70", "#8a74ad", 1400.0, 700.0, 1, 1),
         DeskType {
             id: "l_150".into(),
             name: "Escritorio en L 150×150".into(),
-            color: "#b5533c".into(),
+            color: "#c4704f".into(),
             shape: DeskShape::L,
             seat_width: 1500.0,
             depth: 600.0,
@@ -44,9 +48,13 @@ pub fn default_catalog() -> Vec<DeskType> {
             max_per_side: 1,
             return_length: 1500.0,
             return_depth: 600.0,
+            clear_chair: None,
+            clear_back: 0.0,
+            clear_left: 0.0,
+            clear_right: 0.0,
         },
-        st("pareja", "Pareja cara a cara 2×(120×60)", "#3c8dbc", 1200.0, 600.0, 2, 1),
-        st("isla_8", "Isla 2×4 (8 puestos)", "#1f5f8b", 1200.0, 600.0, 2, 4),
+        st("pareja", "Pareja cara a cara 2×(120×60)", "#4b9ea5", 1200.0, 600.0, 2, 1),
+        st("isla_8", "Isla 2×4 (8 puestos)", "#3f6788", 1200.0, 600.0, 2, 4),
         isla,
         lineal,
     ]

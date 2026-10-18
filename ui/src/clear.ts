@@ -1,0 +1,155 @@
+// Separaciones (despejes) de cada elemento, para verlas en dorado y editarlas en el plano.
+import type { Config, DeskType, Door, Module, Obstacle, Plan, Pt } from './types';
+
+export type ClearKey = 'chair' | 'back' | 'left' | 'right' | 'depth' | 'width' | number;
+export interface ClearLabel { pos: Pt; value: number; key: ClearKey; title: string; prefix?: string }
+export interface ClearInfo { zones: Pt[][]; labels: ClearLabel[] }
+
+const add = (a: Pt, b: Pt): Pt => ({ x: a.x + b.x, y: a.y + b.y });
+const sub = (a: Pt, b: Pt): Pt => ({ x: a.x - b.x, y: a.y - b.y });
+const mul = (a: Pt, k: number): Pt => ({ x: a.x * k, y: a.y * k });
+const norm = (a: Pt): Pt => { const l = Math.hypot(a.x, a.y) || 1; return { x: a.x / l, y: a.y / l }; };
+
+function pip(p: Pt, poly: Pt[]) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+const inRegion = (p: Pt, rings: Pt[][]) => rings.reduce((c, r) => (pip(p, r) ? !c : c), false);
+const area = (poly: Pt[]) => poly.reduce((s, p, i) => { const q = poly[(i + 1) % poly.length]; return s + p.x * q.y - q.x * p.y; }, 0) / 2;
+
+/** Valor de una sub-regla si la regla y la sub-regla están activas. */
+export function ruleVal(c: Config, rid: string, iid: string): number | null {
+  const r = c.rules.find((x) => x.id === rid);
+  if (!r || !r.enabled) return null;
+  const it = r.items.find((i) => i.id === iid);
+  if (!it || !it.enabled) return null;
+  return it.value;
+}
+const ruleOn = (c: Config, rid: string, iid?: string) => {
+  const r = c.rules.find((x) => x.id === rid);
+  if (!r || !r.enabled) return false;
+  if (!iid) return true;
+  return !!r.items.find((i) => i.id === iid)?.enabled;
+};
+
+/** Separación general según el tipo de obstáculo. */
+export function obstacleDefault(c: Config, o: Obstacle): number {
+  if (o.kind === 'column') return ruleVal(c, 'O1', 'dist') ?? 0;
+  if (o.kind === 'fixedOffice') return ruleVal(c, 'O3', 'dist') ?? 0;
+  if (o.kind === 'restricted') return ruleVal(c, 'O2', 'dist') ?? 0;
+  return 0;
+}
+
+/** Separaciones por lado de un obstáculo (las que valen ahora, propias o generales). */
+export function obstacleClears(c: Config, o: Obstacle): number[] {
+  const n = o.poly.length;
+  const def = obstacleDefault(c, o);
+  if (o.clear && o.clear.length === n) return o.clear;
+  const v = o.clear && o.clear.length ? o.clear[0] : def;
+  return Array(n).fill(v);
+}
+
+export function obstacleInfo(c: Config, o: Obstacle): ClearInfo {
+  const n = o.poly.length;
+  const d = obstacleClears(c, o);
+  const ccw = area(o.poly) > 0;
+  const zones: Pt[][] = [];
+  const labels: ClearLabel[] = [];
+  const perSide = n === 4;
+  for (let i = 0; i < n; i++) {
+    const a = o.poly[i], b = o.poly[(i + 1) % n];
+    const u = norm(sub(b, a));
+    const out = ccw ? { x: u.y, y: -u.x } : { x: -u.y, y: u.x };
+    const di = Math.max(0, d[i]);
+    const dp = Math.max(0, d[(i + n - 1) % n]), dn = Math.max(0, d[(i + 1) % n]);
+    if (di > 0) {
+      const a2 = sub(a, mul(u, dp)), b2 = add(b, mul(u, dn));
+      zones.push([a2, b2, add(b2, mul(out, di)), add(a2, mul(out, di))]);
+    }
+    if (perSide || i === 0) {
+      const mid = mul(add(a, b), 0.5);
+      labels.push({ pos: add(mid, mul(out, Math.max(di, 180) * 0.5 + (di > 0 ? 0 : 160))), value: di, key: perSide ? i : 0, title: perSide ? 'Separación de este lado' : 'Separación alrededor' });
+    }
+  }
+  return { zones, labels };
+}
+
+/** Despeje frente a una puerta: fondo y ancho (propios o de las reglas C4 / C3). */
+export function doorClear(c: Config, plan: Plan, d: Door) {
+  const w = Math.max(300, Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y));
+  const u = norm(sub(d.b, d.a));
+  const nrm = { x: -u.y, y: u.x };
+  const mid = mul(add(d.a, d.b), 0.5);
+  const inward = inRegion(add(mid, mul(nrm, 300)), plan.region) ? nrm : mul(nrm, -1);
+  const applies = d.kind === 'main' || (d.kind === 'exit' && ruleOn(c, 'C4', 'salidas')) || (d.kind === 'office' && ruleOn(c, 'C4', 'oficinas'));
+  let depth = 0;
+  if (ruleOn(c, 'C4') && applies) depth = (ruleOn(c, 'C4', 'barrido') ? w : 0) + (ruleVal(c, 'C4', 'extra') ?? 0);
+  let width = w + 400;
+  if (d.clearDepth != null) depth = d.clearDepth;
+  if (d.clearWidth != null) width = d.clearWidth;
+  return { depth, width, mid, u, inward, w };
+}
+
+export function doorInfo(c: Config, plan: Plan, d: Door): ClearInfo {
+  const { depth, width, mid, u, inward } = doorClear(c, plan, d);
+  const h = width / 2;
+  const zone = [sub(mid, mul(u, h)), add(mid, mul(u, h)), add(add(mid, mul(u, h)), mul(inward, depth)), add(sub(mid, mul(u, h)), mul(inward, depth))];
+  return {
+    zones: depth > 0 ? [zone] : [],
+    labels: [
+      { pos: add(mid, mul(inward, Math.max(depth, 400) * 0.5)), value: depth, key: 'depth', title: 'Fondo libre frente a la puerta', prefix: 'fondo' },
+      { pos: add(add(mid, mul(inward, Math.max(depth, 400) + 220)), mul(u, 0)), value: width, key: 'width', title: 'Ancho libre frente a la puerta', prefix: 'ancho' },
+    ],
+  };
+}
+
+/** Separación del lado de la silla de un tipo (la propia o la regla E1). */
+export function chairClear(c: Config, t: DeskType): number {
+  const e1 = ruleVal(c, 'E1', 'muro') ?? 0;
+  return Math.max(t.clearChair ?? e1, 0);
+}
+
+export function moduleInfo(c: Config, m: Module, t: DeskType): ClearInfo {
+  const a = (m.angle * Math.PI) / 180;
+  const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
+  const hl = m.length / 2, hd = m.depth / 2;
+  const L = (p: number, q: number) => add(m.center, add(mul(u, p), mul(v, q)));
+  const rect = (a0: number, a1: number, b0: number, b1: number) => [L(a0, b0), L(a1, b0), L(a1, b1), L(a0, b1)];
+  const two = t.shape === 'straight' && t.sides >= 2;
+  const notch = t.shape === 'l' ? Math.max(0, m.depth - t.depth) : 0;
+  const cc = Math.max(0, chairClear(c, t) - notch);
+  const sgn = m.seatsUp ? 1 : -1;
+  const zones: Pt[][] = [];
+  const labels: ClearLabel[] = [];
+  const seatSides = two ? [1, -1] : [sgn];
+  for (const s of seatSides) {
+    if (cc > 0) zones.push(s > 0 ? rect(-hl, hl, hd, hd + cc) : rect(-hl, hl, -hd - cc, -hd));
+  }
+  labels.push({ pos: L(0, sgn * (hd + Math.max(cc, 300) / 2)), value: chairClear(c, t), key: 'chair', title: 'Espacio libre del lado de la silla', prefix: 'silla' });
+  if (!two) {
+    const bk = Math.max(0, t.clearBack ?? 0);
+    if (bk > 0) zones.push(sgn > 0 ? rect(-hl, hl, -hd - bk, -hd) : rect(-hl, hl, hd, hd + bk));
+    labels.push({ pos: L(0, -sgn * (hd + Math.max(bk, 300) / 2)), value: bk, key: 'back', title: 'Separación detrás del escritorio', prefix: 'atrás' });
+  }
+  const cl = Math.max(0, t.clearLeft ?? 0), cr = Math.max(0, t.clearRight ?? 0);
+  if (cl > 0) zones.push(rect(-hl - cl, -hl, -hd, hd));
+  if (cr > 0) zones.push(rect(hl, hl + cr, -hd, hd));
+  labels.push({ pos: L(-hl - Math.max(cl, 300) / 2, 0), value: cl, key: 'left', title: 'Separación a la izquierda', prefix: 'izq.' });
+  labels.push({ pos: L(hl + Math.max(cr, 300) / 2, 0), value: cr, key: 'right', title: 'Separación a la derecha', prefix: 'der.' });
+  return { zones, labels };
+}
+
+/** Cuerpo de un escritorio colocado a mano (vista previa). */
+export function deskBody(t: DeskType, center: Pt, angleDeg: number) {
+  const per = t.flexible ? Math.max(t.minPerSide, Math.min(t.maxPerSide, t.perSide)) : t.perSide;
+  const length = t.shape === 'l' ? t.seatWidth : t.seatWidth * per;
+  const depth = t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth * t.sides;
+  const a = (angleDeg * Math.PI) / 180;
+  const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
+  const L = (p: number, q: number) => add(center, add(mul(u, p), mul(v, q)));
+  return { length, depth, per, body: [L(-length / 2, -depth / 2), L(length / 2, -depth / 2), L(length / 2, depth / 2), L(-length / 2, depth / 2)], u, v };
+}

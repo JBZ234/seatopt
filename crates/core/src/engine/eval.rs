@@ -537,6 +537,34 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     soft += w.reserve * ((target - ratio).max(0.0) / target) * 1.5;
     soft += density_pen * 10.0;
     soft += custom_pen;
+    // escritorios de un lado con la espalda contra un muro
+    if w.wall > 0.0 {
+        let (mut on, mut tot) = (0usize, 0usize);
+        for (mi, m) in mods.iter().enumerate() {
+            if m.pinned || !ev.module_ok.get(mi).copied().unwrap_or(false) {
+                continue;
+            }
+            let t = &ctx.catalog[m.pm.t];
+            if t.is_two_sided() {
+                continue;
+            }
+            tot += 1;
+            let u = Pt::from_angle(m.angle.to_radians());
+            let v = u.perp();
+            let back = if m.pm.seats_up { -1.0 } else { 1.0 };
+            let off = m.pm.dep * 0.5 + t.clear_back.max(0.0) + 160.0;
+            let hit = [-0.35, 0.0, 0.35].iter().filter(|&&a| {
+                let q = m.center + u * (a * m.pm.len) + v * (back * off);
+                !ctx.f.cell_idx(q).map(|i| ctx.free[i]).unwrap_or(false)
+            }).count();
+            if hit >= 2 {
+                on += 1;
+            }
+        }
+        if tot > 0 {
+            soft += w.wall * (1.0 - on as f64 / tot as f64) * 1.0;
+        }
+    }
     ev.soft = soft * 10.0;
     // a igual cantidad de puestos, preferir menos módulos (islas grandes en vez de muchos sueltos)
     if ctx.is_max.iter().any(|&m| m) {

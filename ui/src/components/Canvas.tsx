@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { placeDesk } from '../actions';
+import { deskBody, doorInfo, moduleInfo, obstacleClears, obstacleInfo, type ClearInfo, type ClearKey } from '../clear';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
 import { emptySel, selCount, useApp, uid } from '../store';
 import type { Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
@@ -61,6 +63,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const [moving, setMoving] = useState<{ a: Pt; b: Pt } | null>(null);
   const [cursor, setCursor] = useState<Pt | null>(null);
   const panRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
+  // campo de edición de una separación (como los campos dinámicos de AutoCAD)
+  const [editing, setEditing] = useState<{ key: ClearKey; x: number; y: number; text: string } | null>(null);
 
   // tamaño
   useEffect(() => {
@@ -122,9 +126,18 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     return best;
   };
+  const gridSnap = (w: Pt): Pt => {
+    const g = st.gridSize;
+    return { x: Math.round(w.x / g) * g, y: Math.round(w.y / g) * g };
+  };
   const worldAt = (sx: number, sy: number): Pt => {
     const w = toWorld(sx, sy);
-    return SNAP_TOOLS.includes(tool) ? snapPt(w) ?? w : w;
+    if (SNAP_TOOLS.includes(tool)) {
+      const v = snapPt(w);
+      if (v) return v;
+    }
+    if (st.snapGrid && (SNAP_TOOLS.includes(tool) || tool === 'placeDesk')) return gridSnap(w);
+    return w;
   };
   // contorno dibujado a mano
   const [outline, setOutline] = useState<Pt[]>([]);
@@ -181,15 +194,18 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       <>
         {plan.building && plan.building.length > 2 && <path className="building" d={ringD(plan.building)} />}
         {plan.rooms?.map((r, i) => <path key={'r' + i} className="room" d={ringD(r.poly)} />)}
+        <clipPath id="region-clip"><path d={plan.region.map(ringD).join('')} clipRule="evenodd" /></clipPath>
         <path className="region" d={plan.region.map(ringD).join('')} fillRule="evenodd" />
         {showKeepouts && layout?.keepouts.map((k, i) => <path key={'k' + i} className="keepout" d={ringD(k)} />)}
-        {layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />)}
+        {layout?.corridorLines && layout.corridorLines.length > 0 && layout.corridorWidth
+          ? <path className="corridor-line" clipPath="url(#region-clip)" d={layout.corridorLines.map((l) => l.map((p, j) => `${j ? 'L' : 'M'}${p.x.toFixed(0)} ${p.y.toFixed(0)}`).join('')).join('')} strokeWidth={layout.corridorWidth} />
+          : layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />)}
         {plan.obstacles.map((o) => <path key={o.id} className="obstacle" d={ringD(o.poly)} fill={OBS_FILL[o.kind]} />)}
         {plan.windows.map((w, i) => <line key={'w' + i} className="window" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
         {plan.doors.map((d) => <line key={d.id} className={'door ' + d.kind} x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} stroke={DOOR_COLOR[d.kind]} />)}
       </>
     );
-  }, [plan, layout?.keepouts, layout?.corridors, showKeepouts]);
+  }, [plan, layout?.keepouts, layout?.corridors, layout?.corridorLines, layout?.corridorWidth, showKeepouts]);
 
   const layoutEls = useMemo(() => {
     if (!layout) return null;
@@ -247,6 +263,85 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const sx = (p: Pt) => p.x * view.k + view.tx;
   const sy = (p: Pt) => -p.y * view.k + view.ty;
   const showNums = view.k * 1000 > 18;
+
+  // ------------------------------------------------ cuadrícula (se adapta al zoom)
+  const gridEls = useMemo(() => {
+    if (!st.gridOn) return null;
+    let g = st.gridSize;
+    while (g * view.k < 7) g *= 2;
+    const major = g * 5;
+    const x0 = -view.tx / view.k, x1 = (size.w - view.tx) / view.k;
+    const y1 = view.ty / view.k, y0 = -(size.h - view.ty) / view.k;
+    let minor = '', maj = '';
+    for (let x = Math.floor(x0 / g) * g; x <= x1; x += g) {
+      const d = `M${x} ${y0}L${x} ${y1}`;
+      if (Math.abs(x / major - Math.round(x / major)) < 1e-6) maj += d; else minor += d;
+    }
+    for (let y = Math.floor(y0 / g) * g; y <= y1; y += g) {
+      const d = `M${x0} ${y}L${x1} ${y}`;
+      if (Math.abs(y / major - Math.round(y / major)) < 1e-6) maj += d; else minor += d;
+    }
+    return <g className="grid"><path className="minor" d={minor} /><path className="major" d={maj} /></g>;
+  }, [st.gridOn, st.gridSize, view, size]);
+
+  // ------------------------------------------------ separaciones del elemento seleccionado (dorado, editables)
+  const one = selCount(sel) === 1;
+  const clr: ClearInfo | null = useMemo(() => {
+    if (!one || !config || !plan) return null;
+    if (sel.obstacles.length) {
+      const o = plan.obstacles.find((x) => x.id === sel.obstacles[0]);
+      return o ? obstacleInfo(config, o) : null;
+    }
+    if (sel.doors.length) {
+      const d = plan.doors.find((x) => x.id === sel.doors[0]);
+      return d && d.kind !== 'ignore' ? doorInfo(config, plan, d) : null;
+    }
+    if (sel.modules.length) {
+      const m = layout?.modules.find((x) => x.id === sel.modules[0]);
+      const t = m && config.catalog.find((x) => x.id === m.typeId);
+      return m && t ? moduleInfo(config, m, t) : null;
+    }
+    return null;
+  }, [one, sel, plan, layout, config]);
+
+  const commitClear = (key: ClearKey, mm: number) => {
+    if (!config || !plan || !isFinite(mm) || mm < 0) return;
+    if (sel.obstacles.length) {
+      const id = sel.obstacles[0];
+      st.updatePlan((p) => {
+        const o = p.obstacles.find((x) => x.id === id);
+        if (!o) return;
+        if (o.poly.length === 4 && typeof key === 'number') {
+          const cur = obstacleClears(config, o);
+          cur[key] = mm;
+          o.clear = cur;
+        } else {
+          o.clear = [mm];
+        }
+      });
+    } else if (sel.doors.length) {
+      const id = sel.doors[0];
+      st.updatePlan((p) => {
+        const d = p.doors.find((x) => x.id === id);
+        if (!d) return;
+        if (key === 'depth') d.clearDepth = mm;
+        if (key === 'width') d.clearWidth = mm;
+      });
+    } else if (sel.modules.length) {
+      const m = layout?.modules.find((x) => x.id === sel.modules[0]);
+      if (!m) return;
+      st.updateConfig((c) => {
+        const t = c.catalog.find((x) => x.id === m.typeId);
+        if (!t) return;
+        if (key === 'chair') t.clearChair = mm;
+        if (key === 'back') t.clearBack = mm;
+        if (key === 'left') t.clearLeft = mm;
+        if (key === 'right') t.clearRight = mm;
+      });
+      st.say('Separación del tipo de escritorio cambiada: se aplica a todos los de ese tipo en la próxima optimización.');
+    }
+  };
+  useEffect(() => { setEditing(null); }, [sel]);
 
   // ------------------------------------------------ interacción
   const nearestDoor = (p: Pt): Door | null => {
@@ -355,7 +450,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         if (selCount(hit)) st.set({ selection: hit });
         return;
       }
-      moveSelection(dx, dy);
+      if (st.snapGrid) {
+        const g = st.gridSize;
+        moveSelection(Math.round(dx / g) * g, Math.round(dy / g) * g);
+      } else moveSelection(dx, dy);
       return;
     }
     if (drag) {
@@ -395,6 +493,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       }
       case 'seed':
         onSeed(w);
+        break;
+      case 'placeDesk':
+        placeDesk(w);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
         const d = nearestDoor(w);
@@ -470,7 +571,23 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k} ${-view.k})`}>
           {showBackground && <g className="bg">{bgEls}</g>}
           {planEls}
+          {gridEls}
           {layoutEls}
+          {clr?.zones.map((z, i) => <path key={'cz' + i} className="clear-zone" d={ringD(z)} />)}
+          {tool === 'placeDesk' && cursor && (() => {
+            const t = config?.catalog.find((x) => x.id === st.placeType);
+            if (!t) return null;
+            const g = deskBody(t, cursor, st.placeAngle);
+            const two = t.shape === 'straight' && t.sides >= 2;
+            const sgn = st.placeUp ? 1 : -1;
+            const chairAt = (s: number) => ({ x: cursor.x + g.v.x * s * (g.depth / 2 + 260), y: cursor.y + g.v.y * s * (g.depth / 2 + 260) });
+            return (
+              <g className="ghost">
+                <path d={ringD(g.body)} fill={t.color} />
+                {(two ? [1, -1] : [sgn]).map((s) => { const c = chairAt(s); return <circle key={s} cx={c.x} cy={c.y} r={220} />; })}
+              </g>
+            );
+          })()}
           {moveOff ? <g transform={`translate(${moveOff.x} ${moveOff.y})`} opacity={0.7}>{selEls}</g> : selEls}
           {drag && (tool === 'window'
             ? <line className="draft" x1={drag.a.x} y1={drag.a.y} x2={drag.b.x} y2={drag.b.y} />
@@ -493,6 +610,14 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             return <text key={o.id} x={sx(c)} y={sy(c)} className="ob-label">{o.label}</text>;
           })}
           {showNums && layout?.seats.map((s) => <text key={s.id} x={sx(s.pos)} y={sy(s.pos) + 3.5} className="seat-num">{s.number}</text>)}
+          {clr?.labels.map((l, i) => (
+            <g key={'cl' + i} className="clear-label" onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setEditing({ key: l.key, x: sx(l.pos), y: sy(l.pos), text: (l.value / 1000).toFixed(2) }); }}>
+              <title>{l.title} · clic para cambiar</title>
+              <rect x={sx(l.pos) - (l.prefix ? 33 : 21)} y={sy(l.pos) - 9} width={l.prefix ? 66 : 42} height={18} rx={4} />
+              <text x={sx(l.pos)} y={sy(l.pos) + 4}>{l.prefix ? `${l.prefix} ` : ''}{(l.value / 1000).toFixed(2)}</text>
+            </g>
+          ))}
           {layout?.seats.filter(flagged).map((s) => <circle key={'f' + s.id} cx={sx(s.pos)} cy={sy(s.pos)} r={4} className="flag" />)}
           {layout?.violations.filter((v) => v.at).map((v, i) => <circle key={'v' + i} cx={sx(v.at!)} cy={sy(v.at!)} r={14} className={'viol' + (v.hard ? ' hard' : '')} />)}
         </g>
@@ -528,6 +653,24 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <button title="Encuadrar todo el plano" onClick={fit}>
           <svg viewBox="0 0 20 20" aria-hidden><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg><span>Encuadrar</span>
         </button>
+      </div>
+      {editing && (
+        <input className="clear-edit" autoFocus style={{ left: editing.x - 32, top: editing.y - 13 }} value={editing.text} aria-label="Separación en metros"
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { commitClear(editing.key, parseFloat(editing.text.replace(',', '.')) * 1000); setEditing(null); }
+            if (e.key === 'Escape') setEditing(null);
+            e.stopPropagation();
+          }}
+          onBlur={() => { commitClear(editing.key, parseFloat(editing.text.replace(',', '.')) * 1000); setEditing(null); }} />
+      )}
+      <div className="grid-ctl" role="group" aria-label="Cuadrícula">
+        <label><input type="checkbox" checked={st.gridOn} onChange={(e) => st.set({ gridOn: e.target.checked })} /> Cuadrícula</label>
+        <label title="Los puntos que dibujas y los escritorios que colocas caen en la cuadrícula"><input type="checkbox" checked={st.snapGrid} onChange={(e) => st.set({ snapGrid: e.target.checked })} /> Snap</label>
+        <select value={st.gridSize} aria-label="Tamaño de la cuadrícula" onChange={(e) => st.set({ gridSize: parseFloat(e.target.value) })}>
+          {[100, 250, 500, 1000].map((g) => <option key={g} value={g}>{(g / 1000).toFixed(g < 1000 ? 2 : 0)} m</option>)}
+        </select>
       </div>
       <div className="readout" aria-live="off">
         <span>x</span><b>{cursor ? (cursor.x / 1000).toFixed(2) : '—'}</b>

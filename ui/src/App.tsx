@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { analyzePlan, ensureConfig, importPlan, openProject, saveProject, setScale } from './actions';
+import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, saveProject, setScale } from './actions';
 import { backendName } from './api';
 import Canvas from './components/Canvas';
 import { Bar } from './components/ui';
@@ -30,6 +30,7 @@ const TOOL_HELP: Partial<Record<Tool, string>> = {
   window: 'Arrastra a lo largo de la ventana',
   erase: 'Haz clic sobre lo que quieras borrar',
   pan: 'Arrastra para mover el plano',
+  placeDesk: 'Clic para colocar el escritorio · R gira 90° · F cambia el lado de la silla · Esc termina',
 };
 
 export default function App() {
@@ -45,6 +46,8 @@ export default function App() {
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selCount(s.selection)) { e.preventDefault(); deleteSelection(); }
       else if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); s.undo(); evaluateSoon(); }
       else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
+      else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'r') s.set({ placeAngle: (s.placeAngle + 90) % 360 });
+      else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'f') s.set({ placeUp: !s.placeUp });
       else if (!ctrl && e.key.toLowerCase() === 'r' && selCount(s.selection)) rotateSelection(90);
       else if (!ctrl && e.key.toLowerCase() === 'p' && s.selection.modules.length) pinSelection(true);
       else if (!ctrl && e.key.startsWith('Arrow') && selCount(s.selection)) {
@@ -93,6 +96,27 @@ export default function App() {
   const req = st.config ? requestedSeats(st.config) : 0;
   const k = st.layout?.kpis;
 
+  if (!st.drawing && !st.plan) {
+    return (
+      <div className="welcome">
+        <div className="welcome-card">
+          <div className="brand big">Puestos<span>optimizador de distribución</span></div>
+          <h1>Selecciona el plano de la oficina</h1>
+          <p>DXF, DWG o PDF vectorial. Después te guío para marcar la escala, el área y la puerta principal.</p>
+          <button className="primary huge" onClick={importPlan}>Seleccionar archivo…</button>
+          <button className="ghost" onClick={openProject}>Abrir un proyecto guardado (.puestos.json)</button>
+          <details className="welcome-cfg">
+            <summary>Archivos DWG</summary>
+            <p className="hint">Se convierten con ODA File Converter (gratuito) o LibreDWG. Si está en otra carpeta, indica la ruta:</p>
+            <input value={st.converter} placeholder="C:\Program Files\ODA\ODAFileConverter 25.x\ODAFileConverter.exe" onChange={(e) => st.set({ converter: e.target.value })} />
+          </details>
+          <ThemeSwitch />
+        </div>
+        {st.toast && <div className={'toast ' + st.toast.tone} role="status" onClick={() => st.set({ toast: null })}>{st.toast.text}</div>}
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="top">
@@ -106,14 +130,9 @@ export default function App() {
           ))}
         </nav>
         <div className="file-actions">
-          <button className="ghost small" onClick={importPlan}>Abrir plano</button>
-          <button className="ghost small" onClick={openProject}>Abrir proyecto</button>
           <button className="ghost small" disabled={!st.plan} onClick={saveProject}>Guardar</button>
-          <div className="theme-switch" role="radiogroup" aria-label="Tema">
-            {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l]) => (
-              <button key={t} role="radio" aria-checked={st.theme === t} className={st.theme === t ? 'on' : ''} onClick={() => st.set({ theme: t })}>{l}</button>
-            ))}
-          </div>
+          <button className="ghost small" onClick={closePlan}>Cerrar plano</button>
+          <ThemeSwitch />
         </div>
       </header>
       <aside className="panel">
@@ -154,6 +173,18 @@ export default function App() {
         <span className="muted small">modo {backendName}</span>
       </footer>
       {st.toast && <div className={'toast ' + st.toast.tone} role="status" onClick={() => st.set({ toast: null })}>{st.toast.text}</div>}
+    </div>
+  );
+}
+
+function ThemeSwitch() {
+  const theme = useApp((s) => s.theme);
+  const set = useApp((s) => s.set);
+  return (
+    <div className="theme-switch" role="radiogroup" aria-label="Tema">
+      {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l]) => (
+        <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => set({ theme: t })}>{l}</button>
+      ))}
     </div>
   );
 }

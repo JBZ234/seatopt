@@ -37,6 +37,8 @@ Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo
 
 ## Flujo de uso
 
+Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un proyecto guardado). Arriba a la derecha, **Cerrar plano** vuelve a esa pantalla.
+
 1. **Plano**: la app te guía con tres tareas, cada una con su estado. La tarea pendiente activa sola su herramienta y muestra la instrucción sobre el plano.
    - **Escala:** se toma del archivo (unidades del DXF o la escala guardada en PDF exportados por la app) o se estima por el tamaño de las puertas. **Calibrar con una medida:** dos clics sobre algo que conozcas.
    - **Área a amoblar:** se detecta sola (ignora el marco de la hoja). Si no queda bien, **clic dentro del área**, o **Dibujar contorno**, con enganche a los vértices del dibujo.
@@ -47,12 +49,17 @@ Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo
    - Para los demás activa **Máximo posible**: el optimizador mete todos los que quepan.
    - Si marcas un tipo **flexible** (isla o bench, que se arma del largo que haga falta) y uno **suelto** (individual o pareja), el flexible llena las áreas grandes y el suelto rellena los huecos pequeños (un puesto de relleno vale 0,7 de uno en fila).
    - **Estimar capacidad** calcula cuántos caben de cada tipo por separado.
+   - **Colocar a mano**: clic en el plano para poner escritorios de un tipo (R gira 90°, F cambia el lado de la silla). Quedan fijados: cuentan dentro de la cantidad y la optimización ubica el resto alrededor.
+   - En *Medidas* de cada tipo, **separación libre alrededor**: lado de la silla (por defecto la de *Espacios*), atrás, izquierda y derecha.
 3. **Espacios**: solo las medidas que deciden la capacidad, cada una con un dibujo: pasillo principal, pasillos hacia los puestos, espacio para la silla, separación entre filas, corte de filas largas, entrada libre, frente de las puertas y separación a columnas y oficinas.
    - Siempre se cumple que todos los puestos se alcancen desde la entrada y que ninguna puerta quede bloqueada.
    - **Calcular cuántos puestos gana cada medida** prueba cada ajuste y muestra la ganancia junto a la medida, con **Aplicar**.
 4. **Organización** (opcional): roles con color, tipo de escritorio, nivel de ruido y elemento al que deben estar cerca; clientes; matriz de cuántas personas de cada rol tiene cada cliente; afinidad entre roles.
 5. **Optimizar**
-   - Elige el tiempo de búsqueda y presiona **Optimizar**. El resultado muestra el total de puestos y el desglose por tipo (fijos y «máximo»).
+   - Controles: **tiempo de búsqueda**, **orden de las filas** (0 = meter escritorios en cualquier hueco; alto = solo filas ordenadas y escritorios apoyados) y **pegar a los muros**.
+   - Presiona **Optimizar**. Después de armar las filas, un **relleno de huecos** busca dónde caben más escritorios en las dos orientaciones, prefiriendo los que quedan con la espalda contra un muro o espalda con espalda; cada uno se valida con todas las reglas.
+   - **Mejores soluciones encontradas**: las N mejores distintas (10 por defecto) con vista previa; clic para verla en el plano.
+   - **Buscar mejores valores**: prueba bajar cada medida de *Espacios* a su mínimo razonable y cambiar de tipo; cada prueba es una optimización completa y se puede **Usar** directamente.
    - Si no caben los fijos, la app prueba relajar cada medida y cambiar de tipo de escritorio, y muestra cuántos puestos gana cada cambio, con el botón **Aplicar**.
    - Con equipos cargados en *Organización* aparece un único control: cuánto pesa sentar a cada equipo junto.
    - **Bloquear puestos:** selecciona escritorios y usa «Fijar y bloquear». En la próxima optimización se conservan en su sitio con sus personas (rol y cliente) y se optimiza el resto.
@@ -92,6 +99,14 @@ También se puede exportar:
 
 - **Líneas simples:** el dibujo original reducido a lo esencial. Cada muro (doble línea, fachada o vidrio) queda como **una sola línea** a eje; además columnas, escaleras y ascensores como bloque, puertas (hoja + arco) y el rótulo de las oficinas. Capas `MUROS`, `COLUMNAS`, `NUCLEO`, `PUERTAS`, `A-PUERTA-PPAL`, `TEXTO`. Delimita la misma área que el original, así que también sirve para reimportar.
 - El dibujo original completo quitando solo las capas de «Mobiliario existente».
+
+### Separaciones editables en el plano
+
+Clic sobre una **oficina, columna o zona**: su separación aparece en dorado con una cota por lado (o una sola si no es rectangular). Clic en el número para escribir la medida en metros (Enter). Lo mismo con una **puerta** (fondo y ancho libres) y con un **escritorio** (silla, atrás, izquierda, derecha; se aplica a todo su tipo).
+
+### Cuadrícula
+
+Abajo a la derecha: mostrar la cuadrícula, **Snap** (los puntos dibujados, los escritorios colocados y los movimientos caen en la cuadrícula) y su tamaño.
 
 ### Tema
 
@@ -166,6 +181,7 @@ crates/core        núcleo en Rust (sin interfaz)
   export.rs          DXF R12 y CSV
   pdf_out.rs         PDF vectorial a escala y DXF sin mobiliario
   simple.rs          plano de líneas simples (muros a eje por adelgazamiento)
+  engine/fill.rs     relleno de huecos después de las filas
   api.rs             fachada JSON + trabajos en segundo plano
 crates/devserver   servidor HTTP con la misma API (modo navegador)
 src-tauri          app de escritorio

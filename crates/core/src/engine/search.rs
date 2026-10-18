@@ -132,6 +132,32 @@ pub struct SearchOut {
     pub genome: Genome,
     pub eval: Eval,
     pub iterations: u64,
+    /// Mejores disposiciones distintas encontradas (puntaje, genoma), mejor primero.
+    pub pool: Vec<(f64, Genome)>,
+}
+
+const POOL: usize = 48;
+
+/// Guarda las mejores disposiciones distintas (por huella del decodificado).
+struct Pool {
+    items: Vec<(f64, u64, Genome)>,
+}
+impl Pool {
+    fn offer(&mut self, score: f64, key: u64, g: &Genome) {
+        if self.items.len() >= POOL && score >= self.items.last().unwrap().0 {
+            return;
+        }
+        if let Some(i) = self.items.iter().position(|x| x.1 == key) {
+            if score < self.items[i].0 {
+                self.items.remove(i);
+            } else {
+                return;
+            }
+        }
+        let pos = self.items.partition_point(|x| x.0 <= score);
+        self.items.insert(pos, (score, key, g.clone()));
+        self.items.truncate(POOL);
+    }
 }
 
 /// Recocido simulado con varias cadenas en paralelo.
@@ -167,6 +193,8 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
     }
     starts.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
     let best: Mutex<Option<(Genome, Eval)>> = Mutex::new(None);
+    let pool = Mutex::new(Pool { items: Vec::new() });
+    let pool_worst = AtomicU64::new(f64::INFINITY.to_bits());
     let iters = AtomicU64::new(0);
     let last_report = Mutex::new(Instant::now());
     let requested = ctx.demand.iter().enumerate().filter(|(i, _)| !ctx.is_max[*i]).map(|(i, &d)| {
@@ -232,6 +260,13 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
                 cache.clear();
             }
             cache.insert(key, ev.score);
+            if ev.score < f64::from_bits(pool_worst.load(Ordering::Relaxed)) {
+                let mut pl = pool.lock().unwrap();
+                pl.offer(ev.score, key, &cand);
+                if pl.items.len() >= POOL {
+                    pool_worst.store(pl.items.last().unwrap().0.to_bits(), Ordering::Relaxed);
+                }
+            }
             let delta = ev.score - cur_ev.score;
             if delta <= 0.0 || rng.f64() < (-delta / temp).exp() {
                 cur = cand;
@@ -263,18 +298,27 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
     });
     let (genome, eval) = best.into_inner().unwrap().expect("sin resultado");
     if std::env::var("SEAT_DEBUG").is_ok() { eprintln!("search: {} iteraciones en {:.1}s ({} cadenas)", iters.load(Ordering::Relaxed), start.elapsed().as_secs_f64(), chains); }
-    SearchOut { genome, eval, iterations: iters.load(Ordering::Relaxed) }
+    let mut pool: Vec<(f64, Genome)> = pool.into_inner().unwrap().items.into_iter().map(|x| (x.0, x.2)).collect();
+    pool.insert(0, (eval.score, genome.clone()));
+    SearchOut { genome, eval, iterations: iters.load(Ordering::Relaxed), pool }
 }
 
 /// Construye el resultado final (Layout) a partir del mejor genoma.
 pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
     let d = decode(ctx, g, true);
-    let (ev, mods, seats) = evaluate(ctx, &d, g.variant, weights, true);
-    let var = &ctx.variants[g.variant];
+    to_layout_from(ctx, &d, g.variant, serde_json::to_value(g).ok(), weights)
+}
+
+/// Resultado final a partir de un decodificado (por ejemplo, ya con huecos rellenados).
+pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, genome: Option<serde_json::Value>, weights: &Weights) -> Layout {
+    let (ev, mods, seats) = evaluate(ctx, d, variant, weights, true);
+    let var = &ctx.variants[variant];
     let mut out_mods = Vec::new();
     let mut out_seats = Vec::new();
     // numeración en orden de lectura: por franjas horizontales de 2 m
-    let mut order: Vec<usize> = (0..seats.len()).filter(|&i| ev.module_ok[seats[i].module]).collect();
+    // los fijados se muestran siempre (aunque tengan avisos); los demás solo si son válidos
+    let shown = |mi: usize| ev.module_ok[mi] || mods[mi].pinned;
+    let mut order: Vec<usize> = (0..seats.len()).filter(|&i| shown(seats[i].module)).collect();
     order.sort_by(|&a, &b| {
         let (pa, pb) = (seats[a].pos, seats[b].pos);
         let (ba, bb) = ((-pa.y / 2400.0).floor(), (-pb.y / 2400.0).floor());
@@ -284,7 +328,7 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
     let fixed: std::collections::HashSet<String> = mods.iter().filter_map(|m| m.fixed_id.clone()).collect();
     let mut counter = 0usize;
     for (mi, m) in mods.iter().enumerate() {
-        if !ev.module_ok[mi] {
+        if !shown(mi) {
             continue;
         }
         let id = match &m.fixed_id {
@@ -404,8 +448,105 @@ pub fn to_layout(ctx: &Ctx, g: &Genome, weights: &Weights) -> Layout {
         kpis,
         violations,
         weights: weights.clone(),
-        genome: serde_json::to_value(g).ok(),
+        genome,
+        corridor_lines: var.corridor_lines.clone(),
+        corridor_width: if var.corridor_lines.is_empty() { 0.0 } else { ctx.p.c1_w },
+        alternatives: vec![],
     }
+}
+
+/// Huella de un resultado para comparar parecido: celdas de 600 mm ocupadas por escritorios.
+fn footprint(l: &Layout) -> std::collections::HashSet<(i64, i64)> {
+    l.seats.iter().map(|s| ((s.pos.x / 600.0).round() as i64, (s.pos.y / 600.0).round() as i64)).collect()
+}
+
+/// Decodifica, rellena huecos y arma el resultado de cada genoma del conjunto;
+/// devuelve hasta `n` resultados distintos, el mejor primero.
+pub fn finish(ctx: &Ctx, pool: &[(f64, Genome)], weights: &Weights, n: usize, fill_secs: f64, cancel: &AtomicBool) -> Vec<Layout> {
+    if pool.is_empty() {
+        return vec![];
+    }
+    // candidatos: los mejores del conjunto sin repetir disposición, más variantes del mejor
+    // (otro pasillo principal, filas giradas) para que haya alternativas realmente distintas
+    let want = (n * 2).clamp(4, 24);
+    let mut picks: Vec<Genome> = Vec::new();
+    let mut prints: Vec<std::collections::HashSet<(i64, i64)>> = Vec::new();
+    let fp_dec = |g: &Genome| -> std::collections::HashSet<(i64, i64)> {
+        let d = decode(ctx, g, false);
+        d.modules.iter().map(|m| ((m.x0 / 600.0).round() as i64 + 100_000 * m.grid as i64, (m.y0 / 600.0).round() as i64)).collect()
+    };
+    let similar = |a: &std::collections::HashSet<(i64, i64)>, b: &std::collections::HashSet<(i64, i64)>| {
+        let inter = a.intersection(b).count() as f64;
+        let uni = (a.len() + b.len()) as f64 - inter;
+        uni <= 0.0 || inter / uni > 0.95
+    };
+    let mut offer = |g: Genome, picks: &mut Vec<Genome>| {
+        if picks.len() >= want {
+            return;
+        }
+        let fp = fp_dec(&g);
+        if prints.iter().any(|p| similar(p, &fp)) {
+            return;
+        }
+        prints.push(fp);
+        picks.push(g);
+    };
+    for (_, g) in pool.iter() {
+        offer(g.clone(), &mut picks);
+    }
+    let best = pool[0].1.clone();
+    for v in 0..ctx.variants.len() {
+        let mut g = best.clone();
+        g.variant = v;
+        offer(g.clone(), &mut picks);
+        // filas giradas 90° en todas las zonas
+        let na = ctx.variants[v].grids.len().max(1);
+        for zg in g.vars[v].zones.iter_mut() {
+            zg.theta = ((zg.theta as usize + 1) % na) as u8;
+        }
+        offer(g.clone(), &mut picks);
+        for zg in g.vars[v].zones.iter_mut() {
+            zg.from_top = !zg.from_top;
+        }
+        offer(g, &mut picks);
+    }
+    let run = |g: &Genome, until: Instant| -> (f64, Layout) {
+        let mut d = decode(ctx, g, true);
+        let ev = if cancel.load(Ordering::Relaxed) {
+            evaluate(ctx, &d, g.variant, weights, false).0
+        } else {
+            super::fill::fill_gaps(ctx, &mut d, g.variant, weights, until)
+        };
+        let l = to_layout_from(ctx, &d, g.variant, serde_json::to_value(g).ok(), weights);
+        (ev.score, l)
+    };
+    // el mejor recibe la mitad del tiempo de relleno; el resto se reparte en tandas paralelas
+    let first = run(&picks[0], Instant::now() + std::time::Duration::from_secs_f64((fill_secs * 0.5).max(0.3)));
+    let rest = &picks[1..];
+    let waves = rest.len().div_ceil(rayon::current_num_threads().max(1)).max(1);
+    let per = std::time::Duration::from_secs_f64((fill_secs * 0.5 / waves as f64).max(0.15));
+    let mut outs: Vec<(f64, Layout)> = rest.par_iter().map(|g| run(g, Instant::now() + per)).collect();
+    outs.push(first);
+    outs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let mut chosen: Vec<Layout> = Vec::new();
+    let mut prints: Vec<std::collections::HashSet<(i64, i64)>> = Vec::new();
+    for (_, l) in outs {
+        let fp = footprint(&l);
+        let similar = prints.iter().any(|p| {
+            let inter = p.intersection(&fp).count() as f64;
+            let uni = (p.len() + fp.len()) as f64 - inter;
+            uni > 0.0 && inter / uni > 0.95
+        });
+        if similar {
+            continue;
+        }
+        prints.push(fp);
+        chosen.push(l);
+        if chosen.len() >= n.max(1) {
+            break;
+        }
+    }
+    chosen
 }
 
 // ============================================================================ alto nivel
@@ -414,11 +555,19 @@ pub fn optimize(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) ->
     progress(Progress { phase: "Preparando el plano".into(), ..Default::default() });
     let ctx = Ctx::build(problem)?;
     let st = &problem.config.settings;
-    let out = search(&ctx, &problem.config.weights, st.time_limit.max(0.5), st.seed.max(1), None, cancel, progress, "Optimizando distribución");
-    let mut layout = to_layout(&ctx, &out.genome, &problem.config.weights);
+    let total = st.time_limit.max(0.5);
+    let out = search(&ctx, &problem.config.weights, total * 0.8, st.seed.max(1), None, cancel, progress, "Optimizando distribución");
+    progress(Progress { phase: "Rellenando huecos y comparando soluciones".into(), fraction: 0.85, seats_placed: out.eval.seats_placed, ..Default::default() });
+    let mut alts = finish(&ctx, &out.pool, &problem.config.weights, st.alternatives.clamp(1, 30) as usize, (total * 0.2).max(1.0), cancel);
     if crate::assign::has_people(&problem.config.org) {
         progress(Progress { phase: "Asignando roles y clientes".into(), fraction: 1.0, ..Default::default() });
-        crate::assign::assign(&ctx, &problem.config, &mut layout);
+        for l in alts.iter_mut() {
+            crate::assign::assign(&ctx, &problem.config, l);
+        }
+    }
+    let mut layout = alts[0].clone();
+    if alts.len() > 1 {
+        layout.alternatives = alts;
     }
     Ok(layout)
 }
@@ -546,64 +695,50 @@ pub fn capacity(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) ->
     Ok(res)
 }
 
-/// Si no caben todos: prueba relajar reglas (no bloqueadas) y cambiar tipos, y mide cuántos puestos se ganan.
+/// Corrida completa con presupuesto corto: búsqueda + relleno de huecos. Devuelve el mejor resultado.
+fn quick_run(p: &Problem, secs: f64, cancel: &AtomicBool) -> Option<Layout> {
+    let ctx = Ctx::build(p).ok()?;
+    let out = search(&ctx, &p.config.weights, secs * 0.75, 5, None, cancel, &|_| {}, "Probando");
+    finish(&ctx, &out.pool, &p.config.weights, 1, secs * 0.25, cancel).into_iter().next()
+}
+
+/// «Buscar mejores valores»: prueba relajar cada medida de *Espacios* hasta su valor mínimo
+/// razonable y cambiar de tipo de escritorio; cada prueba es una corrida completa (con el mismo
+/// tiempo que la base), así que los puestos que se muestran son los de una distribución real.
 pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> Result<Vec<Suggestion>, String> {
-    progress(Progress { phase: "Midiendo la base".into(), ..Default::default() });
-    let ctx = Ctx::build(problem)?;
-    let base = search(&ctx, &problem.config.weights, 2.0, 5, None, cancel, &|_| {}, "Base");
-    let base_seats = base.eval.seats_placed as i32;
-    drop(ctx);
+    // medidas que deciden la capacidad (las de la pantalla Espacios)
+    const ITEMS: [(&str, &str); 11] = [
+        ("C1", "ancho"), ("C2", "ancho"), ("C2", "paso_sillas"), ("E1", "muro"), ("E2", "silla_silla"), ("E2", "silla_espalda"),
+        ("E3", "corte"), ("C3", "profundidad"), ("C4", "extra"), ("O1", "dist"), ("O3", "dist"),
+    ];
+    let secs = (problem.config.settings.time_limit * 0.35).clamp(1.5, 5.0);
     let mut cands: Vec<(Suggestion, Problem)> = Vec::new();
-    for (ri, r) in problem.config.rules.iter().enumerate() {
+    let sug = |rule_id: &str, item_id: &str, description: String, new_value: Option<f64>, disable: bool| Suggestion {
+        rule_id: rule_id.into(), item_id: item_id.into(), description, new_value, disable, gain_seats: 0, seats_placed: 0, layout: None,
+    };
+    for (rid, iid) in ITEMS {
+        let Some(ri) = problem.config.rules.iter().position(|r| r.id == rid) else { continue };
+        let r = &problem.config.rules[ri];
         if !r.enabled || r.locked {
             continue;
         }
-        if r.group.starts_with("Organización") || r.group.starts_with("Confort") && !["A5"].contains(&r.id.as_str()) {
+        let Some(ii) = r.items.iter().position(|i| i.id == iid) else { continue };
+        let it = &r.items[ii];
+        let (Some(v), Some(to)) = (it.value, it.relax_to) else { continue };
+        if !it.enabled || (v - to).abs() < 1e-9 {
             continue;
         }
-        for (ii, it) in r.items.iter().enumerate() {
-            let (Some(v), Some(to)) = (it.value, it.relax_to) else { continue };
-            if !it.enabled || (v - to).abs() < 1e-9 {
-                continue;
-            }
-            for frac in [0.5, 1.0] {
-                let nv = v + (to - v) * frac;
-                let nv = if it.step > 0.0 { (nv / it.step).round() * it.step } else { nv };
-                if (nv - v).abs() < 1e-9 {
-                    continue;
-                }
-                let mut p = problem.clone();
-                p.config.rules[ri].items[ii].value = Some(nv);
-                let unit = if it.unit == "mm" { format!("{:.2} m", nv / 1000.0) } else { format!("{nv} {}", it.unit) };
-                let from = if it.unit == "mm" { format!("{:.2} m", v / 1000.0) } else { format!("{v} {}", it.unit) };
-                cands.push((
-                    Suggestion { rule_id: r.id.clone(), item_id: it.id.clone(), description: format!("{} · {}: de {} a {}", r.name, it.label, from, unit), new_value: Some(nv), disable: false, gain_seats: 0, seats_placed: 0 },
-                    p,
-                ));
-            }
-        }
-        // apagar reglas no estructurales
-        if ["O3", "E7", "E5", "C3"].contains(&r.id.as_str()) {
-            let mut p = problem.clone();
-            p.config.rules[ri].enabled = false;
-            cands.push((Suggestion { rule_id: r.id.clone(), item_id: String::new(), description: format!("Desactivar «{}»", r.name), new_value: None, disable: true, gain_seats: 0, seats_placed: 0 }, p));
-        }
-        if r.id == "E6" && !r.items.iter().any(|i| i.id == "muros_inclinados" && i.enabled) {
-            let mut p = problem.clone();
-            if let Some(it) = p.config.rules[ri].items.iter_mut().find(|i| i.id == "muros_inclinados") {
-                it.enabled = true;
-            }
-            cands.push((Suggestion { rule_id: "E6".into(), item_id: "muros_inclinados".into(), description: "Permitir filas alineadas a muros inclinados".into(), new_value: None, disable: false, gain_seats: 0, seats_placed: 0 }, p));
-        }
-        if r.id == "C1" && r.items.iter().any(|i| i.id == "oficinas" && i.enabled) {
-            let mut p = problem.clone();
-            if let Some(it) = p.config.rules[ri].items.iter_mut().find(|i| i.id == "oficinas") {
-                it.enabled = false;
-            }
-            cands.push((Suggestion { rule_id: "C1".into(), item_id: "oficinas".into(), description: "No llevar el pasillo principal hasta cada puerta de oficina".into(), new_value: None, disable: true, gain_seats: 0, seats_placed: 0 }, p));
-        }
+        let fmt = |x: f64| if it.unit == "mm" { format!("{:.2} m", x / 1000.0) } else { format!("{x} {}", it.unit) };
+        let mut p = problem.clone();
+        p.config.rules[ri].items[ii].value = Some(to);
+        cands.push((sug(rid, iid, format!("{} · {}: de {} a {}", r.name, it.label, fmt(v), fmt(to)), Some(to), false), p));
     }
-    // cambio de tipo: probar los tipos con menos área por puesto (también de un lado ↔ dos lados)
+    if let Some(ri) = problem.config.rules.iter().position(|r| r.id == "C3" && r.enabled && !r.locked) {
+        let mut p = problem.clone();
+        p.config.rules[ri].enabled = false;
+        cands.push((sug("C3", "", "Sin zona libre frente a la entrada".into(), None, true), p));
+    }
+    // cambio de tipo: probar los tipos con menos área por puesto
     let area_per_seat = |t: &DeskType| t.module_length(t.per_side_range().1) * t.module_depth() / t.seats_per_module(t.per_side_range().1).max(1) as f64;
     for d in &problem.config.demand {
         if d.quantity == 0 || d.max {
@@ -611,9 +746,8 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
         }
         let Some(t) = problem.config.catalog.iter().find(|t| t.id == d.type_id) else { continue };
         let mut alts: Vec<&DeskType> = problem.config.catalog.iter().filter(|a| a.id != t.id && area_per_seat(a) <= area_per_seat(t) * 1.1).collect();
-        // preferir los flexibles (se adaptan mejor a espacios irregulares) y luego menor área por puesto
         alts.sort_by(|a, b| b.flexible.cmp(&a.flexible).then(area_per_seat(a).partial_cmp(&area_per_seat(b)).unwrap()));
-        for alt in alts.into_iter().take(3) {
+        for alt in alts.into_iter().take(2) {
             let mut p = problem.clone();
             let seats_t = if t.flexible { d.quantity } else { d.quantity * t.seats_per_module(t.per_side) };
             let qty_alt = if alt.flexible { seats_t } else { seats_t.div_ceil(alt.seats_per_module(alt.per_side).max(1)) };
@@ -623,32 +757,32 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
             } else {
                 p.config.demand.push(Demand { type_id: alt.id.clone(), quantity: qty_alt, max: false });
             }
-            cands.push((Suggestion { rule_id: "TIPO".into(), item_id: format!("{}>{}", t.id, alt.id), description: format!("Usar «{}» en lugar de «{}»", alt.name, t.name), new_value: None, disable: false, gain_seats: 0, seats_placed: 0 }, p));
+            cands.push((sug("TIPO", &format!("{}>{}", t.id, alt.id), format!("Usar «{}» en lugar de «{}»", alt.name, t.name), None, false), p));
         }
     }
-    let total = cands.len();
-    let done = AtomicU64::new(0);
-    let mut results: Vec<Suggestion> = cands
-        .into_par_iter()
-        .filter_map(|(mut s, p)| {
-            if cancel.load(Ordering::Relaxed) {
-                return None;
-            }
-            let ctx = Ctx::build(&p).ok()?;
-            let out = search(&ctx, &p.config.weights, 1.5, 5, None, cancel, &|_| {}, "Sugerencias");
-            let d = done.fetch_add(1, Ordering::Relaxed) + 1;
-            progress(Progress { phase: "Probando cambios de reglas".into(), fraction: d as f64 / total.max(1) as f64, message: s.description.clone(), ..Default::default() });
-            s.seats_placed = out.eval.seats_placed;
-            // con cambio de tipo, lo que importa es si se ubica todo
-            s.gain_seats = if s.rule_id == "TIPO" {
-                base.eval.unplaced_seats as i32 - out.eval.unplaced_seats as i32
-            } else {
-                out.eval.seats_placed as i32 - base_seats
-            };
-            Some(s)
-        })
-        .filter(|s| s.gain_seats > 0)
-        .collect();
+    let total = cands.len() + 1;
+    progress(Progress { phase: "Midiendo la distribución actual".into(), fraction: 0.0, message: format!("1 de {total}"), ..Default::default() });
+    let base = quick_run(problem, secs, cancel).ok_or("No se pudo optimizar el plano.")?;
+    let base_seats = base.kpis.seats_placed as i32;
+    let base_unplaced: u32 = base.kpis.unplaced_by_type.iter().map(|x| x.1).sum();
+    let mut results = Vec::new();
+    for (i, (mut s, p)) in cands.into_iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        progress(Progress { phase: "Buscando mejores valores".into(), fraction: (i + 1) as f64 / total as f64, seats_placed: base.kpis.seats_placed, message: s.description.clone(), ..Default::default() });
+        let Some(l) = quick_run(&p, secs, cancel) else { continue };
+        s.seats_placed = l.kpis.seats_placed;
+        s.gain_seats = if s.rule_id == "TIPO" {
+            base_unplaced as i32 - l.kpis.unplaced_by_type.iter().map(|x| x.1).sum::<u32>() as i32
+        } else {
+            l.kpis.seats_placed as i32 - base_seats
+        };
+        if s.gain_seats > 0 {
+            s.layout = Some(l);
+            results.push(s);
+        }
+    }
     results.sort_by(|a, b| b.gain_seats.cmp(&a.gain_seats));
     results.truncate(12);
     Ok(results)

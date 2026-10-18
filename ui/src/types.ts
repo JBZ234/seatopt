@@ -3,10 +3,10 @@
 export interface Pt { x: number; y: number }
 
 export type ObstacleKind = 'column' | 'fixedOffice' | 'restricted' | 'reserved';
-export interface Obstacle { id: string; kind: ObstacleKind; poly: Pt[]; label: string }
+export interface Obstacle { id: string; kind: ObstacleKind; poly: Pt[]; label: string; clear?: number[] }
 
 export type DoorKind = 'main' | 'exit' | 'office' | 'ignore';
-export interface Door { id: string; kind: DoorKind; a: Pt; b: Pt; label: string }
+export interface Door { id: string; kind: DoorKind; a: Pt; b: Pt; label: string; clearDepth?: number | null; clearWidth?: number | null }
 export interface Window { a: Pt; b: Pt }
 
 export interface Room { poly: Pt[]; label: string }
@@ -18,6 +18,8 @@ export interface DeskType {
   seatWidth: number; depth: number; sides: number; perSide: number;
   flexible: boolean; minPerSide: number; maxPerSide: number;
   returnLength: number; returnDepth: number;
+  /** Separaciones libres (mm): lado de la silla (null = regla E1), atrás, izquierda, derecha. */
+  clearChair?: number | null; clearBack?: number; clearLeft?: number; clearRight?: number;
 }
 export interface Demand { typeId: string; quantity: number; max?: boolean }
 
@@ -50,9 +52,9 @@ export interface Organization { roles: Role[]; clients: Client[]; teams: TeamCou
 
 export interface Weights {
   order: number; daylight: number; windowSide: number; privacy: number;
-  travel: number; compact: number; reserve: number; grouping: number;
+  travel: number; compact: number; reserve: number; grouping: number; wall: number;
 }
-export interface Settings { resolution: number; timeLimit: number; seed: number }
+export interface Settings { resolution: number; timeLimit: number; seed: number; alternatives: number }
 
 export interface Config {
   catalog: DeskType[]; demand: Demand[]; rules: Rule[]; customRules: CustomRule[];
@@ -82,10 +84,11 @@ export interface Violation { ruleId: string; message: string; at?: Pt | null; ha
 export interface Layout {
   modules: Module[]; seats: Seat[]; corridors: Pt[][]; keepouts: Pt[][];
   kpis: Kpis; violations: Violation[]; weights: Weights; genome?: unknown;
+  corridorLines?: Pt[][]; corridorWidth?: number; alternatives?: Layout[];
 }
 export interface Suggestion {
   ruleId: string; itemId: string; description: string; newValue: number | null;
-  disable: boolean; gainSeats: number; seatsPlaced: number;
+  disable: boolean; gainSeats: number; seatsPlaced: number; layout?: Layout | null;
 }
 export interface Variant { layout: Layout; paretoRank: number }
 export interface Capacity { typeId: string; maxSeats: number; maxUnits: number }

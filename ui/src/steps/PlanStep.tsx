@@ -82,7 +82,6 @@ export default function PlanStep() {
     <div className="step-body">
       <div className="file-line">
         <strong title={drawing?.name}>{drawing?.name ?? 'Proyecto'}</strong>
-        <button className="ghost small" onClick={importPlan}>Abrir otro</button>
       </div>
 
       <ol className="tasks">

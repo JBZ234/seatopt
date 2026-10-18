@@ -29,6 +29,10 @@ pub struct Obstacle {
     pub poly: Vec<Pt>,
     #[serde(default)]
     pub label: String,
+    /// Separación libre alrededor (mm): una por lado del polígono, o un solo valor para todos.
+    /// Vacío = la medida general (O1 columnas, O2 tableros, O3 oficinas).
+    #[serde(default)]
+    pub clear: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +54,11 @@ pub struct Door {
     pub b: Pt,
     #[serde(default)]
     pub label: String,
+    /// Despeje propio frente a la puerta (mm): fondo y ancho. None = regla C4 / C3.
+    #[serde(default)]
+    pub clear_depth: Option<f64>,
+    #[serde(default)]
+    pub clear_width: Option<f64>,
 }
 
 impl Door {
@@ -138,6 +147,16 @@ pub struct DeskType {
     /// Para escritorios en L: fondo del retorno.
     #[serde(default)]
     pub return_depth: f64,
+    /// Separación libre del lado de la silla (mm). None = regla E1.
+    #[serde(default)]
+    pub clear_chair: Option<f64>,
+    /// Separación libre detrás, a la izquierda y a la derecha del escritorio (mm).
+    #[serde(default)]
+    pub clear_back: f64,
+    #[serde(default)]
+    pub clear_left: f64,
+    #[serde(default)]
+    pub clear_right: f64,
 }
 
 fn one() -> u32 {
@@ -411,12 +430,19 @@ pub struct Weights {
     pub reserve: f64,
     /// Agrupación por roles y clientes (asignación).
     pub grouping: f64,
+    /// Preferir escritorios con la espalda contra un muro.
+    #[serde(default = "default_wall")]
+    pub wall: f64,
+}
+
+fn default_wall() -> f64 {
+    5.0
 }
 
 impl Default for Weights {
     fn default() -> Self {
         // foco: la mayor cantidad de puestos; solo un leve orden visual de desempate
-        Self { order: 1.0, daylight: 0.0, window_side: 0.0, privacy: 0.0, travel: 0.0, compact: 0.0, reserve: 0.0, grouping: 6.0 }
+        Self { order: 4.0, daylight: 0.0, window_side: 0.0, privacy: 0.0, travel: 0.0, compact: 0.0, reserve: 0.0, grouping: 6.0, wall: 5.0 }
     }
 }
 
@@ -425,7 +451,7 @@ impl Weights {
         [self.order, self.daylight, self.window_side, self.privacy, self.travel, self.compact, self.reserve, self.grouping]
     }
     pub fn from_vec(v: [f64; 8]) -> Self {
-        Self { order: v[0], daylight: v[1], window_side: v[2], privacy: v[3], travel: v[4], compact: v[5], reserve: v[6], grouping: v[7] }
+        Self { order: v[0], daylight: v[1], window_side: v[2], privacy: v[3], travel: v[4], compact: v[5], reserve: v[6], grouping: v[7], wall: default_wall() }
     }
 }
 
@@ -444,6 +470,13 @@ pub struct Settings {
     pub time_limit: f64,
     #[serde(default)]
     pub seed: u64,
+    /// Cuántas de las mejores soluciones distintas devolver.
+    #[serde(default = "default_alts")]
+    pub alternatives: u32,
+}
+
+fn default_alts() -> u32 {
+    10
 }
 
 fn default_time() -> f64 {
@@ -452,7 +485,7 @@ fn default_time() -> f64 {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { resolution: 0.0, time_limit: 8.0, seed: 0 }
+        Self { resolution: 0.0, time_limit: 8.0, seed: 0, alternatives: 10 }
     }
 }
 
@@ -603,6 +636,14 @@ pub struct Layout {
     pub weights: Weights,
     #[serde(default)]
     pub genome: Option<serde_json::Value>,
+    /// Ejes del pasillo principal (para dibujarlo suave) y su ancho (mm).
+    #[serde(default)]
+    pub corridor_lines: Vec<Vec<Pt>>,
+    #[serde(default)]
+    pub corridor_width: f64,
+    /// Otras soluciones buenas y distintas (la primera es esta misma).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<Layout>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -616,6 +657,9 @@ pub struct Suggestion {
     pub disable: bool,
     pub gain_seats: i32,
     pub seats_placed: u32,
+    /// La distribución obtenida con el cambio (para verla y usarla directamente).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<Layout>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

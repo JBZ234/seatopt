@@ -28,7 +28,8 @@ export function Num({ value, unit, onChange, min, max, step, width = 72, disable
   return (
     <span className="num">
       <input aria-label={label} disabled={disabled} style={{ width }} value={txt} inputMode="decimal"
-        onChange={(e) => setTxt(e.target.value)} onBlur={commit} onKeyDown={(e) => {
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setTxt(e.target.value.replace(/^(-?)0+(?=\d)/, '$1'))} onBlur={commit} onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault();

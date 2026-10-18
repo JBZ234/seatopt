@@ -165,6 +165,8 @@ pub struct Variant {
     pub name: String,
     pub corridor: Vec<bool>,
     pub corridor_polys: Vec<Vec<Pt>>,
+    /// Ejes del pasillo (polilíneas simplificadas), para dibujarlo suave.
+    pub corridor_lines: Vec<Vec<Pt>>,
     pub zone_map: Vec<u16>,
     pub zones: Vec<ZoneInfo>,
     pub grids: Vec<RotGrid>,
@@ -210,6 +212,33 @@ pub struct Ctx {
     pub plan: Plan,
     pub pinned: Vec<Module>,
     pub violations: Vec<Violation>,
+}
+
+/// Franjas de separación por lado de un obstáculo (solo si tiene una medida por lado).
+/// Las esquinas quedan cubiertas: cada franja se alarga con la medida de los lados vecinos.
+pub fn obstacle_clear_zones(o: &Obstacle) -> Vec<Vec<Pt>> {
+    let n = o.poly.len();
+    if n < 3 || o.clear.len() != n {
+        return vec![];
+    }
+    let ccw = polygon_area(&o.poly) > 0.0;
+    let mut out = Vec::new();
+    for i in 0..n {
+        let d = o.clear[i];
+        if d <= 0.0 {
+            continue;
+        }
+        let a = o.poly[i];
+        let b = o.poly[(i + 1) % n];
+        let u = (b - a).norm();
+        let out_n = if ccw { pt(u.y, -u.x) } else { pt(-u.y, u.x) };
+        let dp = o.clear[(i + n - 1) % n].max(0.0);
+        let dn = o.clear[(i + 1) % n].max(0.0);
+        let a2 = a - u * dp;
+        let b2 = b + u * dn;
+        out.push(vec![a2, b2, b2 + out_n * d, a2 + out_n * d]);
+    }
+    out
 }
 
 fn auto_res(area_m2: f64) -> f64 {
@@ -314,28 +343,34 @@ impl Ctx {
         let mut col = vec![false; n];
         let mut office = vec![false; n];
         let mut restr = vec![false; n];
+        // los que usan la separación general (sin medida propia)
+        let mut col_g = vec![false; n];
+        let mut office_g = vec![false; n];
+        let mut restr_g = vec![false; n];
+        let mut custom: Vec<&Obstacle> = Vec::new();
         for o in &plan.obstacles {
-            match o.kind {
-                ObstacleKind::Column => raster::fill_polygon(&f, &mut col, &o.poly, true),
-                ObstacleKind::FixedOffice => raster::fill_polygon(&f, &mut office, &o.poly, true),
-                ObstacleKind::Restricted => raster::fill_polygon(&f, &mut restr, &o.poly, true),
-                ObstacleKind::Reserved => {
-                    if p.o4 {
-                        raster::fill_polygon(&f, &mut restr, &o.poly, true)
-                    }
-                }
+            let blocks = !matches!(o.kind, ObstacleKind::Reserved) || p.o4;
+            if !blocks {
+                continue;
             }
+            let (m, g): (&mut Vec<bool>, &mut Vec<bool>) = match o.kind {
+                ObstacleKind::Column => (&mut col, &mut col_g),
+                ObstacleKind::FixedOffice => (&mut office, &mut office_g),
+                _ => (&mut restr, &mut restr_g),
+            };
+            raster::fill_polygon(&f, m, &o.poly, true);
             // contorno grueso para no perder obstáculos chicos
             let k = o.poly.len();
             for i in 0..k {
-                let m: &mut Vec<bool> = match o.kind {
-                    ObstacleKind::Column => &mut col,
-                    ObstacleKind::FixedOffice => &mut office,
-                    ObstacleKind::Restricted => &mut restr,
-                    ObstacleKind::Reserved if p.o4 => &mut restr,
-                    _ => continue,
-                };
                 raster::stroke_segment(&f, m, o.poly[i], o.poly[(i + 1) % k], res * 0.5, true);
+            }
+            if o.clear.is_empty() {
+                raster::fill_polygon(&f, g, &o.poly, true);
+                for i in 0..k {
+                    raster::stroke_segment(&f, g, o.poly[i], o.poly[(i + 1) % k], res * 0.5, true);
+                }
+            } else {
+                custom.push(o);
             }
         }
         for i in 0..n {
@@ -371,9 +406,20 @@ impl Ctx {
                 }
             }
         };
-        buffer(&col, p.o1, &mut keep0);
-        buffer(&restr, p.o2, &mut keep0);
-        buffer(&office, p.o3, &mut keep0);
+        buffer(&col_g, p.o1, &mut keep0);
+        buffer(&restr_g, p.o2, &mut keep0);
+        buffer(&office_g, p.o3, &mut keep0);
+        // separaciones propias de cada obstáculo (por lado o una sola para todo el contorno)
+        for o in custom {
+            for z in obstacle_clear_zones(o) {
+                raster::fill_polygon(&f, &mut keep0, &z, true);
+            }
+            if o.clear.len() == 1 || o.clear.len() != o.poly.len() {
+                let mut tmp = vec![false; n];
+                raster::fill_polygon(&f, &mut tmp, &o.poly, true);
+                buffer(&tmp, o.clear[0], &mut keep0);
+            }
+        }
 
         let inside = |q: Pt| f.cell_idx(q).map(|i| free[i]).unwrap_or(false);
         let mut doors = Vec::new();
@@ -412,7 +458,13 @@ impl Ctx {
                 DoorKind::Ignore => false,
             };
             let mut zones: Vec<Vec<Pt>> = Vec::new();
-            if p.c4_on && applies {
+            if d.clear_depth.is_some() || d.clear_width.is_some() {
+                let depth = d.clear_depth.unwrap_or(if p.c4_swing { w } else { 0.0 } + p.c4_extra);
+                let half = d.clear_width.map(|x| x * 0.5).unwrap_or(w * 0.5 + 200.0);
+                if depth > 0.0 {
+                    zones.push(vec![mid - u * half, mid + u * half, mid + u * half + inward * depth, mid - u * half + inward * depth]);
+                }
+            } else if p.c4_on && applies {
                 let depth = if p.c4_swing { w } else { 0.0 } + p.c4_extra;
                 if depth > 0.0 {
                     let half = w * 0.5 + 200.0;
@@ -561,7 +613,7 @@ impl Ctx {
 
     fn build_variant(&self, style: u8) -> Variant {
         let n = self.f.len();
-        let (corridor, violations) = if style == 255 { (vec![false; n], vec![]) } else { self.corridor(style) };
+        let (corridor, violations, corridor_lines) = if style == 255 { (vec![false; n], vec![], vec![]) } else { self.corridor(style) };
         let name = match style {
             0 => "Pasillo más corto",
             1 => "Pasillo por el centro",
@@ -600,7 +652,7 @@ impl Ctx {
         }
         let grids = self.angles.iter().map(|&th| self.rot_grid(th, &corridor, &zone_map, zones.len())).collect();
         let corridor_dist = if corridor.iter().any(|&b| b) { raster::edt(&self.f, &corridor) } else { vec![f32::INFINITY; n] };
-        Variant { name, corridor, corridor_polys, zone_map, zones, grids, violations, corridor_dist }
+        Variant { name, corridor, corridor_polys, corridor_lines, zone_map, zones, grids, violations, corridor_dist }
     }
 
     fn rot_grid(&self, theta: f64, corridor: &[bool], zone_map: &[u16], nz: usize) -> RotGrid {
@@ -663,7 +715,7 @@ impl Ctx {
 
     /// Pasillo principal: árbol de caminos desde la puerta principal a salidas / puertas de oficinas,
     /// con penalización de giros y costo según el estilo.
-    fn corridor(&self, style: u8) -> (Vec<bool>, Vec<Violation>) {
+    fn corridor(&self, style: u8) -> (Vec<bool>, Vec<Violation>, Vec<Vec<Pt>>) {
         let f = &self.f;
         let n = f.len();
         let p = &self.p;
@@ -687,7 +739,7 @@ impl Ctx {
             })
             .collect();
         if targets.is_empty() || self.main_seeds.is_empty() {
-            return (vec![false; n], viol);
+            return (vec![false; n], viol, vec![]);
         }
         let cost_of = |i: usize| -> f64 {
             let c = clear[i] as f64;
@@ -707,6 +759,7 @@ impl Ctx {
         let (parent, dist) = try_width(half);
         let mut narrow: Option<(Vec<u32>, Vec<f64>)> = None;
         let mut path = vec![false; n];
+        let mut lines: Vec<Vec<Pt>> = Vec::new();
         for t in targets {
             // mejor estado de llegada
             let pick = |dist: &Vec<f64>| -> Option<usize> {
@@ -756,10 +809,18 @@ impl Ctx {
             };
             let mut s = st;
             let mut guard = 0;
+            let mut line: Vec<Pt> = Vec::new();
+            let mut joined = false;
             while s != u32::MAX as usize && guard < n * 2 {
                 let cell = s / 8;
-                if path[cell] {
-                    // ya unido al árbol
+                if !joined {
+                    if line.last().map(|q: &Pt| q.dist(f.center_i(cell)) > 1.0).unwrap_or(true) {
+                        line.push(f.center_i(cell));
+                    }
+                    if path[cell] {
+                        // se unió a un tramo ya trazado: la línea termina aquí
+                        joined = true;
+                    }
                 }
                 path[cell] = true;
                 let ps = par[s];
@@ -769,11 +830,21 @@ impl Ctx {
                 s = ps as usize;
                 guard += 1;
             }
+            if line.len() >= 2 {
+                // el tramo arranca en la puerta de destino: alargarlo hasta el vano
+                line.insert(0, t.door.mid());
+                if !joined {
+                    if let Some(m) = self.doors.iter().find(|d| d.door.kind == DoorKind::Main) {
+                        line.push(m.door.mid());
+                    }
+                }
+                lines.push(simplify(&line, self.res * 1.6));
+            }
         }
         // ensanchar el camino al ancho del pasillo
         let d = raster::edt(f, &path);
         let corridor: Vec<bool> = (0..n).map(|i| self.free[i] && (d[i] as f64) <= half).collect();
-        (corridor, viol)
+        (corridor, viol, lines)
     }
 
     /// Dijkstra con estado (celda, dirección) y penalización por giro. Devuelve padres y distancias por estado.

@@ -1,7 +1,7 @@
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
-import { hasDemand, useApp, type ProjectFile } from './store';
+import { hasDemand, uid, useApp, type ProjectFile } from './store';
 import type {
-  AnalyzeResult, BgLayer, Capacity, Config, Defaults, Layout, Problem, Pt, Suggestion, Variant,
+  AnalyzeResult, BgLayer, Capacity, Config, Defaults, Layout, Module, Problem, Pt, Suggestion, Variant,
 } from './types';
 
 const S = () => useApp.getState();
@@ -21,13 +21,25 @@ export async function importPlan() {
     if (!out) return;
     const roles: Record<string, typeof out.layers[number]['role']> = {};
     out.layers.forEach((l) => (roles[l.name] = l.role));
-    S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
+    S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
     await ensureConfig();
     await loadBackground();
     await analyzePlan(null);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
+}
+
+/** Cierra el plano actual y vuelve a la pantalla de inicio (conserva el catálogo y las medidas). */
+export function closePlan() {
+  const s = S();
+  if (s.layout && !confirm('¿Cerrar el plano? La distribución que no hayas guardado se pierde.')) return;
+  s.set({
+    drawing: null, plan: null, layout: null, background: null, hiddenLayers: [], notes: [], areaM2: 0, roles: {},
+    variants: [], suggestions: null, capacity: null, selection: { modules: [], obstacles: [], doors: [], windows: [] },
+    history: [], step: 0, tool: 'select', calib: [], scaleConfirmed: false, mainConfirmed: true, alternatives: [],
+  });
+  s.updateConfig((c) => { c.pinned = []; });
 }
 
 export async function loadBackground() {
@@ -47,7 +59,7 @@ export async function analyzePlan(seed: Pt | null) {
   try {
     const r = await call<AnalyzeResult>('analyze', { drawingId: drawing.drawingId, options: { mmPerUnit, roles, seed, gapClose } });
     const auto = r.notes.some((n) => n.includes('más ancha'));
-    S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
+    S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, alternatives: [], capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
     S().set({ notes: [drawing.scale.reason, String(e instanceof Error ? e.message : e)] });
@@ -83,13 +95,14 @@ export async function optimize() {
   }
   const signal = startJobUi('Optimizando');
   try {
-    const layout = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizando', progress: st.progress, signal } }), { signal });
-    S().set({ layout, suggestions: null });
+    const res = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizando', progress: st.progress, signal } }), { signal });
+    const alts = (res.alternatives && res.alternatives.length ? res.alternatives : [res]).map((l) => ({ ...l, alternatives: undefined }));
+    const layout = alts[0];
+    S().set({ layout, alternatives: alts, suggestions: null, selection: { modules: [], obstacles: [], doors: [], windows: [] } });
     const k = layout.kpis;
     if (k.unplacedByType.length > 0) {
-      S().say(`No caben todos los escritorios con cantidad fija. Buscando qué medidas ajustar…`);
+      S().say('No caben todos los escritorios con cantidad fija. Prueba «Buscar mejores valores».', 'error');
       S().set({ job: null });
-      await suggest();
     } else {
       S().say(k.maxMode ? `Listo: caben ${k.seatsPlaced} puestos.` : `Listo: ${k.seatsPlaced} puestos ubicados.`);
       S().set({ job: null });
@@ -172,7 +185,52 @@ export function applySuggestion(s: Suggestion) {
     else it.enabled = !s.disable;
   });
   S().set({ suggestions: (S().suggestions ?? []).filter((x) => x !== s) });
-  S().say('Regla ajustada. Vuelve a optimizar para ver el resultado.');
+  if (s.layout) {
+    const l = { ...s.layout, alternatives: undefined };
+    S().set({ layout: l, alternatives: [l], selection: { modules: [], obstacles: [], doors: [], windows: [] } });
+    S().say(`Medida aplicada: ${l.kpis.seatsPlaced} puestos. Puedes optimizar de nuevo con más tiempo para afinar.`);
+  } else {
+    S().say('Medida aplicada. Vuelve a optimizar para ver el resultado.');
+  }
+}
+
+/** Muestra una de las mejores soluciones de la última optimización. */
+export function chooseAlternative(i: number) {
+  const a = S().alternatives[i];
+  if (!a) return;
+  S().set({ layout: a, selection: { modules: [], obstacles: [], doors: [], windows: [] } });
+  if (S().config?.org.teams.some((t) => t.count > 0)) reassign();
+}
+
+/** Coloca un escritorio a mano (queda fijado: la optimización lo respeta y descuenta de la cantidad). */
+export async function placeDesk(center: Pt) {
+  const s = S();
+  const c = s.config;
+  const t = c?.catalog.find((x) => x.id === s.placeType);
+  if (!c || !t || !s.plan) return;
+  const per = t.flexible ? Math.max(t.minPerSide, Math.min(t.maxPerSide, t.perSide)) : t.perSide;
+  const length = t.shape === 'l' ? t.seatWidth : t.seatWidth * per;
+  const depth = t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth * t.sides;
+  const a = (s.placeAngle * Math.PI) / 180;
+  const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
+  const w = (p: number, q: number) => ({ x: center.x + u.x * p + v.x * q, y: center.y + u.y * p + v.y * q });
+  const m: Module = {
+    id: uid('mano'), typeId: t.id, center, angle: s.placeAngle, length, depth, perSide: per, seatsUp: s.placeUp,
+    body: [w(-length / 2, -depth / 2), w(length / 2, -depth / 2), w(length / 2, depth / 2), w(-length / 2, depth / 2)], pinned: true, people: [],
+  };
+  s.snapshot();
+  const base: Layout = s.layout ?? {
+    modules: [], seats: [], corridors: [], keepouts: [], violations: [], weights: c.weights,
+    kpis: { maxSeats: 0, seatsRequested: 0, seatsPlaced: 0, modulesRequested: 0, modulesPlaced: 0, unplacedByType: [], areaM2: s.areaM2, m2PerSeat: 0, avgTravelExitM: 0, maxTravelExitM: 0, daylightPct: 0, windowSidePct: 0, privacyIssues: 0, orientations: 0, reservePct: 0, reserveSeats: 0, accessiblePmr: 0, hardViolations: 0, groupingScore: 0, misplacedPeople: 0, corridorAreaM2: 0, score: 0 },
+  };
+  const layout: Layout = { ...base, modules: [...base.modules, m] };
+  S().updateConfig((cc) => { cc.pinned = [...cc.pinned, m]; });
+  try {
+    const nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout });
+    S().set({ layout: nl });
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
 }
 
 export async function reassign() {

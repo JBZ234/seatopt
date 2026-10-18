@@ -598,7 +598,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
             }
             let kind = if a < 3.0e6 { ObstacleKind::Column } else { ObstacleKind::FixedOffice };
             let id = next_id(if kind == ObstacleKind::Column { "col" } else { "of" });
-            plan.obstacles.push(Obstacle { id, kind, poly: h, label: String::new() });
+            plan.obstacles.push(Obstacle { id, kind, poly: h, label: String::new(), clear: vec![] });
         }
         notes.push(format!("Recinto detectado por inundación (vanos ≤ {:.0} mm cerrados).", opts.gap_close));
     }
@@ -636,7 +636,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
             ObstacleKind::Restricted => "rz",
             ObstacleKind::Reserved => "res",
         });
-        plan.obstacles.push(Obstacle { id, kind, poly: p.clone(), label: String::new() });
+        plan.obstacles.push(Obstacle { id, kind, poly: p.clone(), label: String::new(), clear: vec![] });
     }
 
     for t in &d.texts {
@@ -780,7 +780,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         if widest.map(|w: usize| merged[w].0.dist(merged[w].1) < a.dist(*b)).unwrap_or(true) {
             widest = Some(i);
         }
-        plan.doors.push(Door { id: format!("d{}", i + 1), kind, a: *a, b: *b, label: String::new() });
+        plan.doors.push(Door { id: format!("d{}", i + 1), kind, a: *a, b: *b, label: String::new(), clear_depth: None, clear_width: None });
     }
     if !plan.doors.iter().any(|d| d.kind == DoorKind::Main) {
         if let Some(w) = widest {

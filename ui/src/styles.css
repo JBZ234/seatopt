@@ -9,17 +9,20 @@
   --mat: #1f6f5c;
   --mat-ink: #e9f5f0;
   --red: #c4472b;
-  --egress: #1a9c3b;
-  --exit: #e07b12;
-  --office-door: #2a8fb0;
-  --column: #c86b5c;
-  --office: #9fb0c6;
-  --restricted: #d07fc0;
-  --reserved: #c4b44a;
-  --desk-neutral: #b9c2bc;
-  --window: #3aa7d9;
-  --corridor: #6fa8c4;
-  --keep: #e8c35a;
+  --egress: #2f9e63;
+  --exit: #e08a35;
+  --office-door: #4f8fc4;
+  --column: #4d5866;
+  --office: #d6dde8;
+  --restricted: #e9b8c7;
+  --reserved: #ead9a2;
+  --desk-neutral: #c3cbc6;
+  --window: #6cb6dc;
+  --corridor: #9cc7dc;
+  --keep: #e9c46a;
+  --gold: #c8961e;
+  --office-line: #8f9bb0;
+  --grid: #9aa6a0;
   --radius: 4px;
   --f: 'Barlow', system-ui, sans-serif;
   --fc: 'Barlow Condensed', 'Barlow', sans-serif;
@@ -41,18 +44,21 @@
   --mat: #45b08f;
   --mat-ink: #0d1f18;
   --red: #ec7358;
-  --egress: #3cc163;
-  --exit: #f09a3a;
-  --office-door: #4bb1d3;
-  --column: #c0675b;
-  --office: #4d5f78;
-  --restricted: #b064a2;
-  --reserved: #a49a3e;
+  --egress: #4cc283;
+  --exit: #f0a251;
+  --office-door: #6ea8db;
+  --column: #8b97a6;
+  --office: #33404f;
+  --restricted: #8e5568;
+  --reserved: #7d7044;
   --desk-neutral: #59655f;
   --window: #4bb7e6;
-  --corridor: #3f86aa;
+  --corridor: #4b88a6;
   --keep: #c9a640;
   --sel: #6aa8ff;
+  --gold: #e6b740;
+  --office-line: #6b7a90;
+  --grid: #56625c;
   --shadow: rgba(0, 0, 0, 0.45);
   color-scheme: dark;
 }
@@ -334,13 +340,13 @@ table.matrix thead th { font-weight: 500; color: var(--graphite-2); }
 .canvas svg { display: block; user-select: none; }
 .bg path { fill: none; stroke-width: 0.7; vector-effect: non-scaling-stroke; opacity: 0.55; }
 .region { fill: var(--paper); stroke: var(--graphite); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
-.keepout { fill: var(--keep); opacity: 0.22; }
+.keepout { fill: var(--keep); opacity: 0.18; }
 .corridor { fill: var(--corridor); opacity: 0.32; }
-.obstacle { fill-opacity: 0.55; stroke: var(--graphite-2); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.obstacle { fill-opacity: 0.9; stroke: var(--office-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .window { stroke: var(--window); stroke-width: 4; vector-effect: non-scaling-stroke; stroke-linecap: round; }
 .door { stroke-width: 6; vector-effect: non-scaling-stroke; stroke-linecap: round; }
 .door.main { stroke-width: 8; }
-.desk { stroke: var(--graphite); stroke-width: 0.9; vector-effect: non-scaling-stroke; }
+.desk { stroke: rgba(30, 40, 35, 0.55); stroke-width: 0.9; vector-effect: non-scaling-stroke; }
 .desk.pinned { stroke: var(--red); stroke-width: 2.4; }
 .seat-tile { stroke: none; opacity: 0.9; }
 .chair { stroke: var(--graphite-2); stroke-width: 0.7; vector-effect: non-scaling-stroke; }
@@ -374,7 +380,7 @@ table.matrix thead th { font-weight: 500; color: var(--graphite-2); }
 .tip ul { margin: 4px 0 0; padding-left: 16px; color: #f2c1b5; }
 
 .toast {
-  position: fixed; right: 18px; bottom: 46px; max-width: 420px;
+  position: fixed; right: 18px; bottom: 86px; max-width: 420px;
   background: var(--graphite); color: var(--paper);
   padding: 10px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
 }
@@ -452,7 +458,7 @@ button.active-tool { outline: 2px solid var(--mat); outline-offset: 1px; }
 
 /* ---------------------------------------------------------------- referencia: edificio y recintos */
 .building { fill: none; stroke: var(--graphite); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
-.room { fill: var(--office); fill-opacity: 0.35; stroke: var(--graphite-2); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.room { fill: var(--office); fill-opacity: 0.6; stroke: var(--office-line); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
 .task.unsure .task-mark { border-color: var(--keep); color: var(--keep); }
 
 /* Espacios (medidas de circulación) */
@@ -490,3 +496,72 @@ button.active-tool { outline: 2px solid var(--mat); outline-offset: 1px; }
 .by-type td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .by-type td.muted { color: var(--muted); font-size: 12px; }
 .by-type .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+/* ---------------------------------------------------------------- inicio */
+.welcome { min-height: 100%; display: grid; place-items: center; background: var(--vellum); padding: 24px 16px; }
+.welcome-card {
+  width: min(520px, 100%); display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: 32px; box-shadow: 0 10px 40px var(--shadow);
+}
+.welcome-card .brand.big { font-size: 26px; }
+.welcome-card h1 { font: 600 28px/1.15 var(--fc); margin: 6px 0 0; }
+.welcome-card p { color: var(--graphite-2); margin: 0 0 8px; }
+button.huge { font-size: 17px; padding: 12px 22px; border-radius: 8px; }
+.welcome-card .theme-switch { margin-top: 10px; }
+
+/* ---------------------------------------------------------------- cuadrícula */
+.grid path { fill: none; vector-effect: non-scaling-stroke; pointer-events: none; }
+.grid .minor { stroke: var(--grid); stroke-width: 0.5; opacity: 0.22; }
+.grid .major { stroke: var(--grid); stroke-width: 0.8; opacity: 0.38; }
+.grid-ctl {
+  position: absolute; right: 10px; bottom: 8px; display: flex; align-items: center; gap: 10px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px;
+  font-size: 12px; box-shadow: 0 2px 8px var(--shadow);
+}
+.grid-ctl label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.grid-ctl select { font-size: 12px; padding: 1px 2px; }
+
+/* ---------------------------------------------------------------- pasillo suave */
+.corridor-line { fill: none; stroke: var(--corridor); stroke-opacity: 0.45; stroke-linejoin: round; stroke-linecap: round; }
+
+/* ---------------------------------------------------------------- separaciones (dorado) */
+.clear-zone { fill: var(--gold); fill-opacity: 0.2; stroke: var(--gold); stroke-width: 1.4; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.clear-label { cursor: text; }
+.clear-label rect { fill: var(--gold); stroke: none; }
+.clear-label text { fill: #fff; font: 600 11px var(--fc); text-anchor: middle; pointer-events: none; }
+.clear-label:hover rect { filter: brightness(1.1); }
+.clear-edit {
+  position: absolute; width: 64px; height: 26px; text-align: center; font: 600 13px var(--fc);
+  border: 2px solid var(--gold); border-radius: 4px; background: var(--paper); color: var(--graphite); z-index: 5;
+}
+.ghost path { fill-opacity: 0.55; stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.ghost circle { fill: var(--paper); fill-opacity: 0.8; stroke: var(--gold); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+
+/* ---------------------------------------------------------------- mejores soluciones */
+.alts h3 { margin-top: 14px; }
+.alt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.alt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px; text-align: left;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; cursor: pointer;
+}
+.alt:hover { border-color: var(--mat); }
+.alt.cur { border-color: var(--mat); box-shadow: inset 0 0 0 1px var(--mat); }
+.alt-n { font: 600 18px var(--fc); color: var(--mat); }
+.alt-n small { font-size: 12px; color: var(--graphite-2); }
+.alt-sub { font-size: 11px; color: var(--muted); }
+.thumb { display: block; width: 100%; height: auto; background: var(--vellum); border-radius: 3px; }
+.t-region { fill: var(--paper); stroke: var(--graphite-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.t-ob { fill: var(--office); stroke: none; }
+.t-ob.column { fill: var(--column); }
+.better-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.better-list li { display: grid; grid-template-columns: 96px 1fr auto; gap: 8px; align-items: center; padding: 6px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); }
+.better-list .thumb { width: 96px; }
+.better-body { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.better-body .desc { color: var(--graphite-2); font-size: 12px; }
+
+/* ---------------------------------------------------------------- escritorios a mano y separaciones */
+.manual-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
+.dims.clears { margin-top: 8px; border-top: 1px dashed var(--rule); padding-top: 6px; }
+.dims-title { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--graphite-2); }
+.welcome-cfg { width: 100%; font-size: 13px; color: var(--graphite-2); }
+.welcome-cfg input { width: 100%; margin-top: 4px; }

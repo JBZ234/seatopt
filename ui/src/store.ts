@@ -5,7 +5,7 @@ import type {
 
 export type Tool =
   | 'select' | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
-  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor';
+  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor' | 'placeDesk';
 
 export type ColorBy = 'type' | 'role' | 'client';
 export type Theme = 'system' | 'light' | 'dark';
@@ -39,6 +39,8 @@ export interface AppState {
   areaM2: number;
   config: Config | null;
   layout: Layout | null;
+  /** Mejores soluciones distintas de la última optimización (la elegida es `layout`). */
+  alternatives: Layout[];
   variants: Variant[];
   suggestions: Suggestion[] | null;
   capacity: Capacity[] | null;
@@ -63,6 +65,14 @@ export interface AppState {
   scaleConfirmed: boolean;
   mainConfirmed: boolean;
   theme: Theme;
+  /** Cuadrícula del lienzo. */
+  gridOn: boolean;
+  snapGrid: boolean;
+  gridSize: number;
+  /** Escritorio a colocar a mano (herramienta placeDesk). */
+  placeType: string;
+  placeAngle: number;
+  placeUp: boolean;
   set: (p: Partial<AppState>) => void;
   updateConfig: (f: (c: Config) => void) => void;
   updatePlan: (f: (p: Plan) => void) => void;
@@ -83,6 +93,7 @@ export const useApp = create<AppState>((set, get) => ({
   areaM2: 0,
   config: null,
   layout: null,
+  alternatives: [],
   variants: [],
   suggestions: null,
   capacity: null,
@@ -115,6 +126,12 @@ export const useApp = create<AppState>((set, get) => ({
   scaleConfirmed: false,
   mainConfirmed: true,
   theme: loadTheme(),
+  gridOn: true,
+  snapGrid: false,
+  gridSize: 500,
+  placeType: '',
+  placeAngle: 0,
+  placeUp: false,
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;
