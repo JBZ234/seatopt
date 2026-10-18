@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { placeDesk } from '../actions';
 import { deskBody, doorInfo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
 import { emptySel, selCount, useApp, uid } from '../store';
-import type { Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
+import type { Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
 const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
 const OBS_FILL: Record<ObstacleKind, string> = { column: 'var(--column)', fixedOffice: 'var(--office)', restricted: 'var(--restricted)', reserved: 'var(--reserved)' };
@@ -86,6 +86,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const panRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
   // campo de edición de una separación (como los campos dinámicos de AutoCAD)
   const [editing, setEditing] = useState<{ key: ClearKey; x: number; y: number; text: string } | null>(null);
+  // arrastre de un recuadro dorado: cambia la medida en vivo
+  const [cdrag, setCdrag] = useState<{ key: ClearKey; dir: Pt; mult: number; v0: number; a: Pt; sx: number; sy: number; val: number; moved: boolean } | null>(null);
 
   // tamaño
   useEffect(() => {
@@ -372,14 +374,16 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const pathEls = useMemo(() => {
     if (!layout) return null;
     const main = st.showCorridor && layout.corridorLines?.length ? layout.corridorLines.map((l) => roundedD(l, 900)).join('') : '';
-    const acc = st.showAccess && layout.accessPaths?.length ? layout.accessPaths.map((l) => roundedD(l, 600)).join('') : '';
+    const acc = st.showAccess && layout.accessPaths?.length ? layout.accessPaths.map((l) => roundedD(l, 600)) : [];
+    // cada recorrido se «dibuja» desde la entrada al aparecer
     return (
-      <g className="paths" clipPath="url(#region-clip)">
+      <g className="paths" clipPath="url(#region-clip)" key={'p' + st.reveal}>
         {main && <path className="corridor-axis" d={main} />}
-        {acc && <><path className="access-halo" d={acc} /><path className="access-line" d={acc} /></>}
+        {acc.map((d, i) => <path key={'h' + i} className="access-halo draw" pathLength={1} d={d} style={{ animationDelay: `${300 + i * 120}ms` }} />)}
+        {acc.map((d, i) => <path key={'l' + i} className="access-line draw" pathLength={1} d={d} style={{ animationDelay: `${300 + i * 120}ms` }} />)}
       </g>
     );
-  }, [layout, st.showCorridor, st.showAccess]);
+  }, [layout, st.showCorridor, st.showAccess, st.reveal]);
 
   const layoutEls = useMemo(() => {
     if (!layout) return null;
@@ -402,19 +406,25 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         { x: c1.x + u.x * w, y: c1.y + u.y * w }, { x: c1.x - u.x * w, y: c1.y - u.y * w },
       ];
     };
+    // al llegar un resultado nuevo los escritorios aparecen en una ola de izquierda a derecha
+    let x0 = Infinity, x1 = -Infinity;
+    for (const m of allMods) { x0 = Math.min(x0, m.center.x); x1 = Math.max(x1, m.center.x); }
+    const span = Math.max(1, x1 - x0);
+    const delay = (x: number) => (st.reveal > 0 ? { '--d': `${Math.round(((x - x0) / span) * 650)}ms` } as CSSProperties : undefined);
+    const modX = new Map(allMods.map((m) => [m.id, m.center.x]));
     return (
-      <>
+      <g className={st.reveal > 0 ? 'reveal' : undefined} key={'r' + st.reveal}>
         {allMods.map((m) => (
-          <path key={m.id} className={'desk' + (m.pinned ? ' pinned' : '')} d={ringD(m.body)}
+          <path key={m.id} className={'desk' + (m.pinned ? ' pinned' : '')} d={ringD(m.body)} style={delay(m.center.x)}
             fill={colorBy === 'type' ? typeColor[m.typeId] ?? '#777' : 'var(--desk-neutral)'} />
         ))}
         {colorBy !== 'type' && layout.seats.filter((s) => (colorBy === 'role' ? s.roleId : s.clientId)).map((s) => (
           <path key={'t' + s.id} className="seat-tile" d={ringD(tile(s))} fill={seatFill(s)} />
         ))}
-        {layout.seats.map((s) => <path key={s.id} className="chair" d={ringD(s.chair)} fill={seatFill(s)} />)}
-      </>
+        {layout.seats.map((s) => <path key={s.id} className="chair" d={ringD(s.chair)} fill={seatFill(s)} style={delay((modX.get(s.moduleId) ?? s.pos.x) + 1)} />)}
+      </g>
     );
-  }, [layout, colorBy, typeColor, roleColor, clientColor, config?.catalog]);
+  }, [layout, colorBy, typeColor, roleColor, clientColor, config?.catalog, st.reveal]);
 
   // resaltado de la selección (y vista previa al mover)
   const sel = st.selection;
@@ -461,76 +471,109 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   // ------------------------------------------------ separaciones del elemento seleccionado (dorado, editables)
   const one = selCount(sel) === 1;
-  const clr: ClearInfo | null = useMemo(() => {
-    if (!one || !config || !plan) return null;
+  const infoFor = (pl: Plan, cf: Config): ClearInfo | null => {
     if (sel.obstacles.length) {
-      const o = plan.obstacles.find((x) => x.id === sel.obstacles[0]);
-      return o ? obstacleInfo(config, o) : null;
+      const o = pl.obstacles.find((x) => x.id === sel.obstacles[0]);
+      return o ? obstacleInfo(cf, o) : null;
     }
     if (sel.doors.length) {
-      const d = plan.doors.find((x) => x.id === sel.doors[0]);
-      return d && d.kind !== 'ignore' ? doorInfo(config, plan, d) : null;
+      const d = pl.doors.find((x) => x.id === sel.doors[0]);
+      return d && d.kind !== 'ignore' ? doorInfo(cf, pl, d) : null;
     }
     if (sel.modules.length) {
       const m = layout?.modules.find((x) => x.id === sel.modules[0]);
-      const t = m && config.catalog.find((x) => x.id === m.typeId);
-      return m && t ? moduleInfo(config, m, t) : null;
+      const t = m && cf.catalog.find((x) => x.id === m.typeId);
+      return m && t ? moduleInfo(cf, m, t) : null;
     }
-    if (sel.region?.length) return regionInfo(plan, sel.region[0]);
+    if (sel.region?.length) return regionInfo(pl, sel.region[0]);
     return null;
-  }, [one, sel, plan, layout, config]);
+  };
+  const clr: ClearInfo | null = useMemo(() => (one && config && plan ? infoFor(plan, config) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [one, sel, plan, layout, config]);
 
-  const commitClear = (key: ClearKey, mm: number) => {
-    if (!config || !plan || !isFinite(mm) || mm < 0) return;
+  /** Qué cambia al poner `mm` en la medida `key` del elemento seleccionado (sin aplicarlo). */
+  const clearMut = (key: ClearKey, mm: number): { plan?: (p: Plan) => void; config?: (c: Config) => void } | null => {
+    if (!config || !plan || !isFinite(mm) || mm < 0) return null;
     if (sel.region?.length && clr?.groups && typeof key === 'number') {
       const ri = sel.region[0];
       const edges = clr.groups[key] ?? [];
-      st.updatePlan((p) => {
-        const rc = p.regionClear ? p.regionClear.map((r) => [...r]) : [];
-        while (rc.length < p.region.length) rc.push([]);
-        const row = rc[ri];
-        while (row.length < p.region[ri].length) row.push(0);
-        for (const e of edges) row[e] = mm;
-        p.regionClear = rc;
-      });
-      return;
+      return {
+        plan: (p) => {
+          const rc = p.regionClear ? p.regionClear.map((r) => [...r]) : [];
+          while (rc.length < p.region.length) rc.push([]);
+          const row = rc[ri];
+          while (row.length < p.region[ri].length) row.push(0);
+          for (const e of edges) row[e] = mm;
+          p.regionClear = rc;
+        },
+      };
     }
     if (sel.obstacles.length) {
       const id = sel.obstacles[0];
-      st.updatePlan((p) => {
-        const o = p.obstacles.find((x) => x.id === id);
-        if (!o) return;
-        if (o.poly.length === 4 && typeof key === 'number') {
-          const cur = obstacleClears(config, o);
-          cur[key] = mm;
-          o.clear = cur;
-        } else {
-          o.clear = [mm];
-        }
-      });
-    } else if (sel.doors.length) {
+      return {
+        plan: (p) => {
+          const o = p.obstacles.find((x) => x.id === id);
+          if (!o) return;
+          if (o.poly.length === 4 && typeof key === 'number') {
+            const cur = [...obstacleClears(config, o)];
+            cur[key] = mm;
+            o.clear = cur;
+          } else {
+            o.clear = [mm];
+          }
+        },
+      };
+    }
+    if (sel.doors.length) {
       const id = sel.doors[0];
-      st.updatePlan((p) => {
-        const d = p.doors.find((x) => x.id === id);
-        if (!d) return;
-        if (key === 'depth') d.clearDepth = mm;
-        if (key === 'width') d.clearWidth = mm;
-      });
-    } else if (sel.modules.length) {
+      return {
+        plan: (p) => {
+          const d = p.doors.find((x) => x.id === id);
+          if (!d) return;
+          if (key === 'depth') d.clearDepth = mm;
+          if (key === 'width') d.clearWidth = mm;
+        },
+      };
+    }
+    if (sel.modules.length) {
       const m = layout?.modules.find((x) => x.id === sel.modules[0]);
-      if (!m) return;
+      if (!m) return null;
+      return {
+        config: (c) => {
+          const t = c.catalog.find((x) => x.id === m.typeId);
+          if (!t) return;
+          if (key === 'chair') t.clearChair = mm;
+          if (key === 'back') t.clearBack = mm;
+          if (key === 'left') t.clearLeft = mm;
+          if (key === 'right') t.clearRight = mm;
+        },
+      };
+    }
+    return null;
+  };
+  const commitClear = (key: ClearKey, mm: number) => {
+    const m = clearMut(key, mm);
+    if (!m) return;
+    if (m.plan) st.updatePlan(m.plan);
+    if (m.config) {
       st.snapshot();
-      st.updateConfig((c) => {
-        const t = c.catalog.find((x) => x.id === m.typeId);
-        if (!t) return;
-        if (key === 'chair') t.clearChair = mm;
-        if (key === 'back') t.clearBack = mm;
-        if (key === 'left') t.clearLeft = mm;
-        if (key === 'right') t.clearRight = mm;
-      });
+      st.updateConfig(m.config);
       st.say('Separación del tipo de escritorio cambiada: se aplica a todos los de ese tipo en la próxima optimización.');
     }
   };
+  // lo que se ve: durante el arrastre, la medida nueva en vivo
+  const clrShown: ClearInfo | null = useMemo(() => {
+    if (!cdrag?.moved || !clr || !plan || !config) return clr;
+    const m = clearMut(cdrag.key, cdrag.val);
+    if (!m) return clr;
+    const p2 = m.plan ? structuredClone(plan) : plan;
+    const c2 = m.config ? structuredClone(config) : config;
+    m.plan?.(p2);
+    m.config?.(c2);
+    return infoFor(p2, c2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cdrag, clr, plan, config]);
   useEffect(() => { setEditing(null); }, [sel]);
 
   // ¿cabe el escritorio que se está colocando a mano?
@@ -583,6 +626,15 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onMove = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
+    if (cdrag) {
+      const q = toWorld(x, y);
+      const along = (q.x - cdrag.a.x) * cdrag.dir.x + (q.y - cdrag.a.y) * cdrag.dir.y;
+      const stp = noSnap ? 10 : 50; // de a 5 cm (Espacio: de a 1 cm)
+      const val = Math.max(0, Math.round((cdrag.v0 + along * cdrag.mult) / stp) * stp);
+      const moved = cdrag.moved || Math.hypot(x - cdrag.sx, y - cdrag.sy) > 3;
+      if (val !== cdrag.val || moved !== cdrag.moved) setCdrag({ ...cdrag, val, moved });
+      return;
+    }
     const sn = snapAll(toWorld(x, y), objectSnapNow());
     const w = sn.p;
     setCursor(w);
@@ -616,6 +668,16 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onUp = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
+    if (cdrag) {
+      const c = cdrag;
+      setCdrag(null);
+      if (c.moved) commitClear(c.key, c.val);
+      else {
+        const l = clr?.labels.find((l) => l.key === c.key);
+        if (l) setEditing({ key: l.key, x: sx(l.pos), y: sy(l.pos), text: (l.value / 1000).toFixed(2) });
+      }
+      return;
+    }
     const w = worldAt(x, y);
     if (panRef.current) {
       const moved = Math.hypot(x - panRef.current.sx, y - panRef.current.sy) > 4;
@@ -694,8 +756,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         onSeed(w);
         break;
       case 'placeDesk':
-        if (fitWhy.length) { st.say('No cabe ahí: ' + fitWhy.join('; ') + '. Mantén Espacio para moverlo sin enganche.', 'error'); break; }
-        placeDesk(w);
+        if (fitWhy.length && !e.shiftKey) { st.say('No cabe ahí: ' + fitWhy.join('; ') + '. Shift+clic lo ubica de todas formas; Espacio lo mueve sin enganche.', 'error'); break; }
+        placeDesk(w, fitWhy);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
         const d = nearestDoor(toWorld(x, y));
@@ -775,7 +837,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {gridEls}
           {layoutEls}
           {pathEls}
-          {clr?.zones.map((z, i) => <path key={'cz' + i} className="clear-zone" d={ringD(z)} />)}
+          {clrShown?.zones.map((z, i) => <path key={'cz' + i} className="clear-zone" d={ringD(z)} />)}
           {tool === 'placeDesk' && cursor && (() => {
             const t = config?.catalog.find((x) => x.id === st.placeType);
             if (!t) return null;
@@ -820,10 +882,16 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             </g>
           ))}
           {st.showAccess && layout?.accessPaths?.[0] && <circle className="access-start" cx={sx(layout.accessPaths[0][0])} cy={sy(layout.accessPaths[0][0])} r={6} />}
-          {clr?.labels.map((l, i) => (
-            <g key={'cl' + i} className="clear-label" onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setEditing({ key: l.key, x: sx(l.pos), y: sy(l.pos), text: (l.value / 1000).toFixed(2) }); }}>
-              <title>{l.title} · clic para cambiar</title>
+          {clrShown?.labels.map((l, i) => (
+            <g key={'cl' + i} className={'clear-label' + (moving || drag || tool !== 'select' ? ' inert' : '') + (cdrag?.key === l.key ? ' dragging' : '')}
+              style={{ cursor: Math.abs(l.dir.y) > Math.abs(l.dir.x) ? 'ns-resize' : 'ew-resize' }}
+              onMouseDown={(e) => {
+                if (e.button !== 0 || moving || tool !== 'select') return;
+                e.stopPropagation();
+                const { sx: x, sy: y } = evPt(e);
+                setCdrag({ key: l.key, dir: l.dir, mult: l.mult ?? 1, v0: l.value, a: toWorld(x, y), sx: x, sy: y, val: l.value, moved: false });
+              }}>
+              <title>{l.title} · arrástralo para cambiarla o haz clic para escribirla</title>
               <rect x={sx(l.pos) - (l.prefix ? 33 : 21)} y={sy(l.pos) - 9} width={l.prefix ? 66 : 42} height={18} rx={4} />
               <text x={sx(l.pos)} y={sy(l.pos) + 4}>{l.prefix ? `${l.prefix} ` : ''}{(l.value / 1000).toFixed(2)}</text>
             </g>
@@ -901,7 +969,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       </div>
       {tool === 'placeDesk' && cursor && placeType && (
         <div className={'fit-tip' + (fitWhy.length ? ' bad' : ' ok')} style={{ left: sx(cursor) + 18, top: sy(cursor) + 18 }}>
-          {fitWhy.length ? <><b>No cabe aquí</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul></> : <b>Cabe · clic para ubicarlo</b>}
+          {fitWhy.length ? <><b>No cabe aquí</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul><small>Shift+clic para ubicarlo igual</small></> : <b>Cabe · clic para ubicarlo</b>}
         </div>
       )}
       {hover && <SeatTip layout={layout} seat={hover.seat} x={hover.sx} y={hover.sy} />}

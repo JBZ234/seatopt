@@ -127,7 +127,9 @@ fn build_masks(ctx: &Ctx, g: &RotGrid, mods: &[WModule], seats: &[WSeat], ok: &[
         let side = s.facing.perp();
         let out = -s.facing;
         let r = |d: f64| vec![edge - side * (sw * 0.5), edge + side * (sw * 0.5), edge + side * (sw * 0.5) + out * d, edge - side * (sw * 0.5) + out * d];
-        raster::fill_polygon(&fr, &mut chair, &to_g(&r(cc)), true);
+        // la franja de la silla de un candidato no puede pisar esta: entre las dos debe quedar
+        // «silla con silla» (E2), ni más ni menos (antes se pedía el doble del espacio de silla)
+        raster::fill_polygon(&fr, &mut chair, &to_g(&r((p.e2_ss - cc).clamp(g.res, cc.max(g.res)))), true);
         raster::fill_polygon(&fr, &mut ext, &to_g(&r(ce)), true);
     }
     let comb = |a: &[&Vec<bool>]| -> Vec<bool> { (0..n).map(|i| a.iter().any(|m| m[i])).collect() };

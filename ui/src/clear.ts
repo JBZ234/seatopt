@@ -2,7 +2,11 @@
 import type { Config, DeskType, Door, Module, Obstacle, Plan, Pt } from './types';
 
 export type ClearKey = 'chair' | 'back' | 'left' | 'right' | 'depth' | 'width' | number;
-export interface ClearLabel { pos: Pt; value: number; key: ClearKey; title: string; prefix?: string }
+export interface ClearLabel {
+  pos: Pt; value: number; key: ClearKey; title: string; prefix?: string;
+  /** Hacia dónde crece la medida al arrastrar (unitario) y cuánto cambia por mm arrastrado. */
+  dir: Pt; mult?: number;
+}
 export interface ClearInfo { zones: Pt[][]; labels: ClearLabel[]; /** Para el recinto: aristas de cada grupo (una etiqueta por grupo). */ groups?: number[][] }
 
 const add = (a: Pt, b: Pt): Pt => ({ x: a.x + b.x, y: a.y + b.y });
@@ -72,7 +76,7 @@ export function obstacleInfo(c: Config, o: Obstacle): ClearInfo {
     }
     if (perSide || i === 0) {
       const mid = mul(add(a, b), 0.5);
-      labels.push({ pos: add(mid, mul(out, Math.max(di, 180) * 0.5 + (di > 0 ? 0 : 160))), value: di, key: perSide ? i : 0, title: perSide ? 'Separación de este lado' : 'Separación alrededor' });
+      labels.push({ pos: add(mid, mul(out, Math.max(di, 180) * 0.5 + (di > 0 ? 0 : 160))), value: di, dir: out, key: perSide ? i : 0, title: perSide ? 'Separación de este lado' : 'Separación alrededor' });
     }
   }
   return { zones, labels };
@@ -105,8 +109,8 @@ export function doorInfo(c: Config, plan: Plan, d: Door): ClearInfo {
   return {
     zones: depth > 0 ? [zone] : [],
     labels: [
-      { pos: add(mid, mul(inward, Math.max(depth, 400) * 0.5)), value: depth, key: 'depth', title: 'Fondo libre frente a la puerta', prefix: 'fondo' },
-      { pos: add(add(mid, mul(inward, Math.max(depth, 400) + 220)), mul(u, 0)), value: width, key: 'width', title: 'Ancho libre frente a la puerta', prefix: 'ancho' },
+      { pos: add(mid, mul(inward, Math.max(depth, 400) * 0.5)), value: depth, dir: inward, key: 'depth', title: 'Fondo libre frente a la puerta', prefix: 'fondo' },
+      { pos: add(add(mid, mul(inward, Math.max(depth, 400) + 220)), mul(u, 0)), value: width, dir: u, mult: 2, key: 'width', title: 'Ancho libre frente a la puerta', prefix: 'ancho' },
     ],
   };
 }
@@ -133,17 +137,17 @@ export function moduleInfo(c: Config, m: Module, t: DeskType): ClearInfo {
   for (const s of seatSides) {
     if (cc > 0) zones.push(s > 0 ? rect(-hl, hl, hd, hd + cc) : rect(-hl, hl, -hd - cc, -hd));
   }
-  labels.push({ pos: L(0, sgn * (hd + Math.max(cc, 300) / 2)), value: chairClear(c, t), key: 'chair', title: 'Espacio libre del lado de la silla', prefix: 'silla' });
+  labels.push({ pos: L(0, sgn * (hd + Math.max(cc, 300) / 2)), value: chairClear(c, t), dir: mul(v, sgn), key: 'chair', title: 'Espacio libre del lado de la silla', prefix: 'silla' });
   if (!two) {
     const bk = Math.max(0, t.clearBack ?? 0);
     if (bk > 0) zones.push(sgn > 0 ? rect(-hl, hl, -hd - bk, -hd) : rect(-hl, hl, hd, hd + bk));
-    labels.push({ pos: L(0, -sgn * (hd + Math.max(bk, 300) / 2)), value: bk, key: 'back', title: 'Separación detrás del escritorio', prefix: 'atrás' });
+    labels.push({ pos: L(0, -sgn * (hd + Math.max(bk, 300) / 2)), value: bk, dir: mul(v, -sgn), key: 'back', title: 'Separación detrás del escritorio', prefix: 'atrás' });
   }
   const cl = Math.max(0, t.clearLeft ?? 0), cr = Math.max(0, t.clearRight ?? 0);
   if (cl > 0) zones.push(rect(-hl - cl, -hl, -hd, hd));
   if (cr > 0) zones.push(rect(hl, hl + cr, -hd, hd));
-  labels.push({ pos: L(-hl - Math.max(cl, 300) / 2, 0), value: cl, key: 'left', title: 'Separación a la izquierda', prefix: 'izq.' });
-  labels.push({ pos: L(hl + Math.max(cr, 300) / 2, 0), value: cr, key: 'right', title: 'Separación a la derecha', prefix: 'der.' });
+  labels.push({ pos: L(-hl - Math.max(cl, 300) / 2, 0), value: cl, dir: mul(u, -1), key: 'left', title: 'Separación a la izquierda', prefix: 'izq.' });
+  labels.push({ pos: L(hl + Math.max(cr, 300) / 2, 0), value: cr, dir: u, key: 'right', title: 'Separación a la derecha', prefix: 'der.' });
   return { zones, labels };
 }
 
@@ -201,7 +205,7 @@ export function regionInfo(plan: Plan, ri: number): ClearInfo {
     const a = ring[mid], b = ring[(mid + 1) % n];
     const p = g.length > 1 && g.length % 2 === 0 ? a : mul(add(a, b), 0.5);
     const d = val(g[0]);
-    labels.push({ pos: add(p, mul(inward(mid), Math.max(d, 300) * 0.5 + (d > 0 ? 0 : 120))), value: d, key: gi, title: g.length > 1 ? `Separación en este tramo curvo (${g.length} aristas)` : 'Separación hacia adentro desde esta arista' });
+    labels.push({ pos: add(p, mul(inward(mid), Math.max(d, 300) * 0.5 + (d > 0 ? 0 : 120))), value: d, dir: inward(mid), key: gi, title: g.length > 1 ? `Separación en este tramo curvo (${g.length} aristas)` : 'Separación hacia adentro desde esta arista' });
   });
   return { zones, labels, groups };
 }

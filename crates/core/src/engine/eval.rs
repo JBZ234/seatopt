@@ -560,7 +560,8 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
             let off = m.pm.dep * 0.5 + t.clear_back.max(0.0) + 160.0;
             let hit = [-0.35, 0.0, 0.35].iter().filter(|&&a| {
                 let q = m.center + u * (a * m.pm.len) + v * (back * off);
-                !ctx.f.cell_idx(q).map(|i| ctx.free[i]).unwrap_or(false)
+                // muro, oficina, columna o su franja de separación: cuenta como «apoyado»
+                !ctx.f.cell_idx(q).map(|i| ctx.free[i] && !ctx.keep0[i]).unwrap_or(false)
             }).count();
             if hit >= 2 {
                 on += 1;

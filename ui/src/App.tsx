@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, type CSSProperties } from 'react';
+import { applyPalette, PALETTES } from './palette';
 import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, saveProject, setScale } from './actions';
 import { backendName } from './api';
 import Canvas from './components/Canvas';
@@ -74,13 +75,14 @@ export default function App() {
     const apply = () => {
       const dark = st.theme === 'dark' || (st.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      applyPalette(st.palette, dark);
     };
     apply();
-    try { localStorage.setItem('seatopt-theme', st.theme); } catch { /* sin almacenamiento */ }
+    try { localStorage.setItem('seatopt-theme', st.theme); localStorage.setItem('seatopt-palette', st.palette); } catch { /* sin almacenamiento */ }
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
-  }, [st.theme]);
+  }, [st.theme, st.palette]);
 
   const onSeed = (p: Pt) => { st.set({ tool: 'select' }); analyzePlan(p); };
   const onCalibrated = (a: Pt, b: Pt) => {
@@ -136,7 +138,7 @@ export default function App() {
           <ThemeSwitch />
         </div>
       </header>
-      <aside className="panel">
+      <aside className="panel" key={'step' + st.step}>
         {st.step === 0 && <PlanStep />}
         {st.step === 1 && <DesksStep />}
         {st.step === 2 && <RulesStep />}
@@ -169,7 +171,7 @@ export default function App() {
           <span className="muted">{st.plan ? `${st.areaM2.toFixed(0)} m² útiles` : 'Sin plano'}{req ? ` · ${req} puestos fijos` : ''}{st.config?.demand.some((d) => d.max) ? ' · + máximo posible' : ''}</span>
         )}
         <span className="counter">
-          {k ? (k.maxMode ? <><b>{k.seatsPlaced}</b> puestos</> : <><b>{k.seatsPlaced}</b> / {k.seatsRequested} ubicados</>) : null}
+          {k ? (k.maxMode ? <><b key={k.seatsPlaced}>{k.seatsPlaced}</b> puestos</> : <><b key={k.seatsPlaced}>{k.seatsPlaced}</b> / {k.seatsRequested} ubicados</>) : null}
         </span>
         <span className="muted small">modo {backendName}</span>
       </footer>
@@ -180,12 +182,22 @@ export default function App() {
 
 function ThemeSwitch() {
   const theme = useApp((s) => s.theme);
+  const palette = useApp((s) => s.palette);
   const set = useApp((s) => s.set);
   return (
-    <div className="theme-switch" role="radiogroup" aria-label="Tema">
-      {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l]) => (
-        <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => set({ theme: t })}>{l}</button>
-      ))}
+    <div className="theme-row">
+      <div className="palette-switch" role="radiogroup" aria-label="Paleta de color">
+        {PALETTES.map((p) => (
+          <button key={p.id} role="radio" aria-checked={palette === p.id} aria-label={p.name} title={p.name}
+            className={'swatch' + (palette === p.id ? ' on' : '')} style={{ '--sw': p.dark, '--sw2': p.light } as CSSProperties}
+            onClick={() => set({ palette: p.id })} />
+        ))}
+      </div>
+      <div className="theme-switch" role="radiogroup" aria-label="Tema">
+        {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l]) => (
+          <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => set({ theme: t })}>{l}</button>
+        ))}
+      </div>
     </div>
   );
 }

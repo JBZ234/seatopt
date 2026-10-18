@@ -10,6 +10,10 @@ export type Tool =
 export type ColorBy = 'type' | 'role' | 'client';
 export type Theme = 'system' | 'light' | 'dark';
 
+function loadPalette(): string {
+  try { return localStorage.getItem('seatopt-palette') || 'verde'; } catch { return 'verde'; }
+}
+
 function loadTheme(): Theme {
   try {
     const t = localStorage.getItem('seatopt-theme');
@@ -70,6 +74,10 @@ export interface AppState {
   scaleConfirmed: boolean;
   mainConfirmed: boolean;
   theme: Theme;
+  /** Paleta de color (ver palette.ts). */
+  palette: string;
+  /** Sube cada vez que llega un resultado nuevo: anima la aparición de los escritorios. */
+  reveal: number;
   /** Cuadrícula del lienzo. */
   gridOn: boolean;
   snapGrid: boolean;
@@ -143,6 +151,8 @@ export const useApp = create<AppState>((set, get) => ({
   scaleConfirmed: false,
   mainConfirmed: true,
   theme: loadTheme(),
+  palette: loadPalette(),
+  reveal: 0,
   gridOn: true,
   snapGrid: false,
   gridSize: 500,

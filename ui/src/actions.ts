@@ -122,7 +122,7 @@ export async function optimize(resume = false) {
     const res = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizando', progress: st.progress, signal } }), { signal });
     const alts = (res.alternatives && res.alternatives.length ? res.alternatives : [res]).map((l) => ({ ...l, alternatives: undefined }));
     const layout = alts[0];
-    S().set({ layout, alternatives: alts, suggestions: null, selection: { modules: [], obstacles: [], doors: [], windows: [] } });
+    S().set({ layout, alternatives: alts, suggestions: null, selection: { modules: [], obstacles: [], doors: [], windows: [] }, reveal: S().reveal + 1 });
     const k = layout.kpis;
     if (k.unplacedByType.length > 0) {
       S().say('No caben todos los escritorios con cantidad fija. Prueba «Buscar mejores valores».', 'error');
@@ -211,7 +211,7 @@ export function applySuggestion(s: Suggestion) {
   S().set({ suggestions: (S().suggestions ?? []).filter((x) => x !== s) });
   if (s.layout) {
     const l = { ...s.layout, alternatives: undefined };
-    S().set({ layout: l, alternatives: [l], selection: { modules: [], obstacles: [], doors: [], windows: [] } });
+    S().set({ layout: l, alternatives: [l], selection: { modules: [], obstacles: [], doors: [], windows: [] }, reveal: S().reveal + 1 });
     S().say(`Medida aplicada: ${l.kpis.seatsPlaced} puestos. Puedes optimizar de nuevo con más tiempo para afinar.`);
   } else {
     S().say('Medida aplicada. Vuelve a optimizar para ver el resultado.');
@@ -222,12 +222,12 @@ export function applySuggestion(s: Suggestion) {
 export function chooseAlternative(i: number) {
   const a = S().alternatives[i];
   if (!a) return;
-  S().set({ layout: a, selection: { modules: [], obstacles: [], doors: [], windows: [] } });
+  S().set({ layout: a, selection: { modules: [], obstacles: [], doors: [], windows: [] }, reveal: S().reveal + 1 });
   if (S().config?.org.teams.some((t) => t.count > 0)) reassign();
 }
 
 /** Coloca un escritorio a mano (queda fijado: la optimización lo respeta y descuenta de la cantidad). */
-export async function placeDesk(center: Pt) {
+export async function placeDesk(center: Pt, forced: string[] = []) {
   const s = S();
   const c = s.config;
   const t = c?.catalog.find((x) => x.id === s.placeType);
@@ -252,7 +252,7 @@ export async function placeDesk(center: Pt) {
   try {
     const nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout });
     S().set({ layout: nl });
-    const flags = [...new Set(nl.seats.filter((x) => x.moduleId === m.id).flatMap((x) => x.flags))];
+    const flags = [...new Set([...forced, ...nl.seats.filter((x) => x.moduleId === m.id).flatMap((x) => x.flags)])];
     if (flags.length) S().say(`Ubicado, pero no cumple: ${flags.join('; ')}. Ctrl+Z para quitarlo.`, 'error');
     else S().say(`Puesto agregado: ${nl.kpis.seatsPlaced} puestos.`);
   } catch (e) {

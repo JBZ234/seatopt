@@ -1,7 +1,7 @@
 // ¿Cabe un escritorio aquí? Revisión geométrica rápida (para la vista previa al colocar a mano):
 // recinto, obstáculos y sus separaciones, despejes de puertas, pasillo principal y otros escritorios
 // con sus sillas. La revisión completa (acceso a cada puesto, recorridos) la hace el motor al colocarlo.
-import { chairClear, doorInfo, moduleInfo, obstacleInfo, regionInfo } from './clear';
+import { chairClear, doorInfo, moduleInfo, obstacleInfo, regionInfo, ruleVal } from './clear';
 import type { Config, DeskType, Layout, Plan, Pt } from './types';
 
 function pip(p: Pt, poly: Pt[]) {
@@ -65,6 +65,45 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
   const bodies = mods.map((m) => shape(m.body));
   const otherClear = mods.flatMap((m) => { const tt = config.catalog.find((x) => x.id === m.typeId); return tt ? moduleInfo(config, m, tt).zones : []; }).map(shape);
 
+  // filas enfrentadas por la espalda de la silla (regla E2): silla con silla y silla con escritorio
+  const e2ss = ruleVal(config, 'E2', 'silla_silla') ?? 0, e2se = ruleVal(config, 'E2', 'silla_espalda') ?? 0;
+  const chairD = ruleVal(config, 'E1', 'silla') ?? 500;
+  const e2why: string[] = [];
+  const m2 = (mm: number) => (mm / 1000).toFixed(2).replace('.', ',');
+  const others = layout?.seats ?? [];
+  for (const sd of sides) {
+    const f = { x: -v.x * sd, y: -v.y * sd }; // hacia el escritorio desde la silla
+    const zone = (d: number) => [0, 1, 2, 3].map((k) => {
+      const a = k === 0 || k === 3 ? -hl + 60 : hl - 60, q = k < 2 ? hd : hd + d;
+      return { x: center.x + u.x * a + v.x * q * sd, y: center.y + u.y * a + v.y * q * sd };
+    });
+    if (e2ss > 0) {
+      const z = zone(e2ss - 25); // tolerancia: justo en la medida cuenta como que cumple
+      const bad = others.find((o) => {
+        if (o.facing.x * f.x + o.facing.y * f.y > -0.7) return false; // solo sillas que dan la espalda a la nuestra
+        const e = { x: o.pos.x + o.facing.x * chairD * 0.5, y: o.pos.y + o.facing.y * chairD * 0.5 };
+        return pip(e, z);
+      });
+      if (bad) e2why.push(`Silla espalda con espalda con el puesto ${bad.number}: entre escritorios deben quedar ${m2(e2ss)} m (regla «silla con silla»)`);
+    }
+    if (e2se > 0 && hits(samples({ c: center, u, v: { x: v.x * sd, y: v.y * sd }, a0: -hl + 60, a1: hl - 60, b0: hd, b1: hd + e2se - 25 }), bodies)) {
+      e2why.push(`Detrás de la silla quedan menos de ${m2(e2se)} m hasta otro escritorio (regla «silla con espalda»)`);
+    }
+  }
+  // y al revés: el escritorio nuevo no puede quedar detrás de la silla de otro a menos de esa medida
+  if (e2se > 0) {
+    const bad = others.find((o) => {
+      const e = { x: o.pos.x + o.facing.x * chairD * 0.5, y: o.pos.y + o.facing.y * chairD * 0.5 };
+      const sdv = { x: -o.facing.y, y: o.facing.x }, w = 280;
+      const z = [
+        { x: e.x + sdv.x * w, y: e.y + sdv.y * w }, { x: e.x - sdv.x * w, y: e.y - sdv.y * w },
+        { x: e.x - sdv.x * w - o.facing.x * (e2se - 25), y: e.y - sdv.y * w - o.facing.y * (e2se - 25) }, { x: e.x + sdv.x * w - o.facing.x * (e2se - 25), y: e.y + sdv.y * w - o.facing.y * (e2se - 25) },
+      ];
+      return body.some((p) => pip(p, z));
+    });
+    if (bad) e2why.push(`Queda a menos de ${m2(e2se)} m detrás de la silla del puesto ${bad.number} (regla «silla con espalda»)`);
+  }
+
   const why = new Set<string>();
   const all = [...body, ...chair, ...extra];
   if (all.some((p) => !inRegion(p, plan.region))) why.add('Se sale del recinto o choca con un muro');
@@ -75,5 +114,6 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
   if (hits([...body, ...chair], corridor)) why.add('Invade el pasillo principal');
   if (hits(body, bodies)) why.add('Se monta sobre otro escritorio');
   else if (hits([...chair, ...extra], bodies) || hits(body, otherClear)) why.add('Queda sin espacio con otro escritorio (sillas o separación)');
+  e2why.forEach((w) => why.add(w));
   return [...why];
 }

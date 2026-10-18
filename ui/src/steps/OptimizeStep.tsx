@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { applySuggestion, chooseAlternative, exportCsv, exportDxf, exportPdf, optimize, reassign, saveProject, suggest } from '../actions';
 import Thumb from '../components/Thumb';
 import { Fold, Num, Slider } from '../components/ui';
@@ -27,7 +28,7 @@ export default function OptimizeStep() {
       </p>
       <div className="sliders">
         <Slider label="Orden de las filas" hint="0: mete escritorios en cualquier hueco (más puestos). 10: solo filas ordenadas y escritorios apoyados en muros o espalda con espalda." value={c.weights.order} onChange={(v) => st.updateConfig((cc) => { cc.weights.order = v; })} />
-        <Slider label="Pegar a los muros" hint="Cuánto se prefiere que los escritorios de un lado queden con la espalda contra un muro." value={c.weights.wall ?? 5} onChange={(v) => st.updateConfig((cc) => { cc.weights.wall = v; })} />
+        <Slider label="Pegar a muros y oficinas" hint="Cuánto se prefiere que los escritorios de un lado queden con la espalda contra un muro, una oficina o una columna (respetando su separación)." value={c.weights.wall ?? 5} onChange={(v) => st.updateConfig((cc) => { cc.weights.wall = v; })} />
         {hasPeople && <Slider label="Agrupación por rol y cliente" hint="Cuánto pesa sentar a cada equipo junto." value={c.weights.grouping} onChange={(v) => st.updateConfig((cc) => { cc.weights.grouping = v; })} />}
       </div>
       <div className="field-row">
@@ -68,7 +69,7 @@ export default function OptimizeStep() {
           <h3>Mejores soluciones encontradas</h3>
           <div className="alt-list">
             {st.alternatives.map((a, i) => (
-              <button key={i} className={'alt' + (a === L ? ' cur' : '')} onClick={() => chooseAlternative(i)} aria-pressed={a === L}>
+              <button key={i} className={'alt' + (a === L ? ' cur' : '')} style={{ '--i': i } as CSSProperties} onClick={() => chooseAlternative(i)} aria-pressed={a === L}>
                 <Thumb plan={st.plan!} layout={a} config={c} />
                 <span className="alt-n">{a.kpis.seatsPlaced}<small> puestos</small></span>
                 <span className="alt-sub">#{i + 1} · {a.kpis.modulesPlaced} escritorios{a.kpis.unplacedByType.length ? ' · faltan fijos' : ''}</span>
