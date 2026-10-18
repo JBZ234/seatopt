@@ -7,7 +7,9 @@ export interface ClearLabel {
   /** Hacia dónde crece la medida al arrastrar (unitario) y cuánto cambia por mm arrastrado. */
   dir: Pt; mult?: number;
 }
-export interface ClearInfo { zones: Pt[][]; labels: ClearLabel[]; /** Para el recinto: aristas de cada grupo (una etiqueta por grupo). */ groups?: number[][] }
+/** Borde exterior de una zona dorada: se puede arrastrar para cambiar la medida. */
+export interface ClearEdge { a: Pt; b: Pt; key: ClearKey; dir: Pt; mult?: number; value: number }
+export interface ClearInfo { zones: Pt[][]; labels: ClearLabel[]; edges?: ClearEdge[]; /** Para el recinto: aristas de cada grupo (una etiqueta por grupo). */ groups?: number[][] }
 
 const add = (a: Pt, b: Pt): Pt => ({ x: a.x + b.x, y: a.y + b.y });
 const sub = (a: Pt, b: Pt): Pt => ({ x: a.x - b.x, y: a.y - b.y });
@@ -63,6 +65,7 @@ export function obstacleInfo(c: Config, o: Obstacle): ClearInfo {
   const ccw = area(o.poly) > 0;
   const zones: Pt[][] = [];
   const labels: ClearLabel[] = [];
+  const edges: ClearEdge[] = [];
   const perSide = n === 4;
   for (let i = 0; i < n; i++) {
     const a = o.poly[i], b = o.poly[(i + 1) % n];
@@ -74,12 +77,13 @@ export function obstacleInfo(c: Config, o: Obstacle): ClearInfo {
       const a2 = sub(a, mul(u, dp)), b2 = add(b, mul(u, dn));
       zones.push([a2, b2, add(b2, mul(out, di)), add(a2, mul(out, di))]);
     }
+    if (perSide || di > 0) edges.push({ a: add(a, mul(out, di)), b: add(b, mul(out, di)), key: perSide ? i : 0, dir: out, value: di });
     if (perSide || i === 0) {
       const mid = mul(add(a, b), 0.5);
       labels.push({ pos: add(mid, mul(out, Math.max(di, 180) * 0.5 + (di > 0 ? 0 : 160))), value: di, dir: out, key: perSide ? i : 0, title: perSide ? 'Separación de este lado' : 'Separación alrededor' });
     }
   }
-  return { zones, labels };
+  return { zones, labels, edges };
 }
 
 /** Despeje frente a una puerta: fondo y ancho (propios o de las reglas C4 / C3). */
@@ -108,6 +112,7 @@ export function doorInfo(c: Config, plan: Plan, d: Door): ClearInfo {
   const zone = [sub(mid, mul(u, h)), add(mid, mul(u, h)), add(add(mid, mul(u, h)), mul(inward, depth)), add(sub(mid, mul(u, h)), mul(inward, depth))];
   return {
     zones: depth > 0 ? [zone] : [],
+    edges: [{ a: zone[3], b: zone[2], key: 'depth', dir: inward, value: depth }, { a: zone[1], b: zone[2], key: 'width', dir: u, mult: 2, value: width }],
     labels: [
       { pos: add(mid, mul(inward, Math.max(depth, 400) * 0.5)), value: depth, dir: inward, key: 'depth', title: 'Fondo libre frente a la puerta', prefix: 'fondo' },
       { pos: add(add(mid, mul(inward, Math.max(depth, 400) + 220)), mul(u, 0)), value: width, dir: u, mult: 2, key: 'width', title: 'Ancho libre frente a la puerta', prefix: 'ancho' },
@@ -127,39 +132,61 @@ export function moduleInfo(c: Config, m: Module, t: DeskType): ClearInfo {
   const hl = m.length / 2, hd = m.depth / 2;
   const L = (p: number, q: number) => add(m.center, add(mul(u, p), mul(v, q)));
   const rect = (a0: number, a1: number, b0: number, b1: number) => [L(a0, b0), L(a1, b0), L(a1, b1), L(a0, b1)];
-  const two = t.shape === 'straight' && t.sides >= 2;
+  const two = isTwo(t);
   const notch = t.shape === 'l' ? Math.max(0, m.depth - t.depth) : 0;
   const cc = Math.max(0, chairClear(c, t) - notch);
   const sgn = m.seatsUp ? 1 : -1;
   const zones: Pt[][] = [];
   const labels: ClearLabel[] = [];
+  const edges: ClearEdge[] = [];
   const seatSides = two ? [1, -1] : [sgn];
   for (const s of seatSides) {
     if (cc > 0) zones.push(s > 0 ? rect(-hl, hl, hd, hd + cc) : rect(-hl, hl, -hd - cc, -hd));
+    edges.push({ a: L(-hl, s * (hd + cc)), b: L(hl, s * (hd + cc)), key: 'chair', dir: mul(v, s), value: chairClear(c, t) });
   }
   labels.push({ pos: L(0, sgn * (hd + Math.max(cc, 300) / 2)), value: chairClear(c, t), dir: mul(v, sgn), key: 'chair', title: 'Espacio libre del lado de la silla', prefix: 'silla' });
   if (!two) {
     const bk = Math.max(0, t.clearBack ?? 0);
     if (bk > 0) zones.push(sgn > 0 ? rect(-hl, hl, -hd - bk, -hd) : rect(-hl, hl, hd, hd + bk));
+    edges.push({ a: L(-hl, -sgn * (hd + bk)), b: L(hl, -sgn * (hd + bk)), key: 'back', dir: mul(v, -sgn), value: bk });
     labels.push({ pos: L(0, -sgn * (hd + Math.max(bk, 300) / 2)), value: bk, dir: mul(v, -sgn), key: 'back', title: 'Separación detrás del escritorio', prefix: 'atrás' });
   }
   const cl = Math.max(0, t.clearLeft ?? 0), cr = Math.max(0, t.clearRight ?? 0);
   if (cl > 0) zones.push(rect(-hl - cl, -hl, -hd, hd));
   if (cr > 0) zones.push(rect(hl, hl + cr, -hd, hd));
+  edges.push({ a: L(-hl - cl, -hd), b: L(-hl - cl, hd), key: 'left', dir: mul(u, -1), value: cl });
+  edges.push({ a: L(hl + cr, -hd), b: L(hl + cr, hd), key: 'right', dir: u, value: cr });
   labels.push({ pos: L(-hl - Math.max(cl, 300) / 2, 0), value: cl, dir: mul(u, -1), key: 'left', title: 'Separación a la izquierda', prefix: 'izq.' });
   labels.push({ pos: L(hl + Math.max(cr, 300) / 2, 0), value: cr, dir: u, key: 'right', title: 'Separación a la derecha', prefix: 'der.' });
-  return { zones, labels };
+  return { zones, labels, edges };
 }
 
-/** Cuerpo de un escritorio colocado a mano (vista previa). */
-export function deskBody(t: DeskType, center: Pt, angleDeg: number) {
+/** ¿Sillas en los dos lados largos? */
+export const isTwo = (t: DeskType) => t.shape !== 'l' && t.sides >= 2;
+
+/** Largo y fondo del módulo (el rectángulo que usa el optimizador). */
+export function deskDims(t: DeskType) {
   const per = t.flexible ? Math.max(t.minPerSide, Math.min(t.maxPerSide, t.perSide)) : t.perSide;
-  const length = t.shape === 'l' ? t.seatWidth : t.seatWidth * per;
-  const depth = t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth * t.sides;
+  const length = t.shape === 'straight' ? t.seatWidth * per : t.seatWidth;
+  const depth = t.shape === 'straight' ? t.depth * t.sides : t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth;
+  return { per, length, depth };
+}
+
+/** Cuerpo de un escritorio colocado a mano (vista previa) y, para los propios, sus sillas. */
+export function deskBody(t: DeskType, center: Pt, angleDeg: number, seatsUp = true) {
+  const { per, length, depth } = deskDims(t);
   const a = (angleDeg * Math.PI) / 180;
   const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
   const L = (p: number, q: number) => add(center, add(mul(u, p), mul(v, q)));
-  return { length, depth, per, body: [L(-length / 2, -depth / 2), L(length / 2, -depth / 2), L(length / 2, depth / 2), L(-length / 2, depth / 2)], u, v };
+  if (t.shape === 'custom' && t.body && t.body.length >= 3) {
+    const my = seatsUp || isTwo(t) ? 1 : -1;
+    return {
+      length, depth, per, u, v,
+      body: t.body.map((q) => L(q.x, q.y * my)),
+      chairs: (t.seats ?? []).map((s) => L(s.x, s.y * my)),
+    };
+  }
+  return { length, depth, per, body: [L(-length / 2, -depth / 2), L(length / 2, -depth / 2), L(length / 2, depth / 2), L(-length / 2, depth / 2)], u, v, chairs: undefined as Pt[] | undefined };
 }
 
 /** Separación hacia adentro de cada arista del contorno del recinto. Las aristas cortas seguidas
@@ -194,11 +221,13 @@ export function regionInfo(plan: Plan, ri: number): ClearInfo {
   }
   const zones: Pt[][] = [];
   const labels: ClearLabel[] = [];
+  const edges: ClearEdge[] = [];
   groups.forEach((g, gi) => {
     for (const i of g) {
       const d = val(i);
-      if (d <= 0) continue;
       const a = ring[i], b = ring[(i + 1) % n], inn = inward(i);
+      edges.push({ a: add(a, mul(inn, d)), b: add(b, mul(inn, d)), key: gi, dir: inn, value: val(g[0]) });
+      if (d <= 0) continue;
       zones.push([a, b, add(b, mul(inn, d)), add(a, mul(inn, d))]);
     }
     const mid = g[Math.floor(g.length / 2)];
@@ -207,5 +236,5 @@ export function regionInfo(plan: Plan, ri: number): ClearInfo {
     const d = val(g[0]);
     labels.push({ pos: add(p, mul(inward(mid), Math.max(d, 300) * 0.5 + (d > 0 ? 0 : 120))), value: d, dir: inward(mid), key: gi, title: g.length > 1 ? `Separación en este tramo curvo (${g.length} aristas)` : 'Separación hacia adentro desde esta arista' });
   });
-  return { zones, labels, groups };
+  return { zones, labels, edges, groups };
 }

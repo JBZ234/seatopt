@@ -138,6 +138,19 @@ pub enum DeskShape {
     Straight,
     /// Escritorio en L (un puesto por módulo, en la esquina interna).
     L,
+    /// Diseñado en el estudio: forma propia y sillas donde se quiera.
+    Custom,
+}
+
+/// Silla de un escritorio propio (coordenadas locales en mm, origen en el centro del rectángulo
+/// que contiene la forma; +y es el lado principal de las sillas).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomSeat {
+    pub x: f64,
+    pub y: f64,
+    /// Hacia dónde mira la persona (de la silla hacia el escritorio), unitario.
+    pub facing: Pt,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -179,6 +192,11 @@ pub struct DeskType {
     pub clear_left: f64,
     #[serde(default)]
     pub clear_right: f64,
+    /// Escritorio propio: contorno en coordenadas locales (mm) y sillas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub body: Vec<Pt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seats: Vec<CustomSeat>,
 }
 
 fn one() -> u32 {
@@ -190,7 +208,7 @@ impl DeskType {
     pub fn module_length(&self, k: u32) -> f64 {
         match self.shape {
             DeskShape::Straight => self.seat_width * k as f64,
-            DeskShape::L => self.seat_width,
+            DeskShape::L | DeskShape::Custom => self.seat_width,
         }
     }
     /// Fondo total del cuerpo del módulo.
@@ -198,12 +216,14 @@ impl DeskType {
         match self.shape {
             DeskShape::Straight => self.depth * self.sides as f64,
             DeskShape::L => self.return_length.max(self.depth),
+            DeskShape::Custom => self.depth,
         }
     }
     pub fn seats_per_module(&self, k: u32) -> u32 {
         match self.shape {
             DeskShape::Straight => k * self.sides as u32,
             DeskShape::L => 1,
+            DeskShape::Custom => self.seats.len().max(1) as u32,
         }
     }
     pub fn per_side_range(&self) -> (u32, u32) {
@@ -214,7 +234,12 @@ impl DeskType {
         }
     }
     pub fn is_two_sided(&self) -> bool {
-        self.shape == DeskShape::Straight && self.sides >= 2
+        match self.shape {
+            DeskShape::Straight => self.sides >= 2,
+            // sillas en los dos lados largos
+            DeskShape::Custom => self.seats.iter().any(|s| s.facing.y < -0.5) && self.seats.iter().any(|s| s.facing.y > 0.5),
+            DeskShape::L => false,
+        }
     }
 }
 

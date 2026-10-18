@@ -1,3 +1,4 @@
+import { deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { hasDemand, uid, useApp, type ProjectFile } from './store';
 import type {
@@ -232,9 +233,7 @@ export async function placeDesk(center: Pt, forced: string[] = []) {
   const c = s.config;
   const t = c?.catalog.find((x) => x.id === s.placeType);
   if (!c || !t || !s.plan) return;
-  const per = t.flexible ? Math.max(t.minPerSide, Math.min(t.maxPerSide, t.perSide)) : t.perSide;
-  const length = t.shape === 'l' ? t.seatWidth : t.seatWidth * per;
-  const depth = t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth * t.sides;
+  const { per, length, depth } = deskDims(t);
   const a = (s.placeAngle * Math.PI) / 180;
   const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
   const w = (p: number, q: number) => ({ x: center.x + u.x * p + v.x * q, y: center.y + u.y * p + v.y * q });
@@ -309,6 +308,14 @@ export async function openProject() {
     const pf = JSON.parse(txt) as ProjectFile;
     const def = await loadDefaults();
     const config = pf.config ? { ...def, ...pf.config } : def;
+    // textos de las reglas siempre los de esta versión (los valores son los del proyecto)
+    if (pf.config) {
+      config.rules = config.rules.map((r) => {
+        const d = def.rules.find((x) => x.id === r.id);
+        if (!d) return r;
+        return { ...r, name: d.name, description: d.description, items: r.items.map((it) => { const di = d.items.find((x) => x.id === it.id); return di ? { ...it, label: di.label, help: di.help } : it; }) };
+      });
+    }
     S().set({
       drawing: pf.drawingName ? { drawingId: '', name: pf.drawingName, source: 'dxf', layers: [], scale: { mmPerUnit: pf.mmPerUnit, paperScale: null, reason: '' }, bounds: [0, 0, 0, 0], unitNote: '' } : null,
       mmPerUnit: pf.mmPerUnit, roles: pf.roles ?? {}, plan: pf.plan, config, layout: pf.layout, background: pf.background, hiddenLayers: [],

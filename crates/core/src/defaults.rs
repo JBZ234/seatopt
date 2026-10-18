@@ -21,7 +21,7 @@ pub fn default_catalog() -> Vec<DeskType> {
         clear_chair: None,
         clear_back: 0.0,
         clear_left: 0.0,
-        clear_right: 0.0,
+        clear_right: 0.0, body: vec![], seats: vec![],
     };
     let mut isla = st("isla_flex", "Isla cara a cara (flexible)", "#5e9c7f", 1200.0, 600.0, 2, 4);
     isla.flexible = true;
@@ -51,7 +51,7 @@ pub fn default_catalog() -> Vec<DeskType> {
             clear_chair: None,
             clear_back: 0.0,
             clear_left: 0.0,
-            clear_right: 0.0,
+            clear_right: 0.0, body: vec![], seats: vec![],
         },
         st("pareja", "Pareja cara a cara 2×(120×60)", "#4b9ea5", 1200.0, 600.0, 2, 1),
         st("isla_8", "Isla 2×4 (8 puestos)", "#3f6788", 1200.0, 600.0, 2, 4),
@@ -96,12 +96,12 @@ pub fn default_rules() -> Vec<Rule> {
                 },
                 toggle("recto", "Preferir tramos rectos", "Penaliza giros para que el pasillo sea ordenado."),
             ]),
-        rule("C2", G_CIRC, "Pasillos secundarios",
-            "Pasillos que llegan a las bancadas desde el pasillo principal.",
+        rule("C2", G_CIRC, "Pasillos hacia los puestos",
+            "Ancho de los pasos para llegar a cada puesto. El paso mínimo es obligatorio (ningún puesto queda encerrado); el ancho preferido solo se prefiere.",
             true, false, 1.0, vec![
-                mm("ancho", "Ancho mínimo", 900.0, 600.0, 2000.0, Some(800.0), "Paso cómodo de una persona: 0,9–1,0 m."),
-                item("paso_sillas", "Paso angosto detrás de sillas (último tramo)", Some(600.0), "mm", 400.0, 1200.0, 50.0, Some(500.0),
-                    "Ancho mínimo para llegar a la silla desde el pasillo en los últimos metros."),
+                mm("ancho", "Ancho preferido", 900.0, 600.0, 2000.0, Some(800.0), "Se prefiere llegar a cada puesto por pasillos de este ancho sin correr sillas, pero no es obligatorio."),
+                item("paso_sillas", "Paso mínimo entre escritorios", Some(600.0), "mm", 400.0, 1200.0, 50.0, Some(500.0),
+                    "Hueco más angosto por el que se puede pasar entre escritorios, muros u obstáculos. Las sillas no cuentan: se corren."),
             ]),
         rule("C3", G_CIRC, "Vestíbulo libre en la puerta principal",
             "Zona libre frente a la puerta principal para que no quede bloqueada.",
@@ -127,11 +127,11 @@ pub fn default_rules() -> Vec<Rule> {
             true, true, 1.0, vec![
                 item("dist", "Distancia máxima", Some(15000.0), "mm", 3000.0, 50000.0, 500.0, None, "Aproximación a la regla de pasillos sin salida."),
             ]),
-        rule("C7", G_CIRC, "Todos los puestos accesibles desde la entrada",
-            "Cada silla se alcanza caminando desde la puerta principal por pasillos del ancho mínimo.",
+        rule("C7", G_CIRC, "Ningún puesto encerrado",
+            "A cada silla se llega caminando por cualquier ruta (no tiene que ser directa desde la entrada; a algunos se llega dando más vuelta). Solo se exige que no haya huecos más angostos que el paso mínimo entre escritorios.",
             true, true, 1.0, vec![
-                toggle("desde_entrada", "Medir desde la puerta principal", "Si se apaga, basta con que el puesto llegue a cualquier salida."),
-                toggle("puertas", "Ninguna puerta queda bloqueada", "Cada puerta de oficina y salida se alcanza desde la entrada por un pasillo del ancho mínimo."),
+                toggle("desde_entrada", "Contar desde la puerta principal", "Si se apaga, basta con llegar desde cualquier puerta o salida."),
+                toggle("puertas", "Ninguna puerta queda bloqueada", "Cada puerta de oficina y salida se alcanza por un paso del ancho preferido."),
             ]),
         rule("C8", G_CIRC, "Puestos accesibles en silla de ruedas",
             "Una parte de los puestos tiene ruta ancha y espacio de giro.",

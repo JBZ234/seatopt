@@ -1,7 +1,7 @@
 // ¿Cabe un escritorio aquí? Revisión geométrica rápida (para la vista previa al colocar a mano):
 // recinto, obstáculos y sus separaciones, despejes de puertas, pasillo principal y otros escritorios
 // con sus sillas. La revisión completa (acceso a cada puesto, recorridos) la hace el motor al colocarlo.
-import { chairClear, doorInfo, moduleInfo, obstacleInfo, regionInfo, ruleVal } from './clear';
+import { chairClear, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, regionInfo, ruleVal } from './clear';
 import type { Config, DeskType, Layout, Plan, Pt } from './types';
 
 function pip(p: Pt, poly: Pt[]) {
@@ -39,11 +39,9 @@ const hits = (pts: Pt[], shapes: Shape[]) =>
 export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: DeskType, center: Pt, angleDeg: number, seatsUp: boolean): string[] {
   const a = (angleDeg * Math.PI) / 180;
   const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
-  const per = t.flexible ? Math.max(t.minPerSide, Math.min(t.maxPerSide, t.perSide)) : t.perSide;
-  const len = t.shape === 'l' ? t.seatWidth : t.seatWidth * per;
-  const dep = t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth * t.sides;
+  const { length: len, depth: dep } = deskDims(t);
   const hl = len / 2, hd = dep / 2;
-  const two = t.shape === 'straight' && t.sides >= 2;
+  const two = isTwo(t);
   const notch = t.shape === 'l' ? Math.max(0, dep - t.depth) : 0;
   const cc = Math.max(0, chairClear(config, t) - notch);
   const box = (a0: number, a1: number, b0: number, b1: number): Box => ({ c: center, u, v, a0, a1, b0, b1 });

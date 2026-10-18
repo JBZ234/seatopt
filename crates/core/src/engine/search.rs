@@ -497,7 +497,7 @@ pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, gen
         violations,
         weights: weights.clone(),
         genome,
-        corridor_lines: var.corridor_lines.iter().map(|l| taut(&ctx.f, &var.corridor, l)).collect(),
+        corridor_lines: var.corridor_lines.clone(),
         access_paths: access_paths(ctx, &mods, &seats, &(0..mods.len()).map(|i| ev.module_ok[i] || mods[i].pinned).collect::<Vec<_>>()),
         corridor_width: if var.corridor_lines.is_empty() { 0.0 } else { ctx.p.c1_w },
         alternatives: vec![],
@@ -594,11 +594,13 @@ pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::ev
     }
     let main_mid = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| d.door.mid());
     let main_in = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| d.inward);
+    let main_door = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| &d.door);
     let comfy: Vec<bool> = (0..n).map(|i| pass[i] && ((clear[i] as f64) >= 380.0 || ctx.door_approach[i])).collect();
     let mut out = Vec::new();
     for t in targets {
         let Some(&end) = t.seeds.iter().filter(|&&s| dist[s].is_finite()).min_by(|&&a, &&b| dist[a].partial_cmp(&dist[b]).unwrap()) else { continue };
         let t_door_mid = t.door.mid();
+        let t_door = &t.door;
         let t_in = t.inward;
         let mut line = Vec::new();
         let mut c = end;
@@ -624,14 +626,19 @@ pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::ev
         // solo para el dibujo: tramos horizontales y verticales (L o S), saliendo y llegando de frente
         let first = main_in.and_then(axis_of);
         let last = axis_of(t_in);
-        out.push(orthogonalize(f, &comfy, &pass, &t, first, last));
+        let mut o = orthogonalize(f, &comfy, &pass, &t, first, last);
+        if let Some(m) = main_door {
+            slide_into_door(&mut o, m.a, m.b, false);
+        }
+        slide_into_door(&mut o, t_door.a, t_door.b, true);
+        out.push(o);
     }
     bundle(f, &pass, &mut out);
     out
 }
 
 /// Eje de una dirección: Some(true) horizontal, Some(false) vertical, None si es diagonal.
-fn axis_of(v: Pt) -> Option<bool> {
+pub(crate) fn axis_of(v: Pt) -> Option<bool> {
     let (ax, ay) = (v.x.abs(), v.y.abs());
     if ax.max(ay) < 1e-9 || ax.min(ay) / ax.max(ay) > 0.18 {
         return None;
@@ -685,11 +692,66 @@ fn bundle(f: &crate::raster::Frame, pass: &[bool], paths: &mut [Vec<Pt>]) {
     }
 }
 
+/// Si el recorrido llega a la puerta con un escalón corto al final (para apuntar al centro del vano),
+/// lo quita y entra derecho por otro punto del vano. `at_end`: la puerta es el último punto (si no, el primero).
+pub(crate) fn slide_into_door(pts: &mut Vec<Pt>, a: Pt, b: Pt, at_end: bool) {
+    if !at_end {
+        pts.reverse();
+    }
+    let eps = 1.0;
+    let n = pts.len();
+    if n >= 4 {
+        let (p3, p2, p1, p0) = (pts[n - 4], pts[n - 3], pts[n - 2], pts[n - 1]);
+        let h = |u: Pt, v: Pt| (u.y - v.y).abs() < eps;
+        let v = |u: Pt, w: Pt| (u.x - w.x).abs() < eps;
+        // p3→p2 y p1→p0 en el mismo eje, p2→p1 es el escalón corto
+        let same_axis = (v(p3, p2) && v(p1, p0) && h(p2, p1)) || (h(p3, p2) && h(p1, p0) && v(p2, p1));
+        if same_axis && p2.dist(p1) < 1200.0 {
+            // punto del vano alineado con el tramo p3→p2
+            let d = b - a;
+            let l2 = d.x * d.x + d.y * d.y;
+            if l2 > 1.0 {
+                let vertical_leg = v(p3, p2);
+                // intersección de la recta del tramo con la línea de la puerta
+                let t = if vertical_leg {
+                    if d.x.abs() > 1e-6 { (p2.x - a.x) / d.x } else { f64::NAN }
+                } else if d.y.abs() > 1e-6 {
+                    (p2.y - a.y) / d.y
+                } else {
+                    f64::NAN
+                };
+                let margin = (150.0 / l2.sqrt()).min(0.45);
+                if t.is_finite() && t >= margin && t <= 1.0 - margin {
+                    let q = a + d * t;
+                    pts.truncate(n - 3);
+                    pts.push(if vertical_leg { Pt { x: p2.x, y: q.y } } else { Pt { x: q.x, y: p2.y } });
+                } else if t.is_finite() && n >= 5 {
+                    // el tramo pasa justo al lado del vano: correrlo un poco (≤ 0,6 m) para entrar derecho
+                    let tc = t.clamp(margin, 1.0 - margin);
+                    let q = a + d * tc;
+                    let shift = if vertical_leg { (q.x - p2.x).abs() } else { (q.y - p2.y).abs() };
+                    if shift <= 600.0 {
+                        let mv = |p: Pt| if vertical_leg { Pt { x: q.x, y: p.y } } else { Pt { x: p.x, y: q.y } };
+                        let (np3, np2) = (mv(p3), mv(p2));
+                        pts.truncate(n - 4);
+                        pts.push(np3);
+                        pts.push(if vertical_leg { Pt { x: q.x, y: q.y } } else { Pt { x: q.x, y: q.y } });
+                        let _ = np2;
+                    }
+                }
+            }
+        }
+    }
+    if !at_end {
+        pts.reverse();
+    }
+}
+
 /// Redibuja un recorrido (ya calculado) solo con tramos horizontales y verticales.
 /// Desde cada punto salta al más lejano del recorrido que se pueda unir con una recta, una L o
 /// una S (Z) por celdas libres, sin tramos cortos; así quedan pocas vueltas y nada de escalones.
 /// `first`/`last`: eje con el que sale de la entrada y llega a la oficina (perpendicular a la puerta).
-fn orthogonalize(f: &crate::raster::Frame, comfy: &[bool], pass: &[bool], pts: &[Pt], first: Option<bool>, last: Option<bool>) -> Vec<Pt> {
+pub(crate) fn orthogonalize(f: &crate::raster::Frame, comfy: &[bool], pass: &[bool], pts: &[Pt], first: Option<bool>, last: Option<bool>) -> Vec<Pt> {
     if pts.len() < 2 {
         return pts.to_vec();
     }
@@ -793,6 +855,52 @@ fn orthogonalize(f: &crate::raster::Frame, comfy: &[bool], pass: &[bool], pts: &
             if col { r.pop(); } else { break; }
         }
         r.push(p);
+    }
+    // quitar escalones cortos en medio (< 0,35 m): correr uno de los tramos vecinos para alinearlos
+    let merge = |v: Vec<Pt>| -> Vec<Pt> {
+        let mut r: Vec<Pt> = Vec::with_capacity(v.len());
+        for p in v {
+            if r.last().map_or(false, |q: &Pt| q.dist(p) < eps) { continue; }
+            while r.len() >= 2 {
+                let (a, b) = (r[r.len() - 2], r[r.len() - 1]);
+                let col = ((a.x - b.x).abs() < eps && (b.x - p.x).abs() < eps) || ((a.y - b.y).abs() < eps && (b.y - p.y).abs() < eps);
+                if col { r.pop(); } else { break; }
+            }
+            r.push(p);
+        }
+        r
+    };
+    for _ in 0..8 {
+        let mut changed = false;
+        let l = r.len();
+        for i in 1..l.saturating_sub(2) {
+            let (a, b) = (r[i], r[i + 1]);
+            if a.dist(b) >= 350.0 { continue; }
+            let jog_h = is_h(a, b);
+            // opción 1: mover el tramo anterior (r[i-1], r[i]) a la coordenada de b
+            let shift = |p: Pt, to: Pt| if jog_h { Pt { x: to.x, y: p.y } } else { Pt { x: p.x, y: to.y } };
+            if i >= 2 {
+                let (q0, q1) = (shift(r[i - 1], b), b);
+                if see(pass, r[i - 2], q0) && see(pass, q0, q1) {
+                    r[i - 1] = q0;
+                    r[i] = q1;
+                    changed = true;
+                    break;
+                }
+            }
+            // opción 2: mover el tramo siguiente (r[i+1], r[i+2]) a la coordenada de a
+            if i + 3 < l {
+                let (q1, q2) = (a, shift(r[i + 2], a));
+                if see(pass, q1, q2) && see(pass, q2, r[i + 3]) {
+                    r[i + 1] = q1;
+                    r[i + 2] = q2;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if !changed { break; }
+        r = merge(r);
     }
     r
 }

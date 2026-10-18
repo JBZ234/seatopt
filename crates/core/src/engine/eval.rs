@@ -170,6 +170,29 @@ pub fn module_shapes(ctx: &Ctx, t: &DeskType, pm: &PModule, center: Pt, ang: f64
                 body
             }
         }
+        DeskShape::Custom => {
+            // diseño del estudio: +y es el lado principal de las sillas; con las sillas «abajo» se refleja
+            let my = if pm.seats_up || t.is_two_sided() { 1.0 } else { -1.0 };
+            let kx = if t.seat_width > 1.0 { pm.len / t.seat_width } else { 1.0 };
+            let ky = if t.depth > 1.0 { pm.dep / t.depth } else { 1.0 };
+            for cs in &t.seats {
+                let pos = w(cs.x * kx, cs.y * ky * my);
+                let facing = (u * cs.facing.x + v * (cs.facing.y * my)).norm();
+                let side = facing.perp() * (cw * 0.5);
+                let back = facing * (-chair * 0.5);
+                let front = facing * (chair * 0.5);
+                let chair_poly = vec![pos - side + back, pos + side + back, pos + side + front, pos - side + front];
+                let access = pos - facing * (chair * 0.5 + 250.0);
+                let sd = facing.perp() * (cw * 0.5 + 250.0);
+                seats.push(WSeat { module: mi, pos, facing, chair: chair_poly, access, side_access: [pos - sd, pos + sd] });
+            }
+            let poly: Vec<Pt> = if t.body.len() >= 3 {
+                t.body.iter().map(|q| w(q.x * kx, q.y * ky * my)).collect()
+            } else {
+                vec![w(-hl, -hd), w(hl, -hd), w(hl, hd), w(-hl, hd)]
+            };
+            if my < 0.0 { poly.into_iter().rev().collect() } else { poly }
+        }
     }
 }
 
@@ -220,8 +243,28 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
 
     let mut ev = Eval { module_ok: vec![true; mods.len()], seat_flags: vec![Vec::new(); seats.len()], ..Default::default() };
 
+    // ------------------------------------------------ acceso real: las sillas se corren, los escritorios no.
+    // Un puesto es accesible si se llega a él caminando (por cualquier ruta, no necesariamente directa
+    // desde la entrada) sin pasar por un hueco entre escritorios/muros más angosto que el paso mínimo.
+    let mut walk_d = ctx.free.clone();
+    for m in &mods {
+        raster::fill_polygon(f, &mut walk_d, &m.body, false);
+    }
+    let blocked_d: Vec<bool> = walk_d.iter().map(|b| !b).collect();
+    let clear_d = raster::edt(f, &blocked_d);
+    let mut pass_d: Vec<bool> = (0..n).map(|i| walk_d[i] && (clear_d[i] as f64) >= p.squeeze * 0.5 - res * 0.5).collect();
+    let mut pass_dw: Vec<bool> = (0..n).map(|i| walk_d[i] && (clear_d[i] as f64) >= p.c2_w * 0.5 - res * 0.5).collect();
+    for i in 0..n {
+        if ctx.door_approach[i] && walk_d[i] {
+            pass_d[i] = true;
+            pass_dw[i] = true;
+        }
+    }
+
     // ------------------------------------------------ accesibilidad (C7 / C2 / E4)
     let seeds: Vec<usize> = if p.c7_from_main || !p.c7_on { ctx.main_seeds.clone() } else { ctx.doors.iter().flat_map(|d| d.seeds.iter().copied()).collect() };
+    let d_any = dial::dial(f, &pass_d, &seeds, u32::MAX - 1);
+    let d_doors = if p.c7_on && p.c7_doors { dial::dial(f, &pass_dw, &seeds, u32::MAX - 1) } else { vec![] };
     let d1 = dial::dial(f, &pass_c2, &seeds, u32::MAX - 1);
     let reach: Vec<usize> = (0..n).filter(|&i| d1[i] != UNREACH).collect();
     let lim = p.c2_w * 0.5 + if p.e4.is_finite() { p.e4 } else { 1e9 };
@@ -232,7 +275,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
             if d.door.kind == DoorKind::Main || !d.reachable_empty {
                 continue;
             }
-            if !d.seeds.iter().any(|&s| d1[s] != UNREACH) {
+            if !d.seeds.iter().any(|&s| d_doors[s] != UNREACH) {
                 ev.hard += 1;
                 ev.violations.push(Violation {
                     rule_id: "C7".into(),
@@ -245,16 +288,19 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     }
     // se llega por detrás de la silla o por uno de sus costados (extremo de fila, escritorio suelto)
     let ok_at = |q: Pt| dial::to_mm(near_min(f, &d2, q), res) <= lim + res;
-    let seat_access_ok: Vec<bool> = seats.iter().map(|s| ok_at(s.access) || ok_at(s.side_access[0]) || ok_at(s.side_access[1])).collect();
+    // cómodo = por pasillos del ancho preferido y con las sillas en su sitio (solo preferencia)
+    let seat_comfy: Vec<bool> = seats.iter().map(|s| ok_at(s.access) || ok_at(s.side_access[0]) || ok_at(s.side_access[1])).collect();
+    let ok_any = |q: Pt| near_min(f, &d_any, q) != UNREACH;
+    let seat_access_ok: Vec<bool> = seats.iter().map(|s| ok_any(s.pos) || ok_any(s.access) || ok_any(s.side_access[0]) || ok_any(s.side_access[1])).collect();
 
     // ------------------------------------------------ recorridos a salidas (C5) y recorrido común (C6)
     let need_travel = p.c5.is_some() || weights.travel > 0.0 || full;
     let travel_cap = p.c5.map(|c| c + 2000.0).unwrap_or(120_000.0).max(30_000.0);
-    let d3 = if need_travel { dial::dial(f, &pass_sq, &ctx.exit_seeds, dial::from_mm(travel_cap, res)) } else { vec![] };
+    let d3 = if need_travel { dial::dial(f, &pass_d, &ctx.exit_seeds, dial::from_mm(travel_cap, res)) } else { vec![] };
     let d4 = match p.c6 {
         Some(c6) if var.corridor.iter().any(|&b| b) => {
             let cs: Vec<usize> = (0..n).filter(|&i| var.corridor[i] && walk[i]).collect();
-            Some((dial::dial(f, &pass_sq, &cs, dial::from_mm(c6 + 500.0, res)), c6))
+            Some((dial::dial(f, &pass_d, &cs, dial::from_mm(c6 + 500.0, res)), c6))
         }
         _ => None,
     };
@@ -263,7 +309,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     for (si, s) in seats.iter().enumerate() {
         let mut bad = false;
         if p.c7_on && !seat_access_ok[si] {
-            ev.seat_flags[si].push("Sin acceso por pasillo desde la entrada".into());
+            ev.seat_flags[si].push(format!("Sin acceso: queda encerrado por escritorios (pasos de menos de {:.2} m)", p.squeeze / 1000.0).replace('.', ","));
             bad = true;
         }
         if need_travel {
@@ -526,6 +572,11 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     // ------------------------------------------------ puntaje
     let w = weights;
     let mut soft = 0.0;
+    // preferencia: que a cada puesto se llegue por pasillos cómodos (C2) sin mover sillas
+    if p.c7_on {
+        let uncomfy = valid_seats.iter().filter(|&&i| !seat_comfy[i]).count() as f64;
+        soft += 2.0 * uncomfy / vs;
+    }
     soft += w.order * (ev.orientations.max(1) - 1) as f64 * 0.8;
     soft += p.e7_w * (ev.orientations.max(1) - 1) as f64 * 2.0;
     if p.a4.is_some() && has_windows {

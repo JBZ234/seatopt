@@ -776,6 +776,8 @@ impl Ctx {
             self.turn_dijkstra(&passable, &cost_of, if p.c1_straight { 6.0 } else { 0.5 })
         };
         let (parent, dist) = try_width(half);
+        let pass_main: Vec<bool> = (0..n).map(|i| self.free[i] && ((clear[i] as f64) >= half - self.res * 0.5 || near_door[i])).collect();
+        let pass_narrow: Vec<bool> = (0..n).map(|i| self.free[i] && ((clear[i] as f64) >= p.c2_w * 0.5 - self.res * 0.5 || near_door[i])).collect();
         let mut narrow: Option<(Vec<u32>, Vec<f64>)> = None;
         let mut path = vec![false; n];
         let mut lines: Vec<Vec<Pt>> = Vec::new();
@@ -852,12 +854,28 @@ impl Ctx {
             if line.len() >= 2 {
                 // el tramo arranca en la puerta de destino: alargarlo hasta el vano
                 line.insert(0, t.door.mid());
-                if !joined {
-                    if let Some(m) = self.doors.iter().find(|d| d.door.kind == DoorKind::Main) {
-                        line.push(m.door.mid());
-                    }
+                let main = if joined { None } else { self.doors.iter().find(|d| d.door.kind == DoorKind::Main) };
+                if let Some(m) = main {
+                    line.push(m.door.mid());
                 }
-                lines.push(simplify(&line, self.res * 1.6));
+                // como los recorridos a oficinas: solo tramos horizontales y verticales, entrando
+                // y saliendo de frente a cada puerta
+                let simple = simplify(&line, self.res * 1.6);
+                let first = super::search::axis_of(t.inward);
+                let last = main.and_then(|m| super::search::axis_of(m.inward));
+                let mut o = super::search::orthogonalize(f, &pass_main, &pass_narrow, &simple, first, last);
+                super::search::slide_into_door(&mut o, t.door.a, t.door.b, false);
+                if let Some(m) = main {
+                    super::search::slide_into_door(&mut o, m.door.a, m.door.b, true);
+                }
+                lines.push(o);
+            }
+        }
+        // el pasillo reservado sigue exactamente la línea dibujada
+        let mut path = vec![false; n];
+        for l in &lines {
+            for w in l.windows(2) {
+                raster::stroke_segment(f, &mut path, w[0], w[1], self.res * 0.5, true);
             }
         }
         // ensanchar el camino al ancho del pasillo

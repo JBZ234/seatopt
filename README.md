@@ -167,7 +167,7 @@ La pantalla *Espacios* muestra solo las medidas de capacidad. El motor conserva 
 | ID | Regla | ID | Regla |
 |---|---|---|---|
 | C1 | Pasillo principal (ancho, salidas, oficinas, tramos rectos) | E5 | No mezclar tipos en una bancada |
-| C2 | Pasillos secundarios y paso detrás de sillas | E6 | Orientaciones permitidas (muros inclinados) |
+| C2 | Paso mínimo entre escritorios (obligatorio) y ancho preferido de pasillos | E6 | Orientaciones permitidas (muros inclinados) |
 | C3 | Vestíbulo libre en la puerta principal | E7 | Misma dirección en todas las bancadas |
 | C4 | Despeje en puertas (barrido + espacio al frente) | E8 | Escritorios contra el muro |
 | C5 | Recorrido máximo hasta una salida 🔒 | O1 | Separación a columnas |

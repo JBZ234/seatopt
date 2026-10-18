@@ -4,7 +4,29 @@ import { ruleVal } from '../clear';
 import { requestedSeats, uid, useApp } from '../store';
 import type { DeskType } from '../types';
 
+function CustomPreview({ t }: { t: DeskType }) {
+  const body = t.body ?? [];
+  const seats = t.seats ?? [];
+  const pts = [...body, ...seats.map((s) => ({ x: s.x, y: s.y }))];
+  const x0 = Math.min(...pts.map((p) => p.x)) - 300, x1 = Math.max(...pts.map((p) => p.x)) + 300;
+  const y0 = Math.min(...pts.map((p) => p.y)) - 300, y1 = Math.max(...pts.map((p) => p.y)) + 300;
+  const s = Math.min(160 / (x1 - x0), 92 / (y1 - y0));
+  const ox = (170 - (x1 - x0) * s) / 2, oy = (100 - (y1 - y0) * s) / 2;
+  const X = (x: number) => ox + (x - x0) * s, Y = (y: number) => oy + (y1 - y) * s;
+  return (
+    <svg viewBox="0 0 170 100" className="desk-prev" aria-hidden>
+      <path className="desk-shape" fill={t.color} d={body.map((p, i) => `${i ? 'L' : 'M'}${X(p.x)} ${Y(p.y)}`).join('') + 'Z'} />
+      {seats.map((c, i) => {
+        const sd = { x: -c.facing.y, y: c.facing.x };
+        const q = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => ({ x: c.x + sd.x * a * 220 + c.facing.x * b * 200, y: c.y + sd.y * a * 220 + c.facing.y * b * 200 }));
+        return <path key={i} className="chair-shape" d={q.map((p, j) => `${j ? 'L' : 'M'}${X(p.x)} ${Y(p.y)}`).join('') + 'Z'} />;
+      })}
+    </svg>
+  );
+}
+
 function Preview({ t }: { t: DeskType }) {
+  if (t.shape === 'custom' && t.body?.length) return <CustomPreview t={t} />;
   const k = t.flexible ? t.maxPerSide : t.perSide;
   const L = t.shape === 'l' ? t.seatWidth : t.seatWidth * k;
   const D = t.shape === 'l' ? Math.max(t.returnLength, t.depth) : t.depth * t.sides;
@@ -94,7 +116,7 @@ export default function DesksStep() {
         {c.catalog.map((t) => {
           const q = qty(t.id);
           const mx = isMax(t.id);
-          const unit = t.flexible ? 'puestos' : t.shape === 'l' || t.sides * t.perSide === 1 ? 'escritorios' : `módulos de ${t.sides * t.perSide}`;
+          const unit = t.flexible ? 'puestos' : t.shape === 'l' || t.shape === 'custom' || t.sides * t.perSide === 1 ? 'escritorios' : `módulos de ${t.sides * t.perSide}`;
           const cp = cap(t.id);
           return (
             <article key={t.id} className={'desk-card' + (q > 0 || mx ? ' used' : '') + (mx ? ' maxed' : '')}>
@@ -119,6 +141,12 @@ export default function DesksStep() {
                   <label className="inline max-toggle">Máximo posible <Switch small on={mx} label={`Máximo posible de ${t.name}`} onChange={(v) => setMax(t.id, v)} /></label>
                   {cp && <span className="cap" title="Capacidad estimada si se usara solo este tipo">caben ~{cp.maxUnits}{t.flexible ? '' : ` (${cp.maxSeats} puestos)`}</span>}
                 </div>
+                {t.shape === 'custom' ? (
+                  <div className="row wrap">
+                    <button className="small" onClick={() => st.set({ studio: { open: true, editId: t.id } })}>Editar en el estudio</button>
+                    <span className="cap">{(t.seatWidth / 1000).toFixed(2)} × {(t.depth / 1000).toFixed(2)} m · {t.seats?.length ?? 0} puesto{(t.seats?.length ?? 0) === 1 ? '' : 's'}</span>
+                  </div>
+                ) : (
                 <details>
                   <summary>Medidas</summary>
                   <div className="dims">
@@ -158,8 +186,8 @@ export default function DesksStep() {
                       return (
                         <span className={'clear-note' + (ok ? ' ok' : '')}>
                           {ok
-                            ? `Detrás de la silla quedan ${(left / 1000).toFixed(2)} m: se puede pasar por detrás.`
-                            : `Detrás de la silla quedan ${(Math.max(0, left) / 1000).toFixed(2)} m (el último tramo pide ${(squeeze / 1000).toFixed(2)} m): se llega solo por el costado. Sirve para escritorios sueltos o el extremo de una fila; para pasar por detrás usa ${((chairDepth + squeeze) / 1000).toFixed(2)} m.`}
+                            ? `Detrás de la silla quedan ${(left / 1000).toFixed(2)} m: se puede pasar por detrás sin correrla.`
+                            : `Detrás de la silla quedan ${(Math.max(0, left) / 1000).toFixed(2)} m: para pasar por detrás hay que correr la silla (está permitido). Para pasar sin correrla usa ${((chairDepth + squeeze) / 1000).toFixed(2)} m.`}
                         </span>
                       );
                     })()}
@@ -168,6 +196,7 @@ export default function DesksStep() {
                     <label>Derecha<Num value={t.clearRight ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearRight = v; })} /></label>
                   </div>
                 </details>
+                )}
               </div>
             </article>
           );
@@ -176,6 +205,7 @@ export default function DesksStep() {
       <div className="row wrap">
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio', color: '#5a7d8c', shape: 'straight', seatWidth: 1200, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 0, returnDepth: 0 }); })}>Agregar tipo recto</button>
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio en L', color: '#a0613f', shape: 'l', seatWidth: 1600, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 1200, returnDepth: 600 }); })}>Agregar tipo en L</button>
+        <button className="studio-btn" onClick={() => st.set({ studio: { open: true } })}>Diseñar en el estudio…</button>
       </div>
       {c.pinned.length > 0 && (
         <p className="hint">Hay {c.pinned.length} escritorio{c.pinned.length > 1 ? 's' : ''} fijado{c.pinned.length > 1 ? 's' : ''} en el plano: cuentan dentro de las cantidades y la optimización ubica el resto alrededor.

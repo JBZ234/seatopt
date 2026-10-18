@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { placeDesk } from '../actions';
-import { deskBody, doorInfo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, type ClearInfo, type ClearKey } from '../clear';
+import { deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
-import { emptySel, selCount, useApp, uid } from '../store';
+import { emptySel, selCount, useApp, uid, type Tool } from '../store';
 import type { Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
 const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
@@ -86,6 +86,15 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const panRef = useRef<{ sx: number; sy: number; tx: number; ty: number } | null>(null);
   // campo de edición de una separación (como los campos dinámicos de AutoCAD)
   const [editing, setEditing] = useState<{ key: ClearKey; x: number; y: number; text: string } | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  useEffect(() => {
+    if (!addOpen) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest?.('.add-wrap')) setAddOpen(false); };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [addOpen]);
+  // arrastre de una esquina de columna u oficina (agrandar / reducir)
+  const [vEdit, setVEdit] = useState<{ id: string; idx: number; orig: Pt[]; poly: Pt[] } | null>(null);
   // arrastre de un recuadro dorado: cambia la medida en vivo
   const [cdrag, setCdrag] = useState<{ key: ClearKey; dir: Pt; mult: number; v0: number; a: Pt; sx: number; sy: number; val: number; moved: boolean } | null>(null);
 
@@ -562,6 +571,34 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       st.say('Separación del tipo de escritorio cambiada: se aplica a todos los de ese tipo en la próxima optimización.');
     }
   };
+  /** Nueva forma al llevar la esquina `idx` a `p`: los rectángulos siguen siendo rectángulos
+   *  (la esquina opuesta queda fija); otras formas mueven solo ese vértice. */
+  const resizePoly = (poly: Pt[], idx: number, p: Pt): Pt[] => {
+    const n = poly.length;
+    const isRect = n === 4 && [0, 1, 2, 3].every((i) => {
+      const a = poly[(i + 3) % 4], b = poly[i], c = poly[(i + 1) % 4];
+      const d1 = { x: a.x - b.x, y: a.y - b.y }, d2 = { x: c.x - b.x, y: c.y - b.y };
+      const l = Math.hypot(d1.x, d1.y) * Math.hypot(d2.x, d2.y) || 1;
+      return Math.abs((d1.x * d2.x + d1.y * d2.y) / l) < 0.02;
+    });
+    if (!isRect) return poly.map((q, i) => (i === idx ? p : q));
+    const F = poly[(idx + 2) % 4];
+    const nb = [(idx + 1) % 4, (idx + 3) % 4];
+    const axes = nb.map((k) => { const d = { x: poly[k].x - F.x, y: poly[k].y - F.y }; const l = Math.hypot(d.x, d.y) || 1; return { x: d.x / l, y: d.y / l }; });
+    const comp = axes.map((ax) => Math.max(100, (p.x - F.x) * ax.x + (p.y - F.y) * ax.y)); // mínimo 10 cm, sin dar vuelta
+    const out = [...poly];
+    out[(idx + 2) % 4] = F;
+    out[nb[0]] = { x: F.x + axes[0].x * comp[0], y: F.y + axes[0].y * comp[0] };
+    out[nb[1]] = { x: F.x + axes[1].x * comp[1], y: F.y + axes[1].y * comp[1] };
+    out[idx] = { x: F.x + axes[0].x * comp[0] + axes[1].x * comp[1], y: F.y + axes[0].y * comp[0] + axes[1].y * comp[1] };
+    return out;
+  };
+  const startCdrag = (e: React.MouseEvent, key: ClearKey, dir: Pt, mult: number, value: number) => {
+    if (e.button !== 0 || moving || tool !== 'select') return;
+    e.stopPropagation();
+    const { sx: x, sy: y } = evPt(e);
+    setCdrag({ key, dir, mult, v0: value, a: toWorld(x, y), sx: x, sy: y, val: value, moved: false });
+  };
   // lo que se ve: durante el arrastre, la medida nueva en vivo
   const clrShown: ClearInfo | null = useMemo(() => {
     if (!cdrag?.moved || !clr || !plan || !config) return clr;
@@ -626,6 +663,12 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onMove = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
+    if (vEdit) {
+      const sn2 = snapAll(toWorld(x, y), true);
+      setVEdit({ ...vEdit, poly: resizePoly(vEdit.orig, vEdit.idx, sn2.p) });
+      if (sn2.kind) setSnapMark(sn2); else if (snapMark) setSnapMark(null);
+      return;
+    }
     if (cdrag) {
       const q = toWorld(x, y);
       const along = (q.x - cdrag.a.x) * cdrag.dir.x + (q.y - cdrag.a.y) * cdrag.dir.y;
@@ -668,6 +711,15 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onUp = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
+    if (vEdit) {
+      const v = vEdit;
+      setVEdit(null);
+      setSnapMark(null);
+      if (v.poly.some((q, i) => Math.hypot(q.x - v.orig[i].x, q.y - v.orig[i].y) > 1)) {
+        st.updatePlan((pl) => { const o = pl.obstacles.find((x) => x.id === v.id); if (o) o.poly = v.poly; });
+      }
+      return;
+    }
     if (cdrag) {
       const c = cdrag;
       setCdrag(null);
@@ -838,17 +890,27 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {layoutEls}
           {pathEls}
           {clrShown?.zones.map((z, i) => <path key={'cz' + i} className="clear-zone" d={ringD(z)} />)}
+          {clrShown?.edges?.map((g, i) => (
+            <line key={'ce' + i} className={'clear-edge' + (moving || drag || tool !== 'select' ? ' inert' : '') + (cdrag?.key === g.key ? ' dragging' : '')}
+              x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y}
+              style={{ cursor: Math.abs(g.dir.y) > Math.abs(g.dir.x) ? 'ns-resize' : 'ew-resize' }}
+              onMouseDown={(e) => startCdrag(e, g.key, g.dir, g.mult ?? 1, g.value)}>
+              <title>Arrastra la línea para cambiar la separación</title>
+            </line>
+          ))}
+          {vEdit && vEdit.poly.length > 0 && <path className="sel" d={ringD(vEdit.poly)} />}
           {tool === 'placeDesk' && cursor && (() => {
             const t = config?.catalog.find((x) => x.id === st.placeType);
             if (!t) return null;
-            const g = deskBody(t, cursor, st.placeAngle);
-            const two = t.shape === 'straight' && t.sides >= 2;
+            const g = deskBody(t, cursor, st.placeAngle, st.placeUp);
+            const two = isTwo(t);
             const sgn = st.placeUp ? 1 : -1;
             const chairAt = (s: number) => ({ x: cursor.x + g.v.x * s * (g.depth / 2 + 260), y: cursor.y + g.v.y * s * (g.depth / 2 + 260) });
+            const chairs = g.chairs ?? (two ? [1, -1] : [sgn]).map(chairAt);
             return (
               <g className={'ghost' + (fitWhy.length ? ' bad' : ' ok')}>
                 <path d={ringD(g.body)} fill={t.color} />
-                {(two ? [1, -1] : [sgn]).map((s) => { const c = chairAt(s); return <circle key={s} cx={c.x} cy={c.y} r={220} />; })}
+                {chairs.map((c, i) => <circle key={i} cx={c.x} cy={c.y} r={220} />)}
               </g>
             );
           })()}
@@ -885,17 +947,23 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {clrShown?.labels.map((l, i) => (
             <g key={'cl' + i} className={'clear-label' + (moving || drag || tool !== 'select' ? ' inert' : '') + (cdrag?.key === l.key ? ' dragging' : '')}
               style={{ cursor: Math.abs(l.dir.y) > Math.abs(l.dir.x) ? 'ns-resize' : 'ew-resize' }}
-              onMouseDown={(e) => {
-                if (e.button !== 0 || moving || tool !== 'select') return;
-                e.stopPropagation();
-                const { sx: x, sy: y } = evPt(e);
-                setCdrag({ key: l.key, dir: l.dir, mult: l.mult ?? 1, v0: l.value, a: toWorld(x, y), sx: x, sy: y, val: l.value, moved: false });
-              }}>
+              onMouseDown={(e) => startCdrag(e, l.key, l.dir, l.mult ?? 1, l.value)}>
               <title>{l.title} · arrástralo para cambiarla o haz clic para escribirla</title>
               <rect x={sx(l.pos) - (l.prefix ? 33 : 21)} y={sy(l.pos) - 9} width={l.prefix ? 66 : 42} height={18} rx={4} />
               <text x={sx(l.pos)} y={sy(l.pos) + 4}>{l.prefix ? `${l.prefix} ` : ''}{(l.value / 1000).toFixed(2)}</text>
             </g>
           ))}
+          {one && tool === 'select' && !moving && sel.obstacles.length === 1 && (() => {
+            const o = plan?.obstacles.find((x) => x.id === sel.obstacles[0]);
+            if (!o) return null;
+            const poly = vEdit?.id === o.id ? vEdit.poly : o.poly;
+            return poly.map((q, i) => (
+              <rect key={'vh' + i} className={'v-handle' + (vEdit?.idx === i ? ' on' : '')} x={sx(q) - 5} y={sy(q) - 5} width={10} height={10} rx={2}
+                onMouseDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); setVEdit({ id: o.id, idx: i, orig: o.poly, poly: o.poly }); }}>
+                <title>Arrastra la esquina para agrandar o reducir</title>
+              </rect>
+            ));
+          })()}
           {layout?.seats.filter(flagged).map((s) => <circle key={'f' + s.id} cx={sx(s.pos)} cy={sy(s.pos)} r={4} className="flag" />)}
           {layout?.violations.filter((v) => v.at).map((v, i) => <circle key={'v' + i} cx={sx(v.at!)} cy={sy(v.at!)} r={14} className={'viol' + (v.hard ? ' hard' : '')} />)}
         </g>
@@ -926,12 +994,31 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <button className={tool === 'pan' ? 'on' : ''} aria-pressed={tool === 'pan'} title="Mover el plano (también con botón derecho)" onClick={() => st.set({ tool: tool === 'pan' ? 'select' : 'pan' })}>
           <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2v16M2 10h16M10 2l-2.5 2.5M10 2l2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5" /></svg><span>Mover</span>
         </button>
-        {plan && config && config.catalog.length > 0 && (
-          <button className={tool === 'placeDesk' ? 'on' : ''} aria-pressed={tool === 'placeDesk'}
-            title="Agregar un escritorio a mano (el tipo se elige en el panel: Escritorios u Optimizar). R gira, F cambia el lado de la silla."
-            onClick={() => st.set(tool === 'placeDesk' ? { tool: 'select' } : { tool: 'placeDesk', placeType: st.placeType || config.catalog[0].id, selection: emptySel() })}>
-            <svg viewBox="0 0 20 20" aria-hidden><rect x="3" y="5" width="14" height="6" rx="1" /><path d="M7 14h6M10 11v3" /></svg><span>Agregar escritorio</span>
-          </button>
+        {plan && config && (
+          <div className="add-wrap">
+            <button className={'add-btn' + (addOpen ? ' on' : '')} aria-expanded={addOpen} title="Agregar escritorios, columnas, oficinas, puertas…" onClick={() => setAddOpen(!addOpen)}>
+              <span className="plus" aria-hidden>+</span><span>Agregar</span>
+            </button>
+            {addOpen && (
+              <div className="add-menu" role="menu">
+                <div className="add-sec">Escritorios</div>
+                {config.catalog.map((t) => (
+                  <button key={t.id} role="menuitem" onClick={() => { setAddOpen(false); st.set({ tool: 'placeDesk', placeType: t.id, selection: emptySel() }); }}>
+                    <span className="dot" style={{ background: t.color }} />{t.name}
+                  </button>
+                ))}
+                <button role="menuitem" className="studio-item" onClick={() => { setAddOpen(false); st.set({ studio: { open: true } }); }}>
+                  <span className="dot ring" />Diseñar un escritorio nuevo…
+                </button>
+                <div className="add-sec">Plano</div>
+                {([['column', 'Columna'], ['fixedOffice', 'Oficina o sala fija'], ['restricted', 'Tablero o zona restringida'], ['reserved', 'Zona reservada'], ['drawDoor', 'Puerta'], ['window', 'Ventana']] as [Tool, string][]).map(([k, l]) => (
+                  <button key={k} role="menuitem" onClick={() => { setAddOpen(false); st.set({ tool: k, selection: emptySel() }); }}>
+                    <span className={'dot ob-' + k} />{l}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         <hr />
         <button title="Acercar (rueda del mouse)" onClick={() => zoomBy(1.4)}>

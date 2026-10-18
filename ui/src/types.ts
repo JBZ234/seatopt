@@ -12,7 +12,9 @@ export interface Window { a: Pt; b: Pt }
 export interface Room { poly: Pt[]; label: string }
 export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[]; rooms?: Room[]; building?: Pt[]; regionClear?: number[][] }
 
-export type DeskShape = 'straight' | 'l';
+export type DeskShape = 'straight' | 'l' | 'custom';
+/** Silla de un escritorio propio: posición local (mm, +y = lado principal) y hacia dónde mira. */
+export interface CustomSeat { x: number; y: number; facing: Pt }
 export interface DeskType {
   id: string; name: string; color: string; shape: DeskShape;
   seatWidth: number; depth: number; sides: number; perSide: number;
@@ -20,6 +22,8 @@ export interface DeskType {
   returnLength: number; returnDepth: number;
   /** Separaciones libres (mm): lado de la silla (null = regla E1), atrás, izquierda, derecha. */
   clearChair?: number | null; clearBack?: number; clearLeft?: number; clearRight?: number;
+  /** Escritorio propio (estudio): contorno local y sillas. */
+  body?: Pt[]; seats?: CustomSeat[];
 }
 export interface Demand { typeId: string; quantity: number; max?: boolean }
 

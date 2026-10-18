@@ -3,6 +3,7 @@ import { applyPalette, PALETTES } from './palette';
 import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, saveProject, setScale } from './actions';
 import { backendName } from './api';
 import Canvas from './components/Canvas';
+import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
 import { deleteSelection, evaluateSoon, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
 import { emptySel, requestedSeats, selCount, useApp, type Theme, type Tool } from './store';
@@ -175,6 +176,7 @@ export default function App() {
         </span>
         <span className="muted small">modo {backendName}</span>
       </footer>
+      {st.studio?.open && <DeskStudio key={st.studio.editId ?? 'new'} />}
       {st.toast && <div className={'toast ' + st.toast.tone} role="status" onClick={() => st.set({ toast: null })}>{st.toast.text}</div>}
     </div>
   );

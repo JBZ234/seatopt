@@ -78,6 +78,8 @@ export interface AppState {
   palette: string;
   /** Sube cada vez que llega un resultado nuevo: anima la aparición de los escritorios. */
   reveal: number;
+  /** Estudio de escritorios (crear o editar un tipo propio). */
+  studio: { open: boolean; editId?: string } | null;
   /** Cuadrícula del lienzo. */
   gridOn: boolean;
   snapGrid: boolean;
@@ -153,6 +155,7 @@ export const useApp = create<AppState>((set, get) => ({
   theme: loadTheme(),
   palette: loadPalette(),
   reveal: 0,
+  studio: null,
   gridOn: true,
   snapGrid: false,
   gridSize: 500,
