@@ -593,11 +593,13 @@ pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::ev
         }
     }
     let main_mid = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| d.door.mid());
+    let main_in = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| d.inward);
     let comfy: Vec<bool> = (0..n).map(|i| pass[i] && ((clear[i] as f64) >= 380.0 || ctx.door_approach[i])).collect();
     let mut out = Vec::new();
     for t in targets {
         let Some(&end) = t.seeds.iter().filter(|&&s| dist[s].is_finite()).min_by(|&&a, &&b| dist[a].partial_cmp(&dist[b]).unwrap()) else { continue };
         let t_door_mid = t.door.mid();
+        let t_in = t.inward;
         let mut line = Vec::new();
         let mut c = end;
         let mut guard = 0;
@@ -619,9 +621,180 @@ pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::ev
             t.insert(0, m);
         }
         t.push(t_door_mid);
-        out.push(t);
+        // solo para el dibujo: tramos horizontales y verticales (L o S), saliendo y llegando de frente
+        let first = main_in.and_then(axis_of);
+        let last = axis_of(t_in);
+        out.push(orthogonalize(f, &comfy, &pass, &t, first, last));
     }
+    bundle(f, &pass, &mut out);
     out
+}
+
+/// Eje de una dirección: Some(true) horizontal, Some(false) vertical, None si es diagonal.
+fn axis_of(v: Pt) -> Option<bool> {
+    let (ax, ay) = (v.x.abs(), v.y.abs());
+    if ax.max(ay) < 1e-9 || ax.min(ay) / ax.max(ay) > 0.18 {
+        return None;
+    }
+    Some(ax >= ay)
+}
+
+/// Si dos recorridos van casi juntos por el mismo pasillo, el segundo se monta sobre el primero
+/// (una sola línea en vez de dos paralelas pegadas). Solo mueve tramos interiores y si sigue libre.
+fn bundle(f: &crate::raster::Frame, pass: &[bool], paths: &mut [Vec<Pt>]) {
+    let eps = 1.0;
+    let step = f.res * 0.5;
+    let see = |a: Pt, b: Pt| -> bool {
+        let n = ((a.dist(b) / step).ceil() as usize).max(1);
+        (1..n).all(|k| f.cell_idx(a.lerp(b, k as f64 / n as f64)).map(|i| pass[i]).unwrap_or(false))
+    };
+    // (horizontal?, coordenada fija, desde, hasta)
+    let mut lanes: Vec<(bool, f64, f64, f64)> = Vec::new();
+    let add = |lanes: &mut Vec<(bool, f64, f64, f64)>, p: &[Pt]| {
+        for w in p.windows(2) {
+            let h = (w[0].y - w[1].y).abs() < eps;
+            let v = (w[0].x - w[1].x).abs() < eps;
+            if h { lanes.push((true, w[0].y, w[0].x.min(w[1].x), w[0].x.max(w[1].x))); }
+            if v { lanes.push((false, w[0].x, w[0].y.min(w[1].y), w[0].y.max(w[1].y))); }
+        }
+    };
+    for k in 0..paths.len() {
+        if k > 0 {
+            let p = &mut paths[k];
+            // tramos interiores: ni el que sale de la entrada ni el que llega a la oficina
+            for s in 1..p.len().saturating_sub(2) {
+                let (a, b) = (p[s], p[s + 1]);
+                let h = (a.y - b.y).abs() < eps;
+                let v = (a.x - b.x).abs() < eps;
+                if !h && !v { continue; }
+                let (c, lo, hi) = if h { (a.y, a.x.min(b.x), a.x.max(b.x)) } else { (a.x, a.y.min(b.y), a.y.max(b.y)) };
+                let best = lanes.iter().filter(|l| l.0 == h && (l.1 - c).abs() > eps && (l.1 - c).abs() < 450.0 && l.2.max(lo) < l.3.min(hi))
+                    .min_by(|x, y| (x.1 - c).abs().partial_cmp(&(y.1 - c).abs()).unwrap()).map(|l| l.1);
+                let Some(nc) = best else { continue };
+                let mv = |q: Pt| if h { Pt { x: q.x, y: nc } } else { Pt { x: nc, y: q.y } };
+                let (na, nb) = (mv(a), mv(b));
+                // el tramo movido y sus vecinos (que solo cambian de largo) deben seguir libres
+                if see(na, nb) && see(p[s - 1], na) && see(nb, p[s + 2]) {
+                    p[s] = na;
+                    p[s + 1] = nb;
+                }
+            }
+        }
+        let snapshot = paths[k].clone();
+        add(&mut lanes, &snapshot);
+    }
+}
+
+/// Redibuja un recorrido (ya calculado) solo con tramos horizontales y verticales.
+/// Desde cada punto salta al más lejano del recorrido que se pueda unir con una recta, una L o
+/// una S (Z) por celdas libres, sin tramos cortos; así quedan pocas vueltas y nada de escalones.
+/// `first`/`last`: eje con el que sale de la entrada y llega a la oficina (perpendicular a la puerta).
+fn orthogonalize(f: &crate::raster::Frame, comfy: &[bool], pass: &[bool], pts: &[Pt], first: Option<bool>, last: Option<bool>) -> Vec<Pt> {
+    if pts.len() < 2 {
+        return pts.to_vec();
+    }
+    let (p0, pn) = (pts[0], pts[pts.len() - 1]);
+    let step = f.res * 0.5;
+    let near_door = |q: Pt| q.dist(p0) < f.res * 2.5 || q.dist(pn) < f.res * 2.5;
+    let see = |ok: &[bool], a: Pt, b: Pt| -> bool {
+        let n = ((a.dist(b) / step).ceil() as usize).max(1);
+        (0..=n).all(|k| {
+            let q = a.lerp(b, k as f64 / n as f64);
+            near_door(q) || f.cell_idx(q).map(|i| ok[i]).unwrap_or(false)
+        })
+    };
+    let eps = 1.0;
+    let is_h = |a: Pt, b: Pt| (a.y - b.y).abs() < eps;
+    let ok_path = |ok: &[bool], ps: &[Pt]| ps.windows(2).all(|w| see(ok, w[0], w[1]));
+    // formas candidatas de a a b (sin a); `fa`/`la`: eje exigido al primer/último tramo
+    let shapes = |a: Pt, b: Pt, fa: Option<bool>, la: Option<bool>, min_leg: f64| -> Vec<Vec<Pt>> {
+        let mut out: Vec<Vec<Pt>> = Vec::new();
+        let (dx, dy) = ((b.x - a.x).abs(), (b.y - a.y).abs());
+        let axis_ok = |ps: &[Pt]| -> bool {
+            let mut prev = a;
+            let mut legs = Vec::new();
+            for &q in ps {
+                legs.push((is_h(prev, q), prev.dist(q)));
+                prev = q;
+            }
+            let fine = legs.iter().all(|&(_, l)| l >= min_leg || l < eps);
+            let f_ok = fa.map_or(true, |v| legs.first().map_or(true, |&(h, l)| l < eps || h == v));
+            let l_ok = la.map_or(true, |v| legs.last().map_or(true, |&(h, l)| l < eps || h == v));
+            fine && f_ok && l_ok
+        };
+        if dx < eps || dy < eps {
+            if axis_ok(&[b]) { out.push(vec![b]); }
+            return out;
+        }
+        for h in [true, false] {
+            let c = if h { Pt { x: b.x, y: a.y } } else { Pt { x: a.x, y: b.y } };
+            let ps = vec![c, b];
+            if axis_ok(&ps) { out.push(ps); }
+        }
+        // S: horizontal-vertical-horizontal (tramo vertical en x = t) o al revés; t desde el medio hacia afuera
+        let nt = 24;
+        for k in 0..=nt {
+            let off = if k % 2 == 0 { k as f64 / 2.0 } else { -((k as f64 + 1.0) / 2.0) } / nt as f64;
+            let r = 0.5 + off;
+            if !(0.0..=1.0).contains(&r) { continue; }
+            let tx = a.x + (b.x - a.x) * r;
+            let ps = vec![Pt { x: tx, y: a.y }, Pt { x: tx, y: b.y }, b];
+            if axis_ok(&ps) { out.push(ps); }
+            let ty = a.y + (b.y - a.y) * r;
+            let ps = vec![Pt { x: a.x, y: ty }, Pt { x: b.x, y: ty }, b];
+            if axis_ok(&ps) { out.push(ps); }
+        }
+        out
+    };
+    let last_i = pts.len() - 1;
+    let mut out = vec![p0];
+    let mut i = 0;
+    let mut prev_h: Option<bool> = None;
+    while i < last_i {
+        let a = *out.last().unwrap();
+        let mut done = false;
+        'outer: for min_leg in [600.0, 250.0, 0.0] {
+            for ok in [comfy, pass] {
+                for j in (i + 1..=last_i).rev() {
+                    let fa = if i == 0 { first } else { None };
+                    let la = if j == last_i { last } else { None };
+                    let mut cands = shapes(a, pts[j], fa, la, min_leg);
+                    // seguir en el mismo eje que el tramo anterior ahorra una vuelta
+                    if let Some(ph) = prev_h {
+                        cands.sort_by_key(|ps| (ps.len(), if is_h(a, ps[0]) == ph { 0 } else { 1 }));
+                    } else {
+                        cands.sort_by_key(|ps| ps.len());
+                    }
+                    if let Some(ps) = cands.into_iter().find(|ps| { let mut full = vec![a]; full.extend_from_slice(ps); ok_path(ok, &full) }) {
+                        out.extend_from_slice(&ps);
+                        i = j;
+                        done = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+        if !done {
+            // sin forma ortogonal posible: se deja el tramo como está
+            out.push(pts[i + 1]);
+            i += 1;
+        }
+        let l = out.len();
+        if l >= 2 && out[l - 1].dist(out[l - 2]) >= eps {
+            prev_h = Some(is_h(out[l - 2], out[l - 1]));
+        }
+    }
+    out.dedup_by(|a, b| a.dist(*b) < eps);
+    let mut r: Vec<Pt> = Vec::with_capacity(out.len());
+    for p in out {
+        while r.len() >= 2 {
+            let (a, b) = (r[r.len() - 2], r[r.len() - 1]);
+            let col = ((a.x - b.x).abs() < eps && (b.x - p.x).abs() < eps) || ((a.y - b.y).abs() < eps && (b.y - p.y).abs() < eps);
+            if col { r.pop(); } else { break; }
+        }
+        r.push(p);
+    }
+    r
 }
 
 /// Huella de un resultado para comparar parecido: celdas de 600 mm ocupadas por escritorios.

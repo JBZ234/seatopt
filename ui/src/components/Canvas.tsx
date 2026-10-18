@@ -28,7 +28,10 @@ function roundedD(pts: Pt[], r: number) {
     if (rr < 1) { d += `L${f(b)}`; continue; }
     const p1 = { x: b.x + ((a.x - b.x) / l1) * rr, y: b.y + ((a.y - b.y) / l1) * rr };
     const p2 = { x: b.x + ((c.x - b.x) / l2) * rr, y: b.y + ((c.y - b.y) / l2) * rr };
-    d += `L${f(p1)}Q${f(b)} ${f(p2)}`;
+    // cuarto de círculo (cúbica): en vueltas de 90° queda una curva redonda, no una punta
+    const k = 0.5523;
+    const c1 = { x: p1.x + (b.x - p1.x) * k, y: p1.y + (b.y - p1.y) * k }, c2 = { x: p2.x + (b.x - p2.x) * k, y: p2.y + (b.y - p2.y) * k };
+    d += `L${f(p1)}C${f(c1)} ${f(c2)} ${f(p2)}`;
   }
   return d + `L${f(pts[pts.length - 1])}`;
 }
@@ -369,7 +372,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const pathEls = useMemo(() => {
     if (!layout) return null;
     const main = st.showCorridor && layout.corridorLines?.length ? layout.corridorLines.map((l) => roundedD(l, 900)).join('') : '';
-    const acc = st.showAccess && layout.accessPaths?.length ? layout.accessPaths.map((l) => roundedD(l, 700)).join('') : '';
+    const acc = st.showAccess && layout.accessPaths?.length ? layout.accessPaths.map((l) => roundedD(l, 600)).join('') : '';
     return (
       <g className="paths" clipPath="url(#region-clip)">
         {main && <path className="corridor-axis" d={main} />}
