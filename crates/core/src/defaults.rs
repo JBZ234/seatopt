@@ -258,10 +258,16 @@ fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
         match r.id.as_str() {
             "C1" => set(r, "ancho", 1200.0),
             "C3" => {
-                set(r, "profundidad", 1500.0);
-                set(r, "ancho", 2000.0);
+                set(r, "profundidad", 1200.0);
+                set(r, "ancho", 1500.0);
             }
-            "C4" => set(r, "extra", 900.0),
+            "C4" => set(r, "extra", 600.0),
+            // silla (0,50) + último tramo (0,60) + silla = 1,60: filas espalda con espalda siguen siendo accesibles
+            "E1" => set(r, "muro", 900.0),
+            "E2" => {
+                set(r, "silla_silla", 1600.0);
+                set(r, "silla_espalda", 1100.0);
+            }
             "O3" => {
                 r.enabled = true;
                 set(r, "dist", 300.0);
