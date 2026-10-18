@@ -16,6 +16,23 @@ function ringD(r: Pt[]) {
   return s + 'Z';
 }
 
+/** Polilínea con las esquinas redondeadas (radio r en mm, limitado por la mitad de cada tramo). */
+function roundedD(pts: Pt[], r: number) {
+  if (pts.length < 2) return '';
+  const f = (p: Pt) => `${p.x.toFixed(0)} ${p.y.toFixed(0)}`;
+  let d = `M${f(pts[0])}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
+    const rr = Math.min(r, l1 / 2, l2 / 2);
+    if (rr < 1) { d += `L${f(b)}`; continue; }
+    const p1 = { x: b.x + ((a.x - b.x) / l1) * rr, y: b.y + ((a.y - b.y) / l1) * rr };
+    const p2 = { x: b.x + ((c.x - b.x) / l2) * rr, y: b.y + ((c.y - b.y) / l2) * rr };
+    d += `L${f(p1)}Q${f(b)} ${f(p2)}`;
+  }
+  return d + `L${f(pts[pts.length - 1])}`;
+}
+
 function distSeg(p: Pt, a: Pt, b: Pt) {
   const dx = b.x - a.x, dy = b.y - a.y;
   const l2 = dx * dx + dy * dy || 1;
@@ -287,15 +304,28 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <clipPath id="region-clip"><path d={plan.region.map(ringD).join('')} clipRule="evenodd" /></clipPath>
         <path className="region" d={plan.region.map(ringD).join('')} fillRule="evenodd" />
         {showKeepouts && layout?.keepouts.map((k, i) => <path key={'k' + i} className="keepout" d={ringD(k)} />)}
-        {layout?.corridorLines && layout.corridorLines.length > 0 && layout.corridorWidth
-          ? <path className="corridor-line" clipPath="url(#region-clip)" d={layout.corridorLines.map((l) => l.map((p, j) => `${j ? 'L' : 'M'}${p.x.toFixed(0)} ${p.y.toFixed(0)}`).join('')).join('')} strokeWidth={layout.corridorWidth} />
-          : layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />)}
+        {st.showCorridor && (layout?.corridorLines && layout.corridorLines.length > 0 && layout.corridorWidth
+          ? <path className="corridor-line" clipPath="url(#region-clip)" d={layout.corridorLines.map((l) => roundedD(l, 900)).join('')} strokeWidth={layout.corridorWidth} />
+          : layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />))}
         {plan.obstacles.map((o) => <path key={o.id} className="obstacle" d={ringD(o.poly)} fill={OBS_FILL[o.kind]} />)}
         {plan.windows.map((w, i) => <line key={'w' + i} className="window" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
         {plan.doors.map((d) => <line key={d.id} className={'door ' + d.kind} x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} stroke={DOOR_COLOR[d.kind]} />)}
       </>
     );
-  }, [plan, layout?.keepouts, layout?.corridors, layout?.corridorLines, layout?.corridorWidth, showKeepouts]);
+  }, [plan, layout?.keepouts, layout?.corridors, layout?.corridorLines, layout?.corridorWidth, showKeepouts, st.showCorridor]);
+
+  // recorridos (encima de los escritorios): eje del pasillo principal y caminos a las oficinas
+  const pathEls = useMemo(() => {
+    if (!layout) return null;
+    const main = st.showCorridor && layout.corridorLines?.length ? layout.corridorLines.map((l) => roundedD(l, 900)).join('') : '';
+    const acc = st.showAccess && layout.accessPaths?.length ? layout.accessPaths.map((l) => roundedD(l, 700)).join('') : '';
+    return (
+      <g className="paths" clipPath="url(#region-clip)">
+        {main && <path className="corridor-axis" d={main} />}
+        {acc && <><path className="access-halo" d={acc} /><path className="access-line" d={acc} /></>}
+      </g>
+    );
+  }, [layout, st.showCorridor, st.showAccess]);
 
   const layoutEls = useMemo(() => {
     if (!layout) return null;
@@ -687,6 +717,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {planEls}
           {gridEls}
           {layoutEls}
+          {pathEls}
           {clr?.zones.map((z, i) => <path key={'cz' + i} className="clear-zone" d={ringD(z)} />)}
           {tool === 'placeDesk' && cursor && (() => {
             const t = config?.catalog.find((x) => x.id === st.placeType);
@@ -726,6 +757,12 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             return <text key={o.id} x={sx(c)} y={sy(c)} className="ob-label">{o.label}</text>;
           })}
           {showNums && layout?.seats.map((s) => <text key={s.id} x={sx(s.pos)} y={sy(s.pos) + 3.5} className="seat-num">{s.number}</text>)}
+          {st.showAccess && layout?.accessPaths?.map((l, i) => l.length > 1 && (
+            <g key={'ad' + i} className="access-end">
+              <circle cx={sx(l[l.length - 1])} cy={sy(l[l.length - 1])} r={4.5} />
+            </g>
+          ))}
+          {st.showAccess && layout?.accessPaths?.[0] && <circle className="access-start" cx={sx(layout.accessPaths[0][0])} cy={sy(layout.accessPaths[0][0])} r={6} />}
           {clr?.labels.map((l, i) => (
             <g key={'cl' + i} className="clear-label" onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); setEditing({ key: l.key, x: sx(l.pos), y: sy(l.pos), text: (l.value / 1000).toFixed(2) }); }}>

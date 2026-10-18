@@ -59,6 +59,7 @@ Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un 
 5. **Optimizar**
    - Controles: **tiempo de búsqueda**, **orden de las filas** (0 = meter escritorios en cualquier hueco; alto = solo filas ordenadas y escritorios apoyados) y **pegar a los muros**.
    - Presiona **Optimizar**. Después de armar las filas, un **relleno de huecos** busca dónde caben más escritorios en las dos orientaciones, prefiriendo los que quedan con la espalda contra un muro o espalda con espalda; cada uno se valida con todas las reglas.
+   - **Mostrar**: pasillo principal (franja suave con su eje), **recorridos a oficinas** (camino de referencia desde la entrada hasta cada puerta de oficina por el piso ya amoblado; solo se muestra, no cambia la optimización) y despejes de puertas.
    - **Agregar a mano** (después de optimizar): eliges el tipo y lo mueves por el plano; en verde cabe, en rojo dice qué incumple (recinto, oficinas, columnas y sus separaciones, despejes de puertas, pasillo, otros escritorios). Al soltarlo el motor revisa también el acceso; si algo falla lo avisa (Ctrl+Z lo quita).
    - **Mejores soluciones encontradas**: las N mejores distintas (10 por defecto) con vista previa; clic para verla en el plano.
    - **Buscar mejores valores**: prueba bajar cada medida de *Espacios* a su mínimo razonable y cambiar de tipo; cada prueba es una optimización completa y se puede **Usar** directamente.

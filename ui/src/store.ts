@@ -48,6 +48,8 @@ export interface AppState {
   tool: Tool;
   colorBy: ColorBy;
   showKeepouts: boolean;
+  showCorridor: boolean;
+  showAccess: boolean;
   showBackground: boolean;
   selection: Selection;
   history: Snapshot[];
@@ -104,6 +106,8 @@ export const useApp = create<AppState>((set, get) => ({
   tool: 'select',
   colorBy: 'type',
   showKeepouts: true,
+  showCorridor: true,
+  showAccess: true,
   showBackground: true,
   selection: emptySel(),
   history: [],

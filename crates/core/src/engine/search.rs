@@ -3,6 +3,7 @@
 use super::ctx::Ctx;
 use super::decode::{decode, random_genome, Genome, Rng};
 use super::eval::{deficit, evaluate, Eval};
+use crate::geom::Pt;
 use crate::model::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -450,9 +451,97 @@ pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, gen
         weights: weights.clone(),
         genome,
         corridor_lines: var.corridor_lines.clone(),
+        access_paths: access_paths(ctx, &mods, &seats, &(0..mods.len()).map(|i| ev.module_ok[i] || mods[i].pinned).collect::<Vec<_>>()),
         corridor_width: if var.corridor_lines.is_empty() { 0.0 } else { ctx.p.c1_w },
         alternatives: vec![],
     }
+}
+
+/// Recorridos desde la puerta principal hasta cada puerta de oficina, por el piso ya amoblado.
+/// Solo para mostrar: van por el centro de los pasillos (el costo sube cerca de muros y escritorios).
+pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::eval::WSeat], shown: &[bool]) -> Vec<Vec<Pt>> {
+    use crate::raster;
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let f = &ctx.f;
+    let n = f.len();
+    let targets: Vec<&super::ctx::DoorInfo> = ctx.doors.iter().filter(|d| d.door.kind == DoorKind::Office && !d.seeds.is_empty()).collect();
+    if targets.is_empty() || ctx.main_seeds.is_empty() {
+        return vec![];
+    }
+    let mut free = ctx.free_base.clone();
+    for (i, m) in mods.iter().enumerate() {
+        if shown.get(i).copied().unwrap_or(false) {
+            raster::fill_polygon(f, &mut free, &m.body, false);
+        }
+    }
+    for s in seats {
+        if shown.get(s.module).copied().unwrap_or(false) {
+            raster::fill_polygon(f, &mut free, &s.chair, false);
+        }
+    }
+    let blocked: Vec<bool> = free.iter().map(|b| !b).collect();
+    let clear = raster::edt(f, &blocked);
+    let res = ctx.res;
+    let pass: Vec<bool> = (0..n).map(|i| free[i] && ((clear[i] as f64) >= 280.0 || ctx.door_approach[i])).collect();
+    // Dijkstra con costo mayor cerca de obstáculos: el recorrido va por el medio
+    let cost = |i: usize| -> f64 { 1.0 + 3.0 * (1.0 - ((clear[i] as f64) / 1500.0).min(1.0)) };
+    let mut dist = vec![f64::INFINITY; n];
+    let mut par = vec![u32::MAX; n];
+    let mut pq: BinaryHeap<Reverse<(u64, usize)>> = BinaryHeap::new();
+    for &s in &ctx.main_seeds {
+        if s < n {
+            dist[s] = 0.0;
+            pq.push(Reverse((0, s)));
+        }
+    }
+    let w = f.w as isize;
+    let h = f.h as isize;
+    while let Some(Reverse((dk, i))) = pq.pop() {
+        let d = dk as f64 / 1000.0;
+        if d > dist[i] + 1e-9 {
+            continue;
+        }
+        let (x, y) = ((i as isize) % w, (i as isize) / w);
+        for (dx, dy, l) in [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0), (1, 1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (-1, -1, 1.4142)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                continue;
+            }
+            let j = (ny * w + nx) as usize;
+            if !pass[j] {
+                continue;
+            }
+            let nd = d + l * cost(j);
+            if nd < dist[j] {
+                dist[j] = nd;
+                par[j] = i as u32;
+                pq.push(Reverse(((nd * 1000.0) as u64, j)));
+            }
+        }
+    }
+    let main_mid = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| d.door.mid());
+    let mut out = Vec::new();
+    for t in targets {
+        let Some(&end) = t.seeds.iter().filter(|&&s| dist[s].is_finite()).min_by(|&&a, &&b| dist[a].partial_cmp(&dist[b]).unwrap()) else { continue };
+        let mut line = vec![t.door.mid()];
+        let mut c = end;
+        let mut guard = 0;
+        while c != u32::MAX as usize && guard < n {
+            line.push(f.center_i(c));
+            if par[c] == u32::MAX {
+                break;
+            }
+            c = par[c] as usize;
+            guard += 1;
+        }
+        if let Some(m) = main_mid {
+            line.push(m);
+        }
+        line.reverse();
+        out.push(crate::geom::simplify(&line, res * 1.5));
+    }
+    out
 }
 
 /// Huella de un resultado para comparar parecido: celdas de 600 mm ocupadas por escritorios.

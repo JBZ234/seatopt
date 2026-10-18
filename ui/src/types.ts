@@ -84,7 +84,7 @@ export interface Violation { ruleId: string; message: string; at?: Pt | null; ha
 export interface Layout {
   modules: Module[]; seats: Seat[]; corridors: Pt[][]; keepouts: Pt[][];
   kpis: Kpis; violations: Violation[]; weights: Weights; genome?: unknown;
-  corridorLines?: Pt[][]; corridorWidth?: number; alternatives?: Layout[];
+  corridorLines?: Pt[][]; corridorWidth?: number; accessPaths?: Pt[][]; alternatives?: Layout[];
 }
 export interface Suggestion {
   ruleId: string; itemId: string; description: string; newValue: number | null;

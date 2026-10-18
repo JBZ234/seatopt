@@ -663,6 +663,9 @@ pub struct Layout {
     pub corridor_lines: Vec<Vec<Pt>>,
     #[serde(default)]
     pub corridor_width: f64,
+    /// Recorridos de referencia desde la entrada hasta cada puerta de oficina (solo para mostrar).
+    #[serde(default)]
+    pub access_paths: Vec<Vec<Pt>>,
     /// Otras soluciones buenas y distintas (la primera es esta misma).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alternatives: Vec<Layout>,
