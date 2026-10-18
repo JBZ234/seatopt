@@ -47,6 +47,23 @@ export default function OptimizeStep() {
         )}
       </div>
 
+      {L && (
+        <section className="manual-section">
+          <h3>Agregar escritorios a mano</h3>
+          <p className="hint">Elige el tipo y muévelo por el plano: en verde cabe, en rojo te dice qué regla incumple. Clic para ubicarlo · R gira · F cambia el lado de la silla · Esc termina.</p>
+          <div className="field-row manual-add">
+                        <select aria-label="Tipo de escritorio a agregar" value={st.placeType || c.catalog[0]?.id} onChange={(e) => st.set({ placeType: e.target.value })}>
+              {c.catalog.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button className={'small' + (st.tool === 'placeDesk' ? ' active-tool' : '')}
+              title="Muévelo por el plano: en verde cabe, en rojo te dice qué regla incumple. R gira, F cambia el lado de la silla."
+              onClick={() => st.set(st.tool === 'placeDesk' ? { tool: 'select' } : { tool: 'placeDesk', placeType: st.placeType || c.catalog[0]?.id, selection: { modules: [], obstacles: [], doors: [], windows: [] } })}>
+              {st.tool === 'placeDesk' ? 'Terminar' : 'Colocar'}
+            </button>
+          </div>
+        </section>
+      )}
+
       {st.alternatives.length > 1 && st.plan && (
         <section className="alts">
           <h3>Mejores soluciones encontradas</h3>
@@ -56,6 +73,7 @@ export default function OptimizeStep() {
                 <Thumb plan={st.plan!} layout={a} config={c} />
                 <span className="alt-n">{a.kpis.seatsPlaced}<small> puestos</small></span>
                 <span className="alt-sub">#{i + 1} · {a.kpis.modulesPlaced} escritorios{a.kpis.unplacedByType.length ? ' · faltan fijos' : ''}</span>
+                {a.kpis.hardViolations > 0 && <span className="alt-warn" title={a.violations.filter((v) => v.hard).map((v) => v.message).join('\n')}>Incumple: {a.violations.find((v) => v.hard)?.message ?? 'una regla'}</span>}
               </button>
             ))}
           </div>
@@ -78,17 +96,7 @@ export default function OptimizeStep() {
             </div>
           )}
           <SeatsByType />
-          <div className="field-row manual-add">
-            <span>Agregar a mano</span>
-            <select aria-label="Tipo de escritorio a agregar" value={st.placeType || c.catalog[0]?.id} onChange={(e) => st.set({ placeType: e.target.value })}>
-              {c.catalog.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            <button className={'small' + (st.tool === 'placeDesk' ? ' active-tool' : '')}
-              title="Muévelo por el plano: en verde cabe, en rojo te dice qué regla incumple. R gira, F cambia el lado de la silla."
-              onClick={() => st.set(st.tool === 'placeDesk' ? { tool: 'select' } : { tool: 'placeDesk', placeType: st.placeType || c.catalog[0]?.id, selection: { modules: [], obstacles: [], doors: [], windows: [] } })}>
-              {st.tool === 'placeDesk' ? 'Terminar' : 'Colocar'}
-            </button>
-          </div>
+
           {k.unplacedByType.length > 0 && (
             <p className="warn">Sin ubicar: {k.unplacedByType.map(([t, n]) => `${n} × ${typeName(t)}`).join(', ')}</p>
           )}

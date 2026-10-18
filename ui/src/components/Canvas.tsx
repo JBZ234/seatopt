@@ -764,6 +764,13 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <button className={tool === 'pan' ? 'on' : ''} aria-pressed={tool === 'pan'} title="Mover el plano (también con botón derecho)" onClick={() => st.set({ tool: tool === 'pan' ? 'select' : 'pan' })}>
           <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2v16M2 10h16M10 2l-2.5 2.5M10 2l2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5" /></svg><span>Mover</span>
         </button>
+        {plan && config && config.catalog.length > 0 && (
+          <button className={tool === 'placeDesk' ? 'on' : ''} aria-pressed={tool === 'placeDesk'}
+            title="Agregar un escritorio a mano (el tipo se elige en el panel: Escritorios u Optimizar). R gira, F cambia el lado de la silla."
+            onClick={() => st.set(tool === 'placeDesk' ? { tool: 'select' } : { tool: 'placeDesk', placeType: st.placeType || config.catalog[0].id, selection: emptySel() })}>
+            <svg viewBox="0 0 20 20" aria-hidden><rect x="3" y="5" width="14" height="6" rx="1" /><path d="M7 14h6M10 11v3" /></svg><span>Agregar escritorio</span>
+          </button>
+        )}
         <hr />
         <button title="Acercar (rueda del mouse)" onClick={() => zoomBy(1.4)}>
           <svg viewBox="0 0 20 20" aria-hidden><path d="M10 4v12M4 10h12" /></svg><span>Acercar</span>

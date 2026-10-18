@@ -527,7 +527,15 @@ pub fn finish(ctx: &Ctx, pool: &[(f64, Genome)], weights: &Weights, n: usize, fi
     let per = std::time::Duration::from_secs_f64((fill_secs * 0.5 / waves as f64).max(0.15));
     let mut outs: Vec<(f64, Layout)> = rest.par_iter().map(|g| run(g, Instant::now() + per)).collect();
     outs.push(first);
-    outs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    // orden para mostrar: primero las que ubican todos los fijos y cumplen las reglas duras;
+    // entre ellas, más puestos primero (y a igual cantidad, mejor puntaje)
+    let missing = |l: &Layout| l.kpis.unplaced_by_type.iter().map(|x| x.1).sum::<u32>();
+    outs.sort_by(|a, b| {
+        (missing(&a.1), a.1.kpis.hard_violations.min(1))
+            .cmp(&(missing(&b.1), b.1.kpis.hard_violations.min(1)))
+            .then(b.1.kpis.seats_placed.cmp(&a.1.kpis.seats_placed))
+            .then(a.0.partial_cmp(&b.0).unwrap())
+    });
     let mut chosen: Vec<Layout> = Vec::new();
     let mut prints: Vec<std::collections::HashSet<(i64, i64)>> = Vec::new();
     for (_, l) in outs {
