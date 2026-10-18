@@ -229,7 +229,6 @@ label.check { display: flex; gap: 8px; align-items: center; margin: 8px 0; curso
 .slider { display: grid; grid-template-columns: 150px 1fr 34px; align-items: center; gap: 8px; margin: 4px 0; }
 .slider-label { font-size: 13px; }
 .slider-val { font: 500 14px var(--fc); text-align: right; }
-.slider input { accent-color: var(--mat); width: 100%; }
 .sliders { margin: 10px 0; }
 
 .bar { height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; flex: none; }
@@ -749,3 +748,91 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 14px color-mix(in srgb, 
 .studio-btn { border-color: var(--mat) !important; color: var(--mat); }
 @media (max-width: 900px) { .studio-body { grid-template-columns: 1fr; } .studio-side { border-right: none; } }
 .add-btn.on .plus { background: var(--mat-ink); color: var(--mat); }
+
+/* ---------------------------------------------------------------- sliders con brillo */
+.num.warn input { border-color: var(--exit); box-shadow: 0 0 0 2px color-mix(in srgb, var(--exit) 25%, transparent); }
+.slider-track { position: relative; height: 22px; display: flex; align-items: center; --p: 50%; }
+.slider-track::before {
+  content: ''; position: absolute; left: 0; right: 0; height: 8px; border-radius: 99px;
+  background: color-mix(in srgb, var(--rule) 80%, var(--vellum));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.slider-fill {
+  position: absolute; left: 0; width: var(--p); height: 8px; border-radius: 99px; overflow: hidden; pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mat) 55%, transparent), var(--mat));
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35), inset 0 -1px 2px rgba(0, 0, 0, 0.25), 0 0 10px color-mix(in srgb, var(--mat) 45%, transparent);
+  transition: width 0.18s var(--ease-out);
+}
+.slider-fill::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.45) 50%, transparent 80%);
+  background-size: 200% 100%; animation: shimmer 2.8s ease-in-out infinite;
+}
+@keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+.slider-track input[type='range'] {
+  -webkit-appearance: none; appearance: none; position: relative; width: 100%; height: 22px; margin: 0;
+  background: transparent; cursor: pointer;
+}
+.slider-track input[type='range']::-webkit-slider-runnable-track { height: 8px; background: transparent; }
+.slider-track input[type='range']::-moz-range-track { height: 8px; background: transparent; }
+.slider-track input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; margin-top: -5px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 18%, color-mix(in srgb, var(--mat) 35%, #fff) 45%, var(--mat) 100%);
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 1px var(--mat), 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 12px color-mix(in srgb, var(--mat) 55%, transparent);
+  transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease;
+}
+.slider-track input[type='range']::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 18%, color-mix(in srgb, var(--mat) 35%, #fff) 45%, var(--mat) 100%);
+  border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--mat), 0 0 12px color-mix(in srgb, var(--mat) 55%, transparent);
+}
+.slider:hover input[type='range']::-webkit-slider-thumb { transform: scale(1.18); box-shadow: 0 0 0 1px var(--mat), 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 18px color-mix(in srgb, var(--mat) 75%, transparent); }
+.slider input[type='range']:active::-webkit-slider-thumb { transform: scale(1.3); }
+.slider input[type='range']:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mat) 45%, transparent), 0 0 18px var(--mat); }
+.slider-val { display: inline-block; color: var(--mat); animation: pulse 0.35s var(--ease-spring); }
+
+/* ---------------------------------------------------------------- botón flotante «+» */
+.fab-wrap { position: absolute; left: 16px; bottom: 36px; z-index: 25; }
+.fab {
+  width: 52px; height: 52px; border-radius: 50%; padding: 0; display: grid; place-items: center; border: none;
+  background: radial-gradient(circle at 35% 28%, color-mix(in srgb, var(--mat) 55%, #fff) 0%, var(--mat) 55%, color-mix(in srgb, var(--mat) 75%, #000) 100%);
+  color: var(--mat-ink);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--mat) 40%, transparent), 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  transition: transform 0.35s var(--ease-spring), box-shadow 0.3s ease;
+}
+.fab::before {
+  content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--mat); opacity: 0;
+  transform: scale(0.8); transition: opacity 0.3s ease, transform 0.45s var(--ease-out); pointer-events: none;
+}
+.fab:hover { transform: translateY(-2px) scale(1.06); box-shadow: 0 10px 26px color-mix(in srgb, var(--mat) 55%, transparent), 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.5); }
+.fab:hover::before { opacity: 0.45; transform: scale(1); }
+.fab svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; transition: transform 0.45s var(--ease-spring); }
+.fab-wrap.open .fab svg { transform: rotate(135deg); }
+.fab-wrap.open .fab { animation: fabPop 0.4s var(--ease-spring); }
+@keyframes fabPop { 0% { transform: scale(1); } 40% { transform: scale(0.88); } 100% { transform: scale(1); } }
+.fab-menu {
+  position: absolute; left: 0; bottom: 64px; top: auto; min-width: 250px; max-height: 70vh; overflow: auto;
+  transform-origin: 26px calc(100% + 38px);
+  animation: fabMenu 0.42s var(--ease-spring) both;
+}
+@keyframes fabMenu {
+  from { opacity: 0; transform: scale(0.3) translateY(20px); filter: blur(6px); clip-path: circle(10% at 26px calc(100% + 38px)); }
+  to { opacity: 1; transform: none; filter: none; clip-path: circle(150% at 26px calc(100% + 38px)); }
+}
+.fab-menu > * { animation: fadeUp 0.3s var(--ease-out) both; animation-delay: calc(80ms + var(--i, 0) * 22ms); }
+.fab-menu button { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: transparent; padding: 6px 8px; border-radius: 6px; font-size: 13px; text-align: left; }
+.fab-menu button .dot { transition: transform 0.25s var(--ease-spring); }
+.fab-menu button:hover .dot { transform: scale(1.35); }
+.studio-hist { display: flex; gap: 4px; align-items: center; }
+.studio-templates { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.studio-bar { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--graphite-2); }
+.studio-bar .spacer { flex: 1; }
+.studio-bar select { padding: 2px 6px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); }
+.studio-part { stroke: color-mix(in srgb, var(--graphite) 35%, transparent); stroke-width: 1; stroke-dasharray: 4 3; cursor: move; transition: fill 0.2s ease, stroke 0.2s ease; }
+.studio-part:hover { fill: color-mix(in srgb, #fff 12%, transparent) !important; }
+.studio-part.on { stroke: var(--sel); stroke-width: 1.6; stroke-dasharray: none; fill: color-mix(in srgb, var(--sel) 12%, transparent) !important; }
+.studio-part.loose { opacity: 0.6; stroke: var(--red); }
+.v-handle.mid { fill: var(--sel); }
+.studio-dim.sel { fill: #fff; font-weight: 600; paint-order: stroke; stroke: color-mix(in srgb, var(--sel) 80%, #000); stroke-width: 3px; stroke-linejoin: round; }
+.studio-desk { pointer-events: none; }

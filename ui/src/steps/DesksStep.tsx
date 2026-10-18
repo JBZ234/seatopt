@@ -143,7 +143,7 @@ export default function DesksStep() {
                 </div>
                 {t.shape === 'custom' ? (
                   <div className="row wrap">
-                    <button className="small" onClick={() => st.set({ studio: { open: true, editId: t.id } })}>Editar en el estudio</button>
+                    <button className="small" onClick={() => st.set({ studio: { open: true, editId: t.id } })}>Editar en el Studio</button>
                     <span className="cap">{(t.seatWidth / 1000).toFixed(2)} × {(t.depth / 1000).toFixed(2)} m · {t.seats?.length ?? 0} puesto{(t.seats?.length ?? 0) === 1 ? '' : 's'}</span>
                   </div>
                 ) : (
@@ -205,7 +205,7 @@ export default function DesksStep() {
       <div className="row wrap">
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio', color: '#5a7d8c', shape: 'straight', seatWidth: 1200, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 0, returnDepth: 0 }); })}>Agregar tipo recto</button>
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio en L', color: '#a0613f', shape: 'l', seatWidth: 1600, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 1200, returnDepth: 600 }); })}>Agregar tipo en L</button>
-        <button className="studio-btn" onClick={() => st.set({ studio: { open: true } })}>Diseñar en el estudio…</button>
+        <button className="studio-btn" onClick={() => st.set({ studio: { open: true } })}>Diseñar en el Studio…</button>
       </div>
       {c.pinned.length > 0 && (
         <p className="hint">Hay {c.pinned.length} escritorio{c.pinned.length > 1 ? 's' : ''} fijado{c.pinned.length > 1 ? 's' : ''} en el plano: cuentan dentro de las cantidades y la optimización ubica el resto alrededor.

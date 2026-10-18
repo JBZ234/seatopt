@@ -22,7 +22,7 @@ export interface DeskType {
   returnLength: number; returnDepth: number;
   /** Separaciones libres (mm): lado de la silla (null = regla E1), atrás, izquierda, derecha. */
   clearChair?: number | null; clearBack?: number; clearLeft?: number; clearRight?: number;
-  /** Escritorio propio (estudio): contorno local y sillas. */
+  /** Escritorio propio (Studio): contorno local y sillas. */
   body?: Pt[]; seats?: CustomSeat[];
 }
 export interface Demand { typeId: string; quantity: number; max?: boolean }

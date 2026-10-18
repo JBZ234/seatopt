@@ -994,32 +994,6 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <button className={tool === 'pan' ? 'on' : ''} aria-pressed={tool === 'pan'} title="Mover el plano (también con botón derecho)" onClick={() => st.set({ tool: tool === 'pan' ? 'select' : 'pan' })}>
           <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2v16M2 10h16M10 2l-2.5 2.5M10 2l2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5" /></svg><span>Mover</span>
         </button>
-        {plan && config && (
-          <div className="add-wrap">
-            <button className={'add-btn' + (addOpen ? ' on' : '')} aria-expanded={addOpen} title="Agregar escritorios, columnas, oficinas, puertas…" onClick={() => setAddOpen(!addOpen)}>
-              <span className="plus" aria-hidden>+</span><span>Agregar</span>
-            </button>
-            {addOpen && (
-              <div className="add-menu" role="menu">
-                <div className="add-sec">Escritorios</div>
-                {config.catalog.map((t) => (
-                  <button key={t.id} role="menuitem" onClick={() => { setAddOpen(false); st.set({ tool: 'placeDesk', placeType: t.id, selection: emptySel() }); }}>
-                    <span className="dot" style={{ background: t.color }} />{t.name}
-                  </button>
-                ))}
-                <button role="menuitem" className="studio-item" onClick={() => { setAddOpen(false); st.set({ studio: { open: true } }); }}>
-                  <span className="dot ring" />Diseñar un escritorio nuevo…
-                </button>
-                <div className="add-sec">Plano</div>
-                {([['column', 'Columna'], ['fixedOffice', 'Oficina o sala fija'], ['restricted', 'Tablero o zona restringida'], ['reserved', 'Zona reservada'], ['drawDoor', 'Puerta'], ['window', 'Ventana']] as [Tool, string][]).map(([k, l]) => (
-                  <button key={k} role="menuitem" onClick={() => { setAddOpen(false); st.set({ tool: k, selection: emptySel() }); }}>
-                    <span className={'dot ob-' + k} />{l}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
         <hr />
         <button title="Acercar (rueda del mouse)" onClick={() => zoomBy(1.4)}>
           <svg viewBox="0 0 20 20" aria-hidden><path d="M10 4v12M4 10h12" /></svg><span>Acercar</span>
@@ -1041,6 +1015,32 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             e.stopPropagation();
           }}
           onBlur={() => { commitClear(editing.key, parseFloat(editing.text.replace(',', '.')) * 1000); setEditing(null); }} />
+      )}
+      {plan && config && (
+        <div className={'add-wrap fab-wrap' + (addOpen ? ' open' : '')}>
+          {addOpen && (
+            <div className="add-menu fab-menu" role="menu">
+              <div className="add-sec" style={{ '--i': 0 } as CSSProperties}>Escritorios</div>
+              {config.catalog.map((t, i) => (
+                <button key={t.id} role="menuitem" style={{ '--i': i + 1 } as CSSProperties} onClick={() => { setAddOpen(false); st.set({ tool: 'placeDesk', placeType: t.id, selection: emptySel() }); }}>
+                  <span className="dot" style={{ background: t.color }} />{t.name}
+                </button>
+              ))}
+              <button role="menuitem" className="studio-item" style={{ '--i': config.catalog.length + 1 } as CSSProperties} onClick={() => { setAddOpen(false); st.set({ studio: { open: true } }); }}>
+                <span className="dot ring" />Diseñar en el Studio…
+              </button>
+              <div className="add-sec" style={{ '--i': config.catalog.length + 2 } as CSSProperties}>Plano</div>
+              {([['column', 'Columna'], ['fixedOffice', 'Oficina o sala fija'], ['restricted', 'Tablero o zona restringida'], ['reserved', 'Zona reservada'], ['drawDoor', 'Puerta'], ['window', 'Ventana']] as [Tool, string][]).map(([k, l], i) => (
+                <button key={k} role="menuitem" style={{ '--i': config.catalog.length + 3 + i } as CSSProperties} onClick={() => { setAddOpen(false); st.set({ tool: k, selection: emptySel() }); }}>
+                  <span className={'dot ob-' + k} />{l}
+                </button>
+              ))}
+            </div>
+          )}
+          <button className="fab" aria-expanded={addOpen} aria-label="Agregar" title="Agregar escritorios, columnas, oficinas, puertas…" onClick={() => setAddOpen(!addOpen)}>
+            <svg viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+        </div>
       )}
       <div className="grid-ctl" role="group" aria-label="Cuadrícula">
         <label><input type="checkbox" checked={st.gridOn} onChange={(e) => st.set({ gridOn: e.target.checked })} /> Cuadrícula</label>
