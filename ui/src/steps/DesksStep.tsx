@@ -69,6 +69,9 @@ export default function DesksStep() {
     if (st.placeType === id && st.tool === 'placeDesk') st.set({ tool: 'select' });
   };
   const chairDefault = ruleVal(c, 'E1', 'muro') ?? 1000;
+  // fondo de la silla y paso mínimo detrás (último tramo de «Pasillos hacia los puestos»)
+  const chairDepth = c.rules.find((r) => r.id === 'E1')?.items.find((i) => i.id === 'silla')?.value ?? 500;
+  const squeeze = ruleVal(c, 'C2', 'paso_sillas') ?? ruleVal(c, 'C2', 'ancho') ?? 600;
   const upd = (id: string, f: (t: DeskType) => void) => st.updateConfig((cc) => { const t = cc.catalog.find((t) => t.id === id); if (t) f(t); });
   const req = requestedSeats(c);
   const cap = (id: string) => st.capacity?.find((x) => x.typeId === id);
@@ -149,6 +152,17 @@ export default function DesksStep() {
                   <div className="dims clears">
                     <span className="dims-title">Separación libre alrededor</span>
                     <label title="Espacio para levantarse de la silla. Vacío = el de «Espacios».">Lado de la silla<Num value={t.clearChair ?? chairDefault} unit="mm" onChange={(v) => upd(t.id, (x) => { x.clearChair = v; })} /></label>
+                    {(() => {
+                      const left = (t.clearChair ?? chairDefault) - chairDepth;
+                      const ok = left >= squeeze - 1;
+                      return (
+                        <span className={'clear-note' + (ok ? ' ok' : '')}>
+                          {ok
+                            ? `Detrás de la silla quedan ${(left / 1000).toFixed(2)} m: se puede pasar por detrás.`
+                            : `Detrás de la silla quedan ${(Math.max(0, left) / 1000).toFixed(2)} m (el último tramo pide ${(squeeze / 1000).toFixed(2)} m): se llega solo por el costado. Sirve para escritorios sueltos o el extremo de una fila; para pasar por detrás usa ${((chairDepth + squeeze) / 1000).toFixed(2)} m.`}
+                        </span>
+                      );
+                    })()}
                     {!(t.shape === 'straight' && t.sides >= 2) && <label>Atrás<Num value={t.clearBack ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearBack = v; })} /></label>}
                     <label>Izquierda<Num value={t.clearLeft ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearLeft = v; })} /></label>
                     <label>Derecha<Num value={t.clearRight ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearRight = v; })} /></label>
