@@ -95,22 +95,44 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const toWorld = (sx: number, sy: number): Pt => ({ x: (sx - view.tx) / view.k, y: -(sy - view.ty) / view.k });
 
-  // ------------------------------------------------ enganche a vértices (como OSNAP)
+  // ------------------------------------------------ enganche (como OSNAP): vértices, luego bordes, luego cuadrícula
   const snapIndex = useMemo(() => {
     const cell = 1000;
     const idx = new Map<string, number[]>();
+    const seg = new Map<string, number[]>();
     const add = (x: number, y: number) => {
       const k = `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
       const a = idx.get(k);
       if (a) a.push(x, y); else idx.set(k, [x, y]);
     };
-    background?.forEach((l) => { if (!hiddenLayers.includes(l.name)) l.paths.forEach((p) => { for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]); }); });
-    plan?.region.forEach((r) => r.forEach((q) => add(q.x, q.y)));
-    plan?.obstacles.forEach((o) => o.poly.forEach((q) => add(q.x, q.y)));
-    plan?.doors.forEach((d) => { add(d.a.x, d.a.y); add(d.b.x, d.b.y); });
-    return { idx, cell };
+    const addSeg = (x0: number, y0: number, x1: number, y1: number) => {
+      if (Math.hypot(x1 - x0, y1 - y0) < 50) return;
+      const cx0 = Math.floor(Math.min(x0, x1) / cell), cx1 = Math.floor(Math.max(x0, x1) / cell);
+      const cy0 = Math.floor(Math.min(y0, y1) / cell), cy1 = Math.floor(Math.max(y0, y1) / cell);
+      if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > 400) return;
+      for (let i = cx0; i <= cx1; i++) for (let j = cy0; j <= cy1; j++) {
+        const k = `${i},${j}`;
+        const a = seg.get(k);
+        if (a) a.push(x0, y0, x1, y1); else seg.set(k, [x0, y0, x1, y1]);
+      }
+    };
+    const ring = (r: Pt[], closed = true) => {
+      r.forEach((q) => add(q.x, q.y));
+      for (let i = 0; i < (closed ? r.length : r.length - 1); i++) { const q = r[(i + 1) % r.length]; addSeg(r[i].x, r[i].y, q.x, q.y); }
+    };
+    background?.forEach((l) => {
+      if (hiddenLayers.includes(l.name)) return;
+      l.paths.forEach((p) => {
+        for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]);
+        for (let i = 0; i + 3 < p.length; i += 2) addSeg(p[i], p[i + 1], p[i + 2], p[i + 3]);
+      });
+    });
+    plan?.region.forEach((r) => ring(r));
+    plan?.obstacles.forEach((o) => ring(o.poly));
+    plan?.doors.forEach((d) => ring([d.a, d.b], false));
+    return { idx, seg, cell };
   }, [background, hiddenLayers, plan]);
-  const SNAP_TOOLS: string[] = ['outline', 'drawDoor', 'window', 'column', 'fixedOffice', 'restricted', 'reserved', 'calibrate'];
+  const SNAP_TOOLS: string[] = ['outline', 'drawDoor', 'window', 'column', 'fixedOffice', 'restricted', 'reserved', 'calibrate', 'placeDesk'];
   const snapPt = (w: Pt): Pt | null => {
     const r = 10 / view.k;
     const { idx, cell } = snapIndex;
@@ -126,22 +148,89 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     return best;
   };
+  /** Punto más cercano sobre un borde (muros del recinto, oficinas, columnas, líneas del dibujo).
+   *  Si hay cuadrícula con snap, se queda sobre el borde en la coordenada de la cuadrícula. */
+  const snapEdge = (w: Pt, grid: boolean): Pt | null => {
+    const r = 8 / view.k;
+    const { seg, cell } = snapIndex;
+    let best: Pt | null = null, bd = r;
+    const cx = Math.floor(w.x / cell), cy = Math.floor(w.y / cell), span = Math.ceil(r / cell);
+    const g = st.gridSize;
+    for (let i = -span; i <= span; i++) for (let j = -span; j <= span; j++) {
+      const a = seg.get(`${cx + i},${cy + j}`);
+      if (!a) continue;
+      for (let t = 0; t < a.length; t += 4) {
+        const x0 = a[t], y0 = a[t + 1], x1 = a[t + 2], y1 = a[t + 3];
+        const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
+        let u = Math.max(0, Math.min(1, ((w.x - x0) * dx + (w.y - y0) * dy) / l2));
+        let q = { x: x0 + dx * u, y: y0 + dy * u };
+        if (Math.hypot(q.x - w.x, q.y - w.y) >= bd) continue;
+        if (grid) {
+          // sobre el borde, en la línea de cuadrícula más cercana (en el eje que corre el borde)
+          if (Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) > 1) {
+            const gx = Math.round(w.x / g) * g;
+            const uu = (gx - x0) / dx;
+            if (uu >= 0 && uu <= 1) { u = uu; q = { x: gx, y: y0 + dy * u }; }
+          } else if (Math.abs(dy) > 1) {
+            const gy = Math.round(w.y / g) * g;
+            const uu = (gy - y0) / dy;
+            if (uu >= 0 && uu <= 1) { u = uu; q = { x: x0 + dx * u, y: gy }; }
+          }
+        }
+        bd = Math.hypot(q.x - w.x, q.y - w.y);
+        best = q;
+      }
+    }
+    return best;
+  };
   const gridSnap = (w: Pt): Pt => {
     const g = st.gridSize;
     return { x: Math.round(w.x / g) * g, y: Math.round(w.y / g) * g };
   };
-  const worldAt = (sx: number, sy: number): Pt => {
-    const w = toWorld(sx, sy);
-    if (SNAP_TOOLS.includes(tool)) {
+  // barra espaciadora sostenida: sin ningún enganche mientras se mantiene
+  const [noSnap, setNoSnap] = useState(false);
+  useEffect(() => {
+    const isField = (e: KeyboardEvent) => { const t = e.target as HTMLElement; return !!t && ['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName); };
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || isField(e)) return;
+      // que la barra no «vuelva a pulsar» el último botón usado
+      e.preventDefault();
+      if ((e.target as HTMLElement)?.tagName === 'BUTTON') (e.target as HTMLElement).blur();
+      if (e.ctrlKey || e.metaKey) {
+        if (!e.repeat) {
+          const on = !useApp.getState().snapGrid;
+          useApp.getState().set({ snapGrid: on });
+          useApp.getState().say(on ? 'Snap a la cuadrícula activado' : 'Snap a la cuadrícula desactivado');
+        }
+        return;
+      }
+      setNoSnap(true);
+    };
+    const up = (e: KeyboardEvent) => { if (e.code === 'Space') setNoSnap(false); };
+    const blur = () => setNoSnap(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); };
+  }, []);
+  type SnapKind = 'vertex' | 'edge' | 'grid' | null;
+  /** Enganche completo. `objects`: también a vértices y bordes. */
+  const snapAll = (w: Pt, objects: boolean): { p: Pt; kind: SnapKind } => {
+    if (noSnap) return { p: w, kind: null };
+    if (objects) {
       const v = snapPt(w);
-      if (v) return v;
+      if (v) return { p: v, kind: 'vertex' };
+      const e = snapEdge(w, st.snapGrid);
+      if (e) return { p: e, kind: 'edge' };
     }
-    if (st.snapGrid && (SNAP_TOOLS.includes(tool) || tool === 'placeDesk')) return gridSnap(w);
-    return w;
+    if (st.snapGrid) return { p: gridSnap(w), kind: 'grid' };
+    return { p: w, kind: null };
   };
+  const objectSnapNow = () => SNAP_TOOLS.includes(tool) || (tool === 'select' && !!moving);
+  const worldAt = (sx: number, sy: number): Pt => snapAll(toWorld(sx, sy), objectSnapNow()).p;
   // contorno dibujado a mano
   const [outline, setOutline] = useState<Pt[]>([]);
-  const [snapMark, setSnapMark] = useState<Pt | null>(null);
+  const [snapMark, setSnapMark] = useState<{ p: Pt; kind: SnapKind } | null>(null);
   useEffect(() => { if (tool !== 'outline') setOutline([]); }, [tool]);
   const finishOutline = (pts: Pt[]) => {
     if (pts.length < 3) return;
@@ -388,10 +477,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     if (tool === 'select' && e.button === 0) {
       // ¿clic sobre algo ya seleccionado? → mover
-      const hit = pickPoint(w, 8 / view.k);
+      const hit = pickPoint(toWorld(x, y), 8 / view.k);
       const already = hit.modules.some((id) => sel.modules.includes(id)) || hit.obstacles.some((id) => sel.obstacles.includes(id))
         || hit.doors.some((id) => sel.doors.includes(id)) || hit.windows.some((i) => sel.windows.includes(i));
-      if (already && !e.shiftKey && !(e.ctrlKey || e.metaKey)) setMoving({ a: w, b: w });
+      if (already && !e.shiftKey && !(e.ctrlKey || e.metaKey)) { const a = snapAll(toWorld(x, y), true).p; setMoving({ a, b: a }); }
       else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
@@ -402,11 +491,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onMove = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
-    const w = worldAt(x, y);
+    const sn = snapAll(toWorld(x, y), objectSnapNow());
+    const w = sn.p;
     setCursor(w);
-    if (SNAP_TOOLS.includes(tool)) {
-      const sp = snapPt(toWorld(x, y));
-      if (sp?.x !== snapMark?.x || sp?.y !== snapMark?.y) setSnapMark(sp);
+    if (sn.kind) {
+      if (sn.p.x !== snapMark?.p.x || sn.p.y !== snapMark?.p.y || sn.kind !== snapMark?.kind) setSnapMark(sn);
     } else if (snapMark) setSnapMark(null);
     if (panRef.current) {
       const p = panRef.current;
@@ -444,7 +533,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const tiny = Math.hypot(b.bx - b.ax, b.by - b.ay) < 5;
       let picked;
       if (tiny) {
-        picked = pickPoint(w, 8 / view.k);
+        picked = pickPoint(toWorld(x, y), 8 / view.k);
         if (!selCount(picked)) {
           if (!e.shiftKey && !(e.ctrlKey || e.metaKey)) st.set({ selection: emptySel() });
           return;
@@ -464,14 +553,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const dx = m.b.x - m.a.x, dy = m.b.y - m.a.y;
       if (Math.hypot(dx, dy) * view.k < 3) {
         // clic simple sobre lo seleccionado: dejar solo ese elemento
-        const hit = pickPoint(w, 8 / view.k);
+        const hit = pickPoint(toWorld(x, y), 8 / view.k);
         if (selCount(hit)) st.set({ selection: hit });
         return;
       }
-      if (st.snapGrid) {
-        const g = st.gridSize;
-        moveSelection(Math.round(dx / g) * g, Math.round(dy / g) * g);
-      } else moveSelection(dx, dy);
+      moveSelection(dx, dy);
       return;
     }
     if (drag) {
@@ -516,7 +602,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         placeDesk(w);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
-        const d = nearestDoor(w);
+        const d = nearestDoor(toWorld(x, y));
         if (!d) { st.say('No hay una puerta ahí: haz clic sobre una línea de color en el borde, o usa «Dibujar puerta».'); return; }
         if (tool === 'mainDoor') {
           st.set({ mainConfirmed: true, tool: 'select' });
@@ -545,11 +631,12 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       }
       case 'erase': {
         if (!plan) return;
-        const ob = [...plan.obstacles].reverse().find((o) => pip(w, o.poly));
+        const r = toWorld(x, y);
+        const ob = [...plan.obstacles].reverse().find((o) => pip(r, o.poly));
         if (ob) { st.updatePlan((p) => { p.obstacles = p.obstacles.filter((o) => o.id !== ob.id); }); return; }
-        const wi = plan.windows.findIndex((x) => distSeg(w, x.a, x.b) < 400);
+        const wi = plan.windows.findIndex((q) => distSeg(r, q.a, q.b) < 400);
         if (wi >= 0) { st.updatePlan((p) => { p.windows.splice(wi, 1); }); return; }
-        const d = nearestDoor(w);
+        const d = nearestDoor(r);
         if (d) st.updatePlan((p) => { p.doors = p.doors.filter((x) => x.id !== d.id); });
         break;
       }
@@ -617,7 +704,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           )}
         </g>
         <g className="labels">
-          {snapMark && <rect className="snap" x={sx(snapMark) - 5} y={sy(snapMark) - 5} width={10} height={10} />}
+          {snapMark?.kind === 'vertex' && <rect className="snap" x={sx(snapMark.p) - 5} y={sy(snapMark.p) - 5} width={10} height={10} />}
+          {snapMark?.kind === 'edge' && <path className="snap" d={`M${sx(snapMark.p) - 5} ${sy(snapMark.p) - 5}L${sx(snapMark.p) + 5} ${sy(snapMark.p) + 5}M${sx(snapMark.p) + 5} ${sy(snapMark.p) - 5}L${sx(snapMark.p) - 5} ${sy(snapMark.p) + 5}`} />}
+          {snapMark?.kind === 'grid' && <circle className="snap grid-snap" cx={sx(snapMark.p)} cy={sy(snapMark.p)} r={3.5} />}
           {outline.length > 0 && <circle className="snap-start" cx={sx(outline[0])} cy={sy(outline[0])} r={6} />}
           {plan?.rooms?.filter((r) => r.label).map((r, i) => {
             const c = r.poly.reduce((a, p) => ({ x: a.x + p.x / r.poly.length, y: a.y + p.y / r.poly.length }), { x: 0, y: 0 });
@@ -690,7 +779,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       )}
       <div className="grid-ctl" role="group" aria-label="Cuadrícula">
         <label><input type="checkbox" checked={st.gridOn} onChange={(e) => st.set({ gridOn: e.target.checked })} /> Cuadrícula</label>
-        <label title="Los puntos que dibujas y los escritorios que colocas caen en la cuadrícula"><input type="checkbox" checked={st.snapGrid} onChange={(e) => st.set({ snapGrid: e.target.checked })} /> Snap</label>
+        <label title="El cursor se engancha a la cuadrícula (y siempre a vértices y bordes al dibujar o mover). Mantén la barra espaciadora para soltarlo un momento; Ctrl+Espacio lo activa o desactiva."><input type="checkbox" checked={st.snapGrid} onChange={(e) => st.set({ snapGrid: e.target.checked })} /> Snap</label>
         <select value={st.gridSize} aria-label="Tamaño de la cuadrícula" onChange={(e) => st.set({ gridSize: parseFloat(e.target.value) })}>
           {[100, 250, 500, 1000].map((g) => <option key={g} value={g}>{(g / 1000).toFixed(g < 1000 ? 2 : 0)} m</option>)}
         </select>

@@ -412,6 +412,7 @@ table.matrix thead th { font-weight: 500; color: var(--graphite-2); }
 }
 .selbar span { margin-right: 6px; font-weight: 500; }
 .snap { fill: none; stroke: #e0a100; stroke-width: 2; pointer-events: none; }
+.snap.grid-snap { stroke-width: 1.5; }
 .snap-start { fill: none; stroke: var(--mat); stroke-width: 2; pointer-events: none; }
 .outline-draft { fill: rgba(31, 111, 92, 0.08); stroke: var(--mat); stroke-width: 2; stroke-dasharray: none; vector-effect: non-scaling-stroke; }
 .door-draft { stroke: var(--egress); stroke-width: 6; stroke-dasharray: none; vector-effect: non-scaling-stroke; }

@@ -111,7 +111,10 @@ Clic sobre una **oficina, columna o zona**: su separación aparece en dorado con
 
 ### Cuadrícula
 
-Abajo a la derecha: mostrar la cuadrícula, **Snap** (los puntos dibujados, los escritorios colocados y los movimientos caen en la cuadrícula) y su tamaño.
+Abajo a la derecha: mostrar la cuadrícula, **Snap** y su tamaño.
+
+- Con Snap, el cursor se engancha a la cuadrícula. Al dibujar, colocar o mover también se engancha, con prioridad, a **vértices** (cuadrado) y **bordes** (×) del recinto, oficinas, columnas y líneas del dibujo; sobre un borde se queda en la línea de cuadrícula más cercana.
+- **Barra espaciadora sostenida**: sin enganche mientras la mantienes. **Ctrl+Espacio**: activa o desactiva el Snap.
 
 ### Tema
 
