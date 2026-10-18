@@ -569,3 +569,17 @@ button.huge { font-size: 17px; padding: 12px 22px; border-radius: 8px; }
 .icon-btn { padding: 2px 4px; line-height: 0; }
 .icon-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .hint-inline { font-size: 12px; color: var(--graphite-2); font-weight: 400 !important; }
+.ghost.bad path { stroke: var(--red); fill-opacity: 0.35; }
+.ghost.bad circle { stroke: var(--red); }
+.ghost.ok path { stroke: var(--egress); }
+.ghost.ok circle { stroke: var(--egress); }
+.fit-tip {
+  position: absolute; pointer-events: none; z-index: 4; max-width: 260px; font-size: 12px; line-height: 1.35;
+  background: var(--paper); border: 1px solid var(--rule); border-left: 3px solid var(--egress); border-radius: 5px;
+  padding: 5px 8px; box-shadow: 0 2px 8px var(--shadow);
+}
+.fit-tip.bad { border-left-color: var(--red); }
+.fit-tip ul { margin: 3px 0 0; padding-left: 16px; }
+.desk-head { display: flex; align-items: center; gap: 4px; }
+.desk-head .desk-name { flex: 1; min-width: 0; }
+.manual-add select { max-width: 170px; }

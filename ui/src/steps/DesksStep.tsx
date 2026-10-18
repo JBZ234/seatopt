@@ -57,6 +57,17 @@ export default function DesksStep() {
   });
   const maxNames = c.catalog.filter((t) => isMax(t.id)).map((t) => t.name);
   const manual = (id: string) => c.pinned.filter((m) => m.typeId === id).length;
+  const removeType = (id: string, name: string) => {
+    const used = (st.layout?.modules.filter((m) => m.typeId === id).length ?? 0) + c.pinned.filter((m) => m.typeId === id).length;
+    if (used && !confirm(`«${name}» tiene ${used} escritorio${used > 1 ? 's' : ''} en el plano. ¿Borrar el tipo y esos escritorios?`)) return;
+    st.snapshot();
+    st.updateConfig((cc) => { cc.catalog = cc.catalog.filter((x) => x.id !== id); cc.demand = cc.demand.filter((d) => d.typeId !== id); cc.pinned = cc.pinned.filter((m) => m.typeId !== id); });
+    if (st.layout) {
+      const ids = new Set(st.layout.modules.filter((m) => m.typeId === id).map((m) => m.id));
+      st.set({ layout: { ...st.layout, modules: st.layout.modules.filter((m) => !ids.has(m.id)), seats: st.layout.seats.filter((x) => !ids.has(x.moduleId)) } });
+    }
+    if (st.placeType === id && st.tool === 'placeDesk') st.set({ tool: 'select' });
+  };
   const chairDefault = ruleVal(c, 'E1', 'muro') ?? 1000;
   const upd = (id: string, f: (t: DeskType) => void) => st.updateConfig((cc) => { const t = cc.catalog.find((t) => t.id === id); if (t) f(t); });
   const req = requestedSeats(c);
@@ -86,7 +97,12 @@ export default function DesksStep() {
             <article key={t.id} className={'desk-card' + (q > 0 || mx ? ' used' : '') + (mx ? ' maxed' : '')}>
               <Preview t={t} />
               <div className="desk-main">
-                <input className="desk-name" value={t.name} aria-label="Nombre del tipo" onChange={(e) => upd(t.id, (x) => { x.name = e.target.value; })} />
+                <div className="desk-head">
+                  <input className="desk-name" value={t.name} aria-label="Nombre del tipo" onChange={(e) => upd(t.id, (x) => { x.name = e.target.value; })} />
+                  <button className="ghost small danger icon-btn" title="Borrar este tipo de escritorio" aria-label={`Borrar el tipo ${t.name}`} onClick={() => removeType(t.id, t.name)}>
+                    <svg viewBox="0 0 16 16" aria-hidden><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" /></svg>
+                  </button>
+                </div>
                 <div className="manual-row">
                   <button className={'small' + (st.tool === 'placeDesk' && st.placeType === t.id ? ' active-tool' : '')}
                     title="Clic en el plano para colocarlo. Queda fijado: la optimización lo respeta y ubica el resto."
@@ -137,7 +153,6 @@ export default function DesksStep() {
                     <label>Izquierda<Num value={t.clearLeft ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearLeft = v; })} /></label>
                     <label>Derecha<Num value={t.clearRight ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearRight = v; })} /></label>
                   </div>
-                  <button className="ghost small danger" onClick={() => st.updateConfig((cc) => { cc.catalog = cc.catalog.filter((x) => x.id !== t.id); cc.demand = cc.demand.filter((d) => d.typeId !== t.id); })}>Quitar este tipo</button>
                 </details>
               </div>
             </article>

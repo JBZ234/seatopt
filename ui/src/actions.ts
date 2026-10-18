@@ -250,6 +250,9 @@ export async function placeDesk(center: Pt) {
   try {
     const nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout });
     S().set({ layout: nl });
+    const flags = [...new Set(nl.seats.filter((x) => x.moduleId === m.id).flatMap((x) => x.flags))];
+    if (flags.length) S().say(`Ubicado, pero no cumple: ${flags.join('; ')}. Ctrl+Z para quitarlo.`, 'error');
+    else S().say(`Puesto agregado: ${nl.kpis.seatsPlaced} puestos.`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }

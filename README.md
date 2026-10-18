@@ -48,6 +48,7 @@ Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un 
    - Para los tipos que ya sabes cuántos van (por ejemplo 5 en L y 5 parejas), escribe la cantidad: se ubican primero y siempre.
    - Para los demás activa **Máximo posible**: el optimizador mete todos los que quepan.
    - Si marcas un tipo **flexible** (isla o bench, que se arma del largo que haga falta) y uno **suelto** (individual o pareja), el flexible llena las áreas grandes y el suelto rellena los huecos pequeños (un puesto de relleno vale 0,7 de uno en fila).
+   - El ícono de papelera junto al nombre **borra el tipo** (y sus escritorios en el plano).
    - **Estimar capacidad** calcula cuántos caben de cada tipo por separado.
    - **Colocar a mano**: clic en el plano para poner escritorios de un tipo (R gira 90°, F cambia el lado de la silla). Quedan fijados: cuentan dentro de la cantidad y la optimización ubica el resto alrededor.
    - En *Medidas* de cada tipo, **separación libre alrededor**: lado de la silla (por defecto la de *Espacios*), atrás, izquierda y derecha.
@@ -58,6 +59,7 @@ Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un 
 5. **Optimizar**
    - Controles: **tiempo de búsqueda**, **orden de las filas** (0 = meter escritorios en cualquier hueco; alto = solo filas ordenadas y escritorios apoyados) y **pegar a los muros**.
    - Presiona **Optimizar**. Después de armar las filas, un **relleno de huecos** busca dónde caben más escritorios en las dos orientaciones, prefiriendo los que quedan con la espalda contra un muro o espalda con espalda; cada uno se valida con todas las reglas.
+   - **Agregar a mano** (después de optimizar): eliges el tipo y lo mueves por el plano; en verde cabe, en rojo dice qué incumple (recinto, oficinas, columnas y sus separaciones, despejes de puertas, pasillo, otros escritorios). Al soltarlo el motor revisa también el acceso; si algo falla lo avisa (Ctrl+Z lo quita).
    - **Mejores soluciones encontradas**: las N mejores distintas (10 por defecto) con vista previa; clic para verla en el plano.
    - **Buscar mejores valores**: prueba bajar cada medida de *Espacios* a su mínimo razonable y cambiar de tipo; cada prueba es una optimización completa y se puede **Usar** directamente.
    - Si no caben los fijos, la app prueba relajar cada medida y cambiar de tipo de escritorio, y muestra cuántos puestos gana cada cambio, con el botón **Aplicar**.

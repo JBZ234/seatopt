@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { placeDesk } from '../actions';
 import { deskBody, doorInfo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, type ClearInfo, type ClearKey } from '../clear';
+import { checkDesk } from '../fit';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
 import { emptySel, selCount, useApp, uid } from '../store';
 import type { Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
@@ -448,6 +449,13 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   };
   useEffect(() => { setEditing(null); }, [sel]);
 
+  // ¿cabe el escritorio que se está colocando a mano?
+  const placeType = config?.catalog.find((x) => x.id === st.placeType);
+  const fitWhy = useMemo(() => {
+    if (tool !== 'placeDesk' || !cursor || !plan || !config || !placeType) return [];
+    return checkDesk(plan, config, layout, placeType, cursor, st.placeAngle, st.placeUp);
+  }, [tool, cursor, plan, config, layout, placeType, st.placeAngle, st.placeUp]);
+
   // ------------------------------------------------ interacción
   const nearestDoor = (p: Pt): Door | null => {
     if (!plan) return null;
@@ -599,6 +607,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         onSeed(w);
         break;
       case 'placeDesk':
+        if (fitWhy.length) { st.say('No cabe ahí: ' + fitWhy.join('; ') + '. Mantén Espacio para moverlo sin enganche.', 'error'); break; }
         placeDesk(w);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
@@ -687,7 +696,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             const sgn = st.placeUp ? 1 : -1;
             const chairAt = (s: number) => ({ x: cursor.x + g.v.x * s * (g.depth / 2 + 260), y: cursor.y + g.v.y * s * (g.depth / 2 + 260) });
             return (
-              <g className="ghost">
+              <g className={'ghost' + (fitWhy.length ? ' bad' : ' ok')}>
                 <path d={ringD(g.body)} fill={t.color} />
                 {(two ? [1, -1] : [sgn]).map((s) => { const c = chairAt(s); return <circle key={s} cx={c.x} cy={c.y} r={220} />; })}
               </g>
@@ -789,6 +798,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <span>y</span><b>{cursor ? (cursor.y / 1000).toFixed(2) : '—'}</b>
         <span>m</span>
       </div>
+      {tool === 'placeDesk' && cursor && placeType && (
+        <div className={'fit-tip' + (fitWhy.length ? ' bad' : ' ok')} style={{ left: sx(cursor) + 18, top: sy(cursor) + 18 }}>
+          {fitWhy.length ? <><b>No cabe aquí</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul></> : <b>Cabe · clic para ubicarlo</b>}
+        </div>
+      )}
       {hover && <SeatTip layout={layout} seat={hover.seat} x={hover.sx} y={hover.sy} />}
     </div>
   );
