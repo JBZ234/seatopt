@@ -310,6 +310,61 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     return { d: raw, mark: null };
   };
+  /** Centro del escritorio que se está colocando: una de sus esquinas se engancha a una esquina o
+   *  borde (muros del room, oficinas, columnas, otros escritorios); si queda contra un borde, se
+   *  intenta además el otro eje (encaja en rincones). Si no hay nada cerca, la esquina más cercana al
+   *  mouse cae en la cuadrícula. */
+  const placeSnap = (raw: Pt): { c: Pt; mark: { p: Pt; kind: SnapKind } | null } => {
+    const t = config?.catalog.find((x) => x.id === st.placeType);
+    if (!t || noSnap) return { c: raw, mark: null };
+    const corners = deskBody(t, raw, st.placeAngle, st.placeUp).body;
+    const rings: Pt[][] = [];
+    layout?.modules.forEach((m) => rings.push(m.body));
+    plan?.obstacles.forEach((o) => rings.push(o.poly));
+    plan?.region.forEach((r) => rings.push(r));
+    const r = 14 / view.k;
+    // 1) esquina con esquina
+    let best: { d: Pt; dist: number; p: Pt } | null = null;
+    for (const q of corners) for (const ring of rings) for (const v of ring) {
+      const dd = Math.hypot(v.x - q.x, v.y - q.y);
+      if (dd < r && (!best || dd < best.dist)) best = { d: { x: v.x - q.x, y: v.y - q.y }, dist: dd, p: v };
+    }
+    if (best) return { c: { x: raw.x + best.d.x, y: raw.y + best.d.y }, mark: { p: best.p, kind: 'vertex' } };
+    // 2) esquinas contra bordes: el mejor ajuste y luego otro en dirección distinta (rincón)
+    const edgeFix = (pts: Pt[], avoid: Pt | null) => {
+      let b: { d: Pt; dist: number; p: Pt } | null = null;
+      for (const q of pts) for (const ring of rings) for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], c = ring[(i + 1) % ring.length];
+        const ex = c.x - a.x, ey = c.y - a.y, l2 = ex * ex + ey * ey;
+        if (l2 < 1) continue;
+        const u = Math.max(0, Math.min(1, ((q.x - a.x) * ex + (q.y - a.y) * ey) / l2));
+        const f = { x: a.x + ex * u, y: a.y + ey * u };
+        const d = { x: f.x - q.x, y: f.y - q.y };
+        const dd = Math.hypot(d.x, d.y);
+        if (dd >= r || dd < 1e-6) continue;
+        if (avoid) { const al = Math.hypot(avoid.x, avoid.y) || 1; if (Math.abs((d.x * avoid.x + d.y * avoid.y) / (dd * al)) > 0.5) continue; }
+        if (!b || dd < b.dist) b = { d, dist: dd, p: f };
+      }
+      return b;
+    };
+    const e1 = edgeFix(corners, null);
+    if (e1) {
+      let c = { x: raw.x + e1.d.x, y: raw.y + e1.d.y };
+      const moved = corners.map((q) => ({ x: q.x + e1.d.x, y: q.y + e1.d.y }));
+      const e2 = edgeFix(moved, e1.d);
+      if (e2) c = { x: c.x + e2.d.x, y: c.y + e2.d.y };
+      return { c, mark: { p: e2 ? { x: e2.p.x, y: e2.p.y } : e1.p, kind: 'edge' } };
+    }
+    // 3) cuadrícula: la esquina más cercana al mouse
+    if (st.snapGrid) {
+      let k0 = corners[0];
+      for (const q of corners) if (Math.hypot(q.x - raw.x, q.y - raw.y) < Math.hypot(k0.x - raw.x, k0.y - raw.y)) k0 = q;
+      // la esquina más cercana al cursor en pantalla es la del cuadrante del mouse; usamos la primera si están a la par
+      const g = gridSnap(k0);
+      return { c: { x: raw.x + g.x - k0.x, y: raw.y + g.y - k0.y }, mark: { p: g, kind: 'grid' } };
+    }
+    return { c: raw, mark: null };
+  };
   const worldAt = (sx: number, sy: number): Pt => snapAll(toWorld(sx, sy), objectSnapNow()).p;
   // contorno dibujado a mano
   const [outline, setOutline] = useState<Pt[]>([]);
@@ -678,6 +733,17 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       if (val !== cdrag.val || moved !== cdrag.moved) setCdrag({ ...cdrag, val, moved });
       return;
     }
+    if (tool === 'placeDesk') {
+      const ps = placeSnap(toWorld(x, y));
+      setCursor(ps.c);
+      if (ps.mark?.p.x !== snapMark?.p.x || ps.mark?.p.y !== snapMark?.p.y || ps.mark?.kind !== snapMark?.kind) setSnapMark(ps.mark);
+      if (hover) setHover(null);
+      if (panRef.current) {
+        const pp = panRef.current;
+        setView((v) => ({ ...v, tx: pp.tx + x - pp.sx, ty: pp.ty + y - pp.sy }));
+      }
+      return;
+    }
     const sn = snapAll(toWorld(x, y), objectSnapNow());
     const w = sn.p;
     setCursor(w);
@@ -809,7 +875,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         break;
       case 'placeDesk':
         if (fitWhy.length && !e.shiftKey) { st.say('No cabe ahí: ' + fitWhy.join('; ') + '. Shift+clic lo ubica de todas formas; Espacio lo mueve sin enganche.', 'error'); break; }
-        placeDesk(w, fitWhy);
+        placeDesk(placeSnap(toWorld(x, y)).c, fitWhy);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
         const d = nearestDoor(toWorld(x, y));

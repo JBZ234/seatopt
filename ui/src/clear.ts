@@ -178,6 +178,13 @@ export function deskBody(t: DeskType, center: Pt, angleDeg: number, seatsUp = tr
   const a = (angleDeg * Math.PI) / 180;
   const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
   const L = (p: number, q: number) => add(center, add(mul(u, p), mul(v, q)));
+  if (t.shape === 'l') {
+    // igual que el motor: barra del lado opuesto a la silla y retorno a la izquierda; la silla en el rincón
+    const hl = length / 2, hd = depth / 2, s = seatsUp ? -1 : 1;
+    const d = Math.min(t.depth, depth), rd = Math.min(Math.max(t.returnDepth, 300), length * 0.6);
+    const body = [L(-hl, -hd * s), L(-hl + rd, -hd * s), L(-hl + rd, (hd - d) * s), L(hl, (hd - d) * s), L(hl, hd * s), L(-hl, hd * s)];
+    return { length, depth, per, u, v, body, chairs: [L(rd / 2, (hd - d - 250) * s)] };
+  }
   if (t.shape === 'custom' && t.body && t.body.length >= 3) {
     const my = seatsUp || isTwo(t) ? 1 : -1;
     return {
