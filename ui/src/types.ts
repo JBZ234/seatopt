@@ -54,7 +54,7 @@ export interface Weights {
   order: number; daylight: number; windowSide: number; privacy: number;
   travel: number; compact: number; reserve: number; grouping: number; wall: number;
 }
-export interface Settings { resolution: number; timeLimit: number; seed: number; alternatives: number }
+export interface Settings { resolution: number; timeLimit: number; seed: number; alternatives: number; resume?: unknown }
 
 export interface Config {
   catalog: DeskType[]; demand: Demand[]; rules: Rule[]; customRules: CustomRule[];

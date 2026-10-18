@@ -16,6 +16,8 @@ pub struct WSeat {
     pub facing: Pt,
     pub chair: Vec<Pt>,
     pub access: Pt,
+    /// Llegadas por los costados de la silla (sirven en los extremos de fila y escritorios sueltos).
+    pub side_access: [Pt; 2],
 }
 
 #[derive(Clone, Debug)]
@@ -129,7 +131,8 @@ pub fn module_shapes(ctx: &Ctx, t: &DeskType, pm: &PModule, center: Pt, ang: f64
         let front = facing * (chair * 0.5);
         let chair_poly = vec![pos - side + back, pos + side + back, pos + side + front, pos - side + front];
         let access = pos - facing * (chair * 0.5 + 250.0);
-        seats.push(WSeat { module: mi, pos, facing, chair: chair_poly, access });
+        let side_access = [pos - u * (cw * 0.5 + 250.0), pos + u * (cw * 0.5 + 250.0)];
+        seats.push(WSeat { module: mi, pos, facing, chair: chair_poly, access, side_access });
     };
     match t.shape {
         DeskShape::Straight => {
@@ -240,7 +243,9 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
             }
         }
     }
-    let seat_access_ok: Vec<bool> = seats.iter().map(|s| dial::to_mm(near_min(f, &d2, s.access), res) <= lim + res).collect();
+    // se llega por detrás de la silla o por uno de sus costados (extremo de fila, escritorio suelto)
+    let ok_at = |q: Pt| dial::to_mm(near_min(f, &d2, q), res) <= lim + res;
+    let seat_access_ok: Vec<bool> = seats.iter().map(|s| ok_at(s.access) || ok_at(s.side_access[0]) || ok_at(s.side_access[1])).collect();
 
     // ------------------------------------------------ recorridos a salidas (C5) y recorrido común (C6)
     let need_travel = p.c5.is_some() || weights.travel > 0.0 || full;

@@ -161,9 +161,40 @@ impl Pool {
     }
 }
 
-/// Recocido simulado con varias cadenas en paralelo.
+/// Cuánto buscar: tope duro, mínimo y, si hay `patience`, parar cuando pasa ese tiempo sin mejoras.
+#[derive(Clone, Copy, Debug)]
+pub struct Budget {
+    pub cap: f64,
+    pub min: f64,
+    pub patience: Option<f64>,
+}
+
+impl Budget {
+    pub fn fixed(secs: f64) -> Self {
+        Budget { cap: secs, min: secs, patience: None }
+    }
+    /// Automático: la paciencia crece con el área del plano y es mayor con pocos núcleos.
+    pub fn auto(area_m2: f64) -> Self {
+        let threads = rayon::current_num_threads().max(1) as f64;
+        let patience = (3.0 + area_m2 / 120.0).clamp(4.0, 14.0) * (8.0 / threads).clamp(1.0, 2.5);
+        Budget { cap: 120.0, min: (patience * 0.8).max(3.0), patience: Some(patience) }
+    }
+}
+
+/// Recocido simulado con varias cadenas en paralelo (tiempo fijo).
 pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Option<Genome>, cancel: &AtomicBool, progress: ProgressFn, phase: &str) -> SearchOut {
+    search_budget(ctx, weights, Budget::fixed(time_limit), seed, init, cancel, progress, phase)
+}
+
+/// Recocido simulado con varias cadenas en paralelo.
+#[allow(clippy::too_many_arguments)]
+pub fn search_budget(ctx: &Ctx, weights: &Weights, budget: Budget, seed: u64, init: Option<Genome>, cancel: &AtomicBool, progress: ProgressFn, phase: &str) -> SearchOut {
     let start = Instant::now();
+    let time_limit = budget.cap;
+    // la temperatura baja sobre un horizonte estimado; después queda en búsqueda local
+    let horizon = match budget.patience { Some(p) => (p * 3.0).max(budget.min), None => time_limit };
+    // momento (ms desde el inicio) de la última mejora del mejor resultado
+    let last_imp = AtomicU64::new(0);
     let chains = rayon::current_num_threads().clamp(2, 16);
     let mut base_rng = Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1);
     let base = match init {
@@ -234,7 +265,13 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
             if el >= time_limit || cancel.load(Ordering::Relaxed) {
                 break;
             }
-            let frac = el / time_limit;
+            if let Some(p) = budget.patience {
+                let since = el - last_imp.load(Ordering::Relaxed) as f64 / 1000.0;
+                if el >= budget.min && since >= p {
+                    break;
+                }
+            }
+            let frac = (el / horizon).min(1.0);
             let temp = t0 * (t1 / t0).powf(frac);
             let mut cand = cur.clone();
             let nm = 1 + (rng.f32() < 0.3) as usize;
@@ -274,6 +311,10 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
                 cur_ev = ev;
                 let mut b = best.lock().unwrap();
                 if b.as_ref().map(|x| cur_ev.score < x.1.score - 1e-9).unwrap_or(true) {
+                    // mejoras de verdad (no solo desempates mínimos) reinician la paciencia
+                    if b.as_ref().map(|x| x.1.score - cur_ev.score > 50.0).unwrap_or(true) {
+                        last_imp.store((start.elapsed().as_secs_f64() * 1000.0) as u64, Ordering::Relaxed);
+                    }
                     *b = Some((cur.clone(), cur_ev.clone()));
                 }
             }
@@ -283,14 +324,20 @@ pub fn search(ctx: &Ctx, weights: &Weights, time_limit: f64, seed: u64, init: Op
                     *lr = Instant::now();
                     let b = best.lock().unwrap();
                     if let Some((_, e)) = b.as_ref() {
+                        let el = start.elapsed().as_secs_f64();
+                        let since = el - last_imp.load(Ordering::Relaxed) as f64 / 1000.0;
+                        let (fraction, message) = match budget.patience {
+                            Some(p) => ((since / p).clamp(0.0, 1.0), format!("{} puestos · última mejora hace {:.0} s", e.seats_placed, since.max(0.0))),
+                            None => (frac, String::new()),
+                        };
                         progress(Progress {
                             phase: phase.into(),
-                            fraction: frac,
+                            fraction,
                             best_score: e.score,
                             seats_placed: e.seats_placed,
                             seats_requested: requested,
                             iterations: iters.load(Ordering::Relaxed),
-                            message: String::new(),
+                            message,
                         });
                     }
                 }
@@ -450,11 +497,36 @@ pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, gen
         violations,
         weights: weights.clone(),
         genome,
-        corridor_lines: var.corridor_lines.clone(),
+        corridor_lines: var.corridor_lines.iter().map(|l| taut(&ctx.f, &var.corridor, l)).collect(),
         access_paths: access_paths(ctx, &mods, &seats, &(0..mods.len()).map(|i| ev.module_ok[i] || mods[i].pinned).collect::<Vec<_>>()),
         corridor_width: if var.corridor_lines.is_empty() { 0.0 } else { ctx.p.c1_w },
         alternatives: vec![],
     }
+}
+
+/// «Tensa» una polilínea de celdas: desde cada punto salta al más lejano que se ve en línea recta
+/// por celdas permitidas. Queda una sucesión de rectas (las curvas las pone el dibujo en las esquinas).
+fn taut(f: &crate::raster::Frame, ok: &[bool], pts: &[Pt]) -> Vec<Pt> {
+    if pts.len() <= 2 {
+        return pts.to_vec();
+    }
+    let step = f.res * 0.5;
+    let visible = |a: Pt, b: Pt| -> bool {
+        let n = ((a.dist(b) / step).ceil() as usize).max(1);
+        (0..=n).all(|k| f.cell_idx(a.lerp(b, k as f64 / n as f64)).map(|i| ok[i]).unwrap_or(false))
+    };
+    let mut out = vec![pts[0]];
+    let mut i = 0;
+    while i < pts.len() - 1 {
+        // el más lejano visible (buscando desde el final del tramo)
+        let mut j = pts.len() - 1;
+        while j > i + 1 && !visible(pts[i], pts[j]) {
+            j -= 1;
+        }
+        out.push(pts[j]);
+        i = j;
+    }
+    out
 }
 
 /// Recorridos desde la puerta principal hasta cada puerta de oficina, por el piso ya amoblado.
@@ -521,10 +593,12 @@ pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::ev
         }
     }
     let main_mid = ctx.doors.iter().find(|d| d.door.kind == DoorKind::Main).map(|d| d.door.mid());
+    let comfy: Vec<bool> = (0..n).map(|i| pass[i] && ((clear[i] as f64) >= 380.0 || ctx.door_approach[i])).collect();
     let mut out = Vec::new();
     for t in targets {
         let Some(&end) = t.seeds.iter().filter(|&&s| dist[s].is_finite()).min_by(|&&a, &&b| dist[a].partial_cmp(&dist[b]).unwrap()) else { continue };
-        let mut line = vec![t.door.mid()];
+        let t_door_mid = t.door.mid();
+        let mut line = Vec::new();
         let mut c = end;
         let mut guard = 0;
         while c != u32::MAX as usize && guard < n {
@@ -535,11 +609,17 @@ pub fn access_paths(ctx: &Ctx, mods: &[super::eval::WModule], seats: &[super::ev
             c = par[c] as usize;
             guard += 1;
         }
-        if let Some(m) = main_mid {
-            line.push(m);
-        }
         line.reverse();
-        out.push(crate::geom::simplify(&line, res * 1.5));
+        // tensar por celdas con holgura (se aleja de muros y escritorios); los extremos son el vano
+        let mut t = taut(f, &comfy, &line);
+        if t.len() < 2 {
+            t = crate::geom::simplify(&line, res * 1.5);
+        }
+        if let Some(m) = main_mid {
+            t.insert(0, m);
+        }
+        t.push(t_door_mid);
+        out.push(t);
     }
     out
 }
@@ -652,10 +732,18 @@ pub fn optimize(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) ->
     progress(Progress { phase: "Preparando el plano".into(), ..Default::default() });
     let ctx = Ctx::build(problem)?;
     let st = &problem.config.settings;
-    let total = st.time_limit.max(0.5);
-    let out = search(&ctx, &problem.config.weights, total * 0.8, st.seed.max(1), None, cancel, progress, "Optimizando distribución");
+    // tiempo 0 = automático: busca hasta que deja de mejorar
+    let budget = if st.time_limit > 0.0 { Budget::fixed(st.time_limit * 0.8) } else { Budget::auto(ctx.area_m2) };
+    // «Seguir buscando»: arrancar desde el genoma de la solución actual (si sigue siendo compatible)
+    let init: Option<Genome> = st.resume.as_ref().and_then(|v| serde_json::from_value::<Genome>(v.clone()).ok()).filter(|g| {
+        g.vars.len() == ctx.variants.len() && g.vars.iter().zip(&ctx.variants).all(|(gv, cv)| gv.zones.len() == cv.zones.len() && gv.order.len() + 1 == cv.zones.len().max(1))
+    });
+    let t0 = Instant::now();
+    let out = search_budget(&ctx, &problem.config.weights, budget, st.seed.max(1), init, cancel, progress, "Optimizando distribución");
+    let spent = t0.elapsed().as_secs_f64();
     progress(Progress { phase: "Rellenando huecos y comparando soluciones".into(), fraction: 0.85, seats_placed: out.eval.seats_placed, ..Default::default() });
-    let mut alts = finish(&ctx, &out.pool, &problem.config.weights, st.alternatives.clamp(1, 30) as usize, (total * 0.2).max(1.0), cancel);
+    let fill = if st.time_limit > 0.0 { (st.time_limit * 0.2).max(1.0) } else { (spent * 0.25).clamp(1.5, 10.0) };
+    let mut alts = finish(&ctx, &out.pool, &problem.config.weights, st.alternatives.clamp(1, 30) as usize, fill, cancel);
     if crate::assign::has_people(&problem.config.org) {
         progress(Progress { phase: "Asignando roles y clientes".into(), fraction: 1.0, ..Default::default() });
         for l in alts.iter_mut() {
@@ -694,7 +782,7 @@ pub fn explore(problem: &Problem, n: usize, cancel: &AtomicBool, progress: Progr
         samples.push(Weights::from_vec(v));
     }
     samples.truncate(n.max(2));
-    let each = (problem.config.settings.time_limit * 0.6).clamp(1.0, 10.0);
+    let each = if problem.config.settings.time_limit > 0.0 { (problem.config.settings.time_limit * 0.6).clamp(1.0, 10.0) } else { 4.0 };
     let total = samples.len();
     let done = AtomicU64::new(0);
     let base_out = search(&ctx, &problem.config.weights, each, 11, None, cancel, &|_| {}, "Explorando");
@@ -808,7 +896,8 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
         ("C1", "ancho"), ("C2", "ancho"), ("C2", "paso_sillas"), ("E1", "muro"), ("E2", "silla_silla"), ("E2", "silla_espalda"),
         ("E3", "corte"), ("C3", "profundidad"), ("C4", "extra"), ("O1", "dist"), ("O3", "dist"),
     ];
-    let secs = (problem.config.settings.time_limit * 0.35).clamp(1.5, 5.0);
+    let tl = problem.config.settings.time_limit;
+    let secs = if tl > 0.0 { (tl * 0.35).clamp(1.5, 5.0) } else { 3.0 };
     let mut cands: Vec<(Suggestion, Problem)> = Vec::new();
     let sug = |rule_id: &str, item_id: &str, description: String, new_value: Option<f64>, disable: bool| Suggestion {
         rule_id: rule_id.into(), item_id: item_id.into(), description, new_value, disable, gain_seats: 0, seats_placed: 0, layout: None,

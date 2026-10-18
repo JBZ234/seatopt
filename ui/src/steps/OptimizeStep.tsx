@@ -23,12 +23,8 @@ export default function OptimizeStep() {
       <p className="hint">
         {req > 0 && <>Primero se ubica{req > 1 ? 'n los' : ''} {req} puesto{req > 1 ? 's' : ''} con cantidad fija. </>}
         {maxTypes.length > 0 ? <>{req > 0 ? 'Después se meten' : 'Se meten'} todos los que quepan de: {maxTypes.join(', ')}.</> : <>Busca la distribución que deja el mejor acceso con esas cantidades.</>}
+        {' '}Busca hasta que deja de encontrar mejoras; puedes detenerla cuando quieras.
       </p>
-      <label className="slider" title="Más tiempo = más combinaciones probadas.">
-        <span className="slider-label">Tiempo de búsqueda</span>
-        <input type="range" min={3} max={90} step={1} value={c.settings.timeLimit} onChange={(e) => st.updateConfig((cc) => { cc.settings.timeLimit = parseFloat(e.target.value); })} />
-        <span className="slider-val">{c.settings.timeLimit} s</span>
-      </label>
       <div className="sliders">
         <Slider label="Orden de las filas" hint="0: mete escritorios en cualquier hueco (más puestos). 10: solo filas ordenadas y escritorios apoyados en muros o espalda con espalda." value={c.weights.order} onChange={(v) => st.updateConfig((cc) => { cc.weights.order = v; })} />
         <Slider label="Pegar a los muros" hint="Cuánto se prefiere que los escritorios de un lado queden con la espalda contra un muro." value={c.weights.wall ?? 5} onChange={(v) => st.updateConfig((cc) => { cc.weights.wall = v; })} />
@@ -43,7 +39,10 @@ export default function OptimizeStep() {
         {busy ? (
           <button className="danger" onClick={() => { if (st.job) st.job.signal.cancel = true; }}>Detener</button>
         ) : (
-          <button className="primary" disabled={!st.plan || !anyDemand} onClick={optimize}>{L ? 'Optimizar de nuevo' : 'Optimizar'}</button>
+          <>
+            <button className="primary" disabled={!st.plan || !anyDemand} onClick={() => optimize()}>{L ? 'Optimizar de nuevo' : 'Optimizar'}</button>
+            {L?.genome != null && <button title="Continúa desde la solución que estás viendo, sin empezar de cero" onClick={() => optimize(true)}>Seguir buscando</button>}
+          </>
         )}
       </div>
 

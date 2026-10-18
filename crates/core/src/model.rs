@@ -495,6 +495,9 @@ pub struct Settings {
     /// Cuántas de las mejores soluciones distintas devolver.
     #[serde(default = "default_alts")]
     pub alternatives: u32,
+    /// «Seguir buscando»: genoma de la solución desde la que continuar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<serde_json::Value>,
 }
 
 fn default_alts() -> u32 {
@@ -502,12 +505,12 @@ fn default_alts() -> u32 {
 }
 
 fn default_time() -> f64 {
-    8.0
+    0.0
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { resolution: 0.0, time_limit: 8.0, seed: 0, alternatives: 10 }
+        Self { resolution: 0.0, time_limit: 0.0, seed: 0, alternatives: 10, resume: None }
     }
 }
 

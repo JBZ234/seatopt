@@ -92,7 +92,7 @@ interface Space {
 
 const SPACES: Space[] = [
   { key: 'C1', title: 'Pasillo principal', toggle: 'C1', desc: 'Une la entrada con las salidas. Se traza antes de poner escritorios.', items: [['C1', 'ancho', 'Ancho']] },
-  { key: 'C2', title: 'Pasillos hacia los puestos', desc: 'Ancho mínimo para llegar caminando a cada silla desde la entrada.', items: [['C2', 'ancho', 'Ancho'], ['C2', 'paso_sillas', 'Último tramo, detrás de las sillas']] },
+  { key: 'C2', title: 'Pasillos hacia los puestos', desc: 'Es la regla de acceso: cada puesto debe alcanzarse caminando desde la entrada por pasillos de este ancho; el último tramo (detrás de las sillas o por el costado, en los extremos de fila) puede ser más angosto. También vigila que ninguna puerta quede bloqueada.', items: [['C2', 'ancho', 'Ancho'], ['C2', 'paso_sillas', 'Último tramo, detrás de las sillas']] },
   { key: 'E1', title: 'Espacio para la silla', desc: 'Del borde del escritorio al muro, del lado donde se sienta la persona.', items: [['E1', 'muro', 'Distancia']] },
   { key: 'E2', title: 'Separación entre filas', desc: 'Entre los bordes de escritorios de filas vecinas.', items: [['E2', 'silla_silla', 'Sillas espalda con espalda'], ['E2', 'silla_espalda', 'Silla con espalda de escritorio']] },
   { key: 'E3', title: 'Corte de filas largas', toggle: 'E3', desc: 'Cada cuántos puestos seguidos se corta una fila para dejar un paso.', items: [['E3', 'max', 'Puestos seguidos por lado'], ['E3', 'corte', 'Ancho del paso']] },

@@ -107,9 +107,11 @@ function startJobUi(kind: string) {
   return signal;
 }
 
-export async function optimize() {
-  const p = problem();
-  if (!p) return;
+export async function optimize(resume = false) {
+  const p0 = problem();
+  if (!p0) return;
+  // tiempo automático (0) y, con «Seguir buscando», el genoma de la solución actual
+  const p = { ...p0, config: { ...p0.config, settings: { ...p0.config.settings, timeLimit: 0, resume: resume ? S().layout?.genome ?? null : null } } };
   if (!hasDemand(p.config)) {
     S().say('Indica cuántos escritorios ubicar, o marca «Máximo posible», en el paso «Escritorios».', 'error');
     S().set({ step: 1 });

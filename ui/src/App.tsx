@@ -163,7 +163,7 @@ export default function App() {
           <div className="job">
             <span>{job.progress?.phase || job.kind}{job.progress?.message ? ` · ${job.progress.message}` : ''}</span>
             <Bar value={job.progress?.fraction ?? 0} />
-            {job.progress && job.progress.seatsPlaced > 0 && <span className="mono">{job.progress.seatsPlaced} / {job.progress.seatsRequested}</span>}
+            {job.progress && job.progress.seatsPlaced > 0 && !job.progress.message && <span className="mono">{job.progress.seatsRequested > 0 ? `${job.progress.seatsPlaced} / ${job.progress.seatsRequested}` : `${job.progress.seatsPlaced} puestos`}</span>}
           </div>
         ) : (
           <span className="muted">{st.plan ? `${st.areaM2.toFixed(0)} m² útiles` : 'Sin plano'}{req ? ` · ${req} puestos fijos` : ''}{st.config?.demand.some((d) => d.max) ? ' · + máximo posible' : ''}</span>

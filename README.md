@@ -57,7 +57,8 @@ Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un 
    - **Calcular cuántos puestos gana cada medida** prueba cada ajuste y muestra la ganancia junto a la medida, con **Aplicar**.
 4. **Organización** (opcional): roles con color, tipo de escritorio, nivel de ruido y elemento al que deben estar cerca; clientes; matriz de cuántas personas de cada rol tiene cada cliente; afinidad entre roles.
 5. **Optimizar**
-   - Controles: **tiempo de búsqueda**, **orden de las filas** (0 = meter escritorios en cualquier hueco; alto = solo filas ordenadas y escritorios apoyados) y **pegar a los muros**.
+   - La búsqueda **se detiene sola** cuando pasa un rato sin mejoras (más paciencia en planos grandes o con pocos núcleos; tope de 2 min). **Seguir buscando** continúa desde la solución que estás viendo.
+   - Controles: **orden de las filas** (0 = meter escritorios en cualquier hueco; alto = solo filas ordenadas y escritorios apoyados) y **pegar a los muros**.
    - Presiona **Optimizar**. Después de armar las filas, un **relleno de huecos** busca dónde caben más escritorios en las dos orientaciones, prefiriendo los que quedan con la espalda contra un muro o espalda con espalda; cada uno se valida con todas las reglas.
    - **Mostrar**: pasillo principal (franja suave con su eje), **recorridos a oficinas** (camino de referencia desde la entrada hasta cada puerta de oficina por el piso ya amoblado; solo se muestra, no cambia la optimización) y despejes de puertas.
    - **Agregar a mano** (después de optimizar): eliges el tipo y lo mueves por el plano; en verde cabe, en rojo dice qué incumple (recinto, oficinas, columnas y sus separaciones, despejes de puertas, pasillo, otros escritorios). Al soltarlo el motor revisa también el acceso; si algo falla lo avisa (Ctrl+Z lo quita).
