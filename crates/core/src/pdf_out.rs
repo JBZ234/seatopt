@@ -554,16 +554,7 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
 
 /// Lado hacia el que abre una puerta: hacia el área amoblable.
 fn door_inward(plan: &Plan, d: &Door) -> Pt {
-    let u = (d.b - d.a).norm();
-    let n = u.perp();
-    let m = d.mid();
-    if point_in_region(m + n * 300.0, &plan.region) {
-        n
-    } else if point_in_region(m - n * 300.0, &plan.region) {
-        -n
-    } else {
-        n
-    }
+    d.inward(plan)
 }
 
 fn draw_minimal_plan(c: &mut Canvas, plan: &Plan, layout: Option<&Layout>) {

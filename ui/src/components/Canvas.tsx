@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { placeDesk } from '../actions';
-import { deskBody, doorInfo, moduleInfo, obstacleClears, obstacleInfo, type ClearInfo, type ClearKey } from '../clear';
+import { deskBody, doorInfo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, type ClearInfo, type ClearKey } from '../clear';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
 import { emptySel, selCount, useApp, uid } from '../store';
 import type { Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
@@ -255,6 +255,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         {plan?.obstacles.filter((o) => sel.obstacles.includes(o.id)).map((o) => <path key={'so' + o.id} className="sel" d={ringD(o.poly)} />)}
         {plan?.doors.filter((d) => sel.doors.includes(d.id)).map((d) => <line key={'sd' + d.id} className="sel" x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} />)}
         {plan?.windows.filter((_, i) => sel.windows.includes(i)).map((w, i) => <line key={'sw' + i} className="sel" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
+        {plan?.region.filter((_, i) => sel.region?.includes(i)).map((r, i) => <path key={'sr' + i} className="sel" fill="none" d={ringD(r)} />)}
       </>
     );
   }, [sel, layout, plan]);
@@ -301,11 +302,25 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const t = m && config.catalog.find((x) => x.id === m.typeId);
       return m && t ? moduleInfo(config, m, t) : null;
     }
+    if (sel.region?.length) return regionInfo(plan, sel.region[0]);
     return null;
   }, [one, sel, plan, layout, config]);
 
   const commitClear = (key: ClearKey, mm: number) => {
     if (!config || !plan || !isFinite(mm) || mm < 0) return;
+    if (sel.region?.length && clr?.groups && typeof key === 'number') {
+      const ri = sel.region[0];
+      const edges = clr.groups[key] ?? [];
+      st.updatePlan((p) => {
+        const rc = p.regionClear ? p.regionClear.map((r) => [...r]) : [];
+        while (rc.length < p.region.length) rc.push([]);
+        const row = rc[ri];
+        while (row.length < p.region[ri].length) row.push(0);
+        for (const e of edges) row[e] = mm;
+        p.regionClear = rc;
+      });
+      return;
+    }
     if (sel.obstacles.length) {
       const id = sel.obstacles[0];
       st.updatePlan((p) => {
@@ -330,6 +345,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     } else if (sel.modules.length) {
       const m = layout?.modules.find((x) => x.id === sel.modules[0]);
       if (!m) return;
+      st.snapshot();
       st.updateConfig((c) => {
         const t = c.catalog.find((x) => x.id === m.typeId);
         if (!t) return;
@@ -375,7 +391,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const hit = pickPoint(w, 8 / view.k);
       const already = hit.modules.some((id) => sel.modules.includes(id)) || hit.obstacles.some((id) => sel.obstacles.includes(id))
         || hit.doors.some((id) => sel.doors.includes(id)) || hit.windows.some((i) => sel.windows.includes(i));
-      if (already && !e.shiftKey) setMoving({ a: w, b: w });
+      if (already && !e.shiftKey && !(e.ctrlKey || e.metaKey)) setMoving({ a: w, b: w });
       else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
@@ -430,14 +446,16 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       if (tiny) {
         picked = pickPoint(w, 8 / view.k);
         if (!selCount(picked)) {
-          if (!e.shiftKey) st.set({ selection: emptySel() });
+          if (!e.shiftKey && !(e.ctrlKey || e.metaKey)) st.set({ selection: emptySel() });
           return;
         }
       } else {
         const r = normRect(toWorld(b.ax, b.ay), toWorld(b.bx, b.by));
         picked = pickRect(r, b.bx < b.ax);
       }
-      st.set({ selection: mergeSel(st.selection, picked, e.shiftKey) });
+      // como AutoCAD: una selección nueva reemplaza la anterior; Ctrl suma, Shift quita
+      const add = e.ctrlKey || e.metaKey;
+      st.set({ selection: e.shiftKey ? mergeSel(st.selection, picked, true) : add ? mergeSel(st.selection, picked, false) : picked });
       return;
     }
     if (moving) {
@@ -631,8 +649,13 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           <span>{describeSel(sel)}</span>
           {sel.modules.length > 0 && <button className="small" title="Conserva estos escritorios y a sus personas en las próximas optimizaciones (P)" onClick={() => pinSelection(true)}>Fijar y bloquear</button>}
           {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Soltar</button>}
-          <button className="small" title="Girar 90° (R)" onClick={() => rotateSelection(90)}>Girar 90°</button>
-          <button className="small danger" title="Supr" onClick={deleteSelection}>Borrar</button>
+          {sel.doors.length > 0 && (
+            <button className="small" title="Cambia el lado hacia el que abre la puerta (y su despeje)"
+              onClick={() => st.updatePlan((p) => { p.doors.forEach((d) => { if (sel.doors.includes(d.id)) d.flip = !d.flip; }); })}>Invertir sentido</button>
+          )}
+          {(sel.modules.length > 0 || sel.obstacles.length > 0) && <button className="small" title="Gira los escritorios u obstáculos seleccionados 90° sobre su centro (R)" onClick={() => rotateSelection(90)}>Girar 90°</button>}
+          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small danger" title="Supr" onClick={deleteSelection}>Borrar</button>}
+          {sel.region?.length ? <span className="hint-inline">Clic en un número dorado para la separación de esa arista</span> : null}
           <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Quitar selección</button>
         </div>
       )}

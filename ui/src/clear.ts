@@ -3,7 +3,7 @@ import type { Config, DeskType, Door, Module, Obstacle, Plan, Pt } from './types
 
 export type ClearKey = 'chair' | 'back' | 'left' | 'right' | 'depth' | 'width' | number;
 export interface ClearLabel { pos: Pt; value: number; key: ClearKey; title: string; prefix?: string }
-export interface ClearInfo { zones: Pt[][]; labels: ClearLabel[] }
+export interface ClearInfo { zones: Pt[][]; labels: ClearLabel[]; /** Para el recinto: aristas de cada grupo (una etiqueta por grupo). */ groups?: number[][] }
 
 const add = (a: Pt, b: Pt): Pt => ({ x: a.x + b.x, y: a.y + b.y });
 const sub = (a: Pt, b: Pt): Pt => ({ x: a.x - b.x, y: a.y - b.y });
@@ -84,7 +84,11 @@ export function doorClear(c: Config, plan: Plan, d: Door) {
   const u = norm(sub(d.b, d.a));
   const nrm = { x: -u.y, y: u.x };
   const mid = mul(add(d.a, d.b), 0.5);
-  const inward = inRegion(add(mid, mul(nrm, 300)), plan.region) ? nrm : mul(nrm, -1);
+  // lado libre: dentro del recinto y fuera de oficinas y columnas (igual que el motor); «flip» lo invierte
+  const free = (q: Pt) => inRegion(q, plan.region) && !plan.obstacles.some((o) => (o.kind === 'column' || o.kind === 'fixedOffice') && pip(q, o.poly));
+  const score = (s: number) => [1, 2, 3, 4, 5, 6].filter((k) => free(add(mid, mul(nrm, s * 150 * k)))).length;
+  let inward = score(1) >= score(-1) ? nrm : mul(nrm, -1);
+  if (d.flip) inward = mul(inward, -1);
   const applies = d.kind === 'main' || (d.kind === 'exit' && ruleOn(c, 'C4', 'salidas')) || (d.kind === 'office' && ruleOn(c, 'C4', 'oficinas'));
   let depth = 0;
   if (ruleOn(c, 'C4') && applies) depth = (ruleOn(c, 'C4', 'barrido') ? w : 0) + (ruleVal(c, 'C4', 'extra') ?? 0);
@@ -152,4 +156,52 @@ export function deskBody(t: DeskType, center: Pt, angleDeg: number) {
   const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
   const L = (p: number, q: number) => add(center, add(mul(u, p), mul(v, q)));
   return { length, depth, per, body: [L(-length / 2, -depth / 2), L(length / 2, -depth / 2), L(length / 2, depth / 2), L(-length / 2, depth / 2)], u, v };
+}
+
+/** Separación hacia adentro de cada arista del contorno del recinto. Las aristas cortas seguidas
+ *  (curvas dibujadas con muchos tramos) se agrupan y comparten una sola medida. */
+export function regionInfo(plan: Plan, ri: number): ClearInfo {
+  const ring = plan.region[ri];
+  if (!ring || ring.length < 3) return { zones: [], labels: [] };
+  const n = ring.length;
+  const cl = plan.regionClear?.[ri] ?? [];
+  const val = (i: number) => Math.max(0, cl[i] ?? 0);
+  const len = (i: number) => Math.hypot(ring[(i + 1) % n].x - ring[i].x, ring[(i + 1) % n].y - ring[i].y);
+  const inward = (i: number) => {
+    const a = ring[i], b = ring[(i + 1) % n];
+    const u = norm(sub(b, a));
+    const nn = { x: -u.y, y: u.x };
+    return inRegion(add(mul(add(a, b), 0.5), mul(nn, 60)), plan.region) ? nn : mul(nn, -1);
+  };
+  // grupos: cada arista larga sola; las cortas consecutivas juntas
+  const SHORT = 600;
+  const groups: number[][] = [];
+  let cur: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (len(i) >= SHORT) {
+      if (cur.length) { groups.push(cur); cur = []; }
+      groups.push([i]);
+    } else cur.push(i);
+  }
+  if (cur.length) {
+    // unir con el primer grupo si también era de aristas cortas (el anillo da la vuelta)
+    if (groups.length && len(groups[0][0]) < SHORT) groups[0] = [...cur, ...groups[0]];
+    else groups.push(cur);
+  }
+  const zones: Pt[][] = [];
+  const labels: ClearLabel[] = [];
+  groups.forEach((g, gi) => {
+    for (const i of g) {
+      const d = val(i);
+      if (d <= 0) continue;
+      const a = ring[i], b = ring[(i + 1) % n], inn = inward(i);
+      zones.push([a, b, add(b, mul(inn, d)), add(a, mul(inn, d))]);
+    }
+    const mid = g[Math.floor(g.length / 2)];
+    const a = ring[mid], b = ring[(mid + 1) % n];
+    const p = g.length > 1 && g.length % 2 === 0 ? a : mul(add(a, b), 0.5);
+    const d = val(g[0]);
+    labels.push({ pos: add(p, mul(inward(mid), Math.max(d, 300) * 0.5 + (d > 0 ? 0 : 120))), value: d, key: gi, title: g.length > 1 ? `Separación en este tramo curvo (${g.length} aristas)` : 'Separación hacia adentro desde esta arista' });
+  });
+  return { zones, labels, groups };
 }

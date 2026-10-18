@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type {
-  BgLayer, Capacity, Config, ImportOut, LayerRole, Layout, Module, Plan, Progress, Pt, Suggestion, Variant,
+  BgLayer, Capacity, Config, DeskType, ImportOut, LayerRole, Layout, Module, Plan, Progress, Pt, Suggestion, Variant,
 } from './types';
 
 export type Tool =
@@ -19,11 +19,11 @@ function loadTheme(): Theme {
 }
 
 /** Selección múltiple (como AutoCAD). Ventanas por índice. */
-export interface Selection { modules: string[]; obstacles: string[]; doors: string[]; windows: number[] }
-export const emptySel = (): Selection => ({ modules: [], obstacles: [], doors: [], windows: [] });
-export const selCount = (s: Selection) => s.modules.length + s.obstacles.length + s.doors.length + s.windows.length;
+export interface Selection { modules: string[]; obstacles: string[]; doors: string[]; windows: number[]; /** Anillos del contorno del recinto. */ region?: number[] }
+export const emptySel = (): Selection => ({ modules: [], obstacles: [], doors: [], windows: [], region: [] });
+export const selCount = (s: Selection) => s.modules.length + s.obstacles.length + s.doors.length + s.windows.length + (s.region?.length ?? 0);
 
-interface Snapshot { plan: Plan | null; layout: Layout | null; pinned: Module[] }
+interface Snapshot { plan: Plan | null; layout: Layout | null; pinned: Module[]; catalog: DeskType[] }
 
 export interface JobUi { kind: string; progress: Progress | null; signal: { cancel: boolean } }
 
@@ -51,9 +51,12 @@ export interface AppState {
   showBackground: boolean;
   selection: Selection;
   history: Snapshot[];
+  /** Estados deshechos (para rehacer). */
+  future: Snapshot[];
   /** Guarda el estado actual para poder deshacer. */
   snapshot: () => void;
   undo: () => void;
+  redo: () => void;
   toast: { text: string; tone: 'info' | 'error' } | null;
   calib: Pt[];
   autoExplore: boolean;
@@ -104,16 +107,26 @@ export const useApp = create<AppState>((set, get) => ({
   showBackground: true,
   selection: emptySel(),
   history: [],
+  future: [],
   snapshot: () => {
     const { plan, layout, config, history } = get();
-    set({ history: [...history.slice(-29), clone({ plan, layout, pinned: config?.pinned ?? [] })] });
+    set({ history: [...history.slice(-49), clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] })], future: [] });
   },
   undo: () => {
     const h = get().history;
     if (!h.length) return;
     const last = h[h.length - 1];
-    const c = get().config;
-    set({ history: h.slice(0, -1), plan: last.plan, layout: last.layout, config: c ? { ...c, pinned: last.pinned } : c, selection: emptySel() });
+    const { plan, layout, config, future } = get();
+    const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] });
+    set({ history: h.slice(0, -1), future: [...future.slice(-49), now], plan: last.plan, layout: last.layout, config: config ? { ...config, pinned: last.pinned, catalog: last.catalog.length ? last.catalog : config.catalog } : config, selection: emptySel() });
+  },
+  redo: () => {
+    const f = get().future;
+    if (!f.length) return;
+    const next = f[f.length - 1];
+    const { plan, layout, config, history } = get();
+    const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] });
+    set({ future: f.slice(0, -1), history: [...history.slice(-49), now], plan: next.plan, layout: next.layout, config: config ? { ...config, pinned: next.pinned, catalog: next.catalog.length ? next.catalog : config.catalog } : config, selection: emptySel() });
   },
   toast: null,
   calib: [],

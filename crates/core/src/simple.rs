@@ -526,6 +526,7 @@ fn door_geo(d: &Door, region: &[Vec<Pt>]) -> DoorGeo {
     let n = u.perp();
     let m = d.mid();
     let inward = if point_in_region(m + n * 300.0, region) { n } else { -n };
+    let inward = if d.flip { -inward } else { inward };
     let a0 = u.y.atan2(u.x).to_degrees();
     let a1 = inward.y.atan2(inward.x).to_degrees();
     let mut da = a1 - a0;

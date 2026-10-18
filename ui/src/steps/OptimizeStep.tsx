@@ -97,7 +97,7 @@ export default function OptimizeStep() {
             ))}
           </div>
           {st.colorBy !== 'type' && <Legend />}
-          <p className="hint">Para bloquear puestos: selecciona escritorios en el plano (arrastra de izquierda a derecha para una ventana azul o de derecha a izquierda para una captura verde) y usa «Fijar y bloquear». Se conservan con sus personas y se optimiza el resto. Arrastra para mover, R gira, Supr borra, Ctrl+Z deshace.</p>
+          <p className="hint">Para bloquear puestos: selecciona escritorios en el plano (arrastra de izquierda a derecha para una ventana azul o de derecha a izquierda para una captura verde) y usa «Fijar y bloquear». Se conservan con sus personas y se optimiza el resto. Una selección nueva reemplaza la anterior; con Ctrl se suma y con Shift se quita. Arrastra para mover, R gira, Supr borra, Ctrl+Z deshace y Ctrl+Y rehace.</p>
           <label className="check"><input type="checkbox" checked={st.showKeepouts} onChange={(e) => st.set({ showKeepouts: e.target.checked })} /> Mostrar despejes de puertas</label>
           <div className="row wrap">
             {c.pinned.length > 0 && <button className="ghost small" onClick={() => { st.snapshot(); st.updateConfig((cc) => { cc.pinned = []; }); if (st.layout) st.set({ layout: { ...st.layout, modules: st.layout.modules.map((m) => ({ ...m, pinned: false })), seats: st.layout.seats.map((s) => ({ ...s, locked: false })) } }); }}>Soltar los {c.pinned.length} fijados</button>}

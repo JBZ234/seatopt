@@ -565,3 +565,6 @@ button.huge { font-size: 17px; padding: 12px 22px; border-radius: 8px; }
 .dims-title { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--graphite-2); }
 .welcome-cfg { width: 100%; font-size: 13px; color: var(--graphite-2); }
 .welcome-cfg input { width: 100%; margin-top: 4px; }
+.icon-btn { padding: 2px 4px; line-height: 0; }
+.icon-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.hint-inline { font-size: 12px; color: var(--graphite-2); font-weight: 400 !important; }

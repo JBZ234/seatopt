@@ -59,9 +59,27 @@ pub struct Door {
     pub clear_depth: Option<f64>,
     #[serde(default)]
     pub clear_width: Option<f64>,
+    /// Invertir el lado hacia el que abre (y hacia donde va el despeje).
+    #[serde(default)]
+    pub flip: bool,
 }
 
 impl Door {
+    /// Lado hacia el que abre la puerta: el lado libre (dentro del recinto y fuera de oficinas y
+    /// columnas); `flip` lo invierte.
+    pub fn inward(&self, plan: &Plan) -> Pt {
+        let u = (self.b - self.a).norm();
+        let n = u.perp();
+        let m = self.mid();
+        let free = |q: Pt| {
+            crate::geom::point_in_region(q, &plan.region)
+                && !plan.obstacles.iter().any(|o| matches!(o.kind, ObstacleKind::Column | ObstacleKind::FixedOffice) && crate::geom::point_in_polygon(q, &o.poly))
+        };
+        let score = |s: f64| (1..=6).filter(|k| free(m + n * (s * 150.0 * *k as f64))).count();
+        let dir = if score(1.0) >= score(-1.0) { n } else { -n };
+        if self.flip { -dir } else { dir }
+    }
+
     pub fn width(&self) -> f64 {
         self.a.dist(self.b)
     }
@@ -95,6 +113,10 @@ pub struct Plan {
     /// Referencia: contorno exterior del edificio.
     #[serde(default)]
     pub building: Vec<Pt>,
+    /// Separación libre hacia adentro desde cada arista del recinto (mm), por anillo y arista.
+    /// Vacío = sin separación propia (cuentan las reglas de silla y pasillos).
+    #[serde(default)]
+    pub region_clear: Vec<Vec<f64>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

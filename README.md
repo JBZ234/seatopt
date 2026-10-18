@@ -75,12 +75,13 @@ Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un 
 |---|---|
 | Selección por ventana (azul) | Arrastrar de **izquierda a derecha**: toma lo que queda completamente adentro |
 | Selección por captura (verde) | Arrastrar de **derecha a izquierda**: toma todo lo que toque |
-| Agregar / quitar | Clic agrega; **Shift** + clic o barrido quita |
+| Agregar / quitar | Una selección nueva reemplaza la anterior; **Ctrl** + clic o barrido suma, **Shift** + clic o barrido quita |
 | Mover | Arrastrar lo seleccionado, o flechas (100 mm; Shift = 500 mm) |
-| Girar 90° | **R** |
+| Girar 90° | **R**: escritorios u obstáculos seleccionados, sobre su centro |
+| Invertir puerta | Botón «Invertir sentido» con la puerta seleccionada |
 | Fijar y bloquear personas | **P** o botón de la barra de selección |
 | Borrar | **Supr** |
-| Deshacer | **Ctrl+Z** |
+| Deshacer / rehacer | **Ctrl+Z** / **Ctrl+Y** (o Ctrl+Shift+Z) |
 | Seleccionar todos los escritorios | **Ctrl+A** |
 | Limpiar selección / salir de herramienta | **Esc** |
 | Desplazar / zoom | Botón derecho o central + arrastrar / rueda |
@@ -100,7 +101,11 @@ También se puede exportar:
 - **Líneas simples:** el dibujo original reducido a lo esencial. Cada muro (doble línea, fachada o vidrio) queda como **una sola línea** a eje; además columnas, escaleras y ascensores como bloque, puertas (hoja + arco) y el rótulo de las oficinas. Capas `MUROS`, `COLUMNAS`, `NUCLEO`, `PUERTAS`, `A-PUERTA-PPAL`, `TEXTO`. Delimita la misma área que el original, así que también sirve para reimportar.
 - El dibujo original completo quitando solo las capas de «Mobiliario existente».
 
+En *Plano → Capas del dibujo*, el ícono de papelera **borra todas las líneas y objetos de esa capa** (si la capa afectaba el área, se vuelve a detectar).
+
 ### Separaciones editables en el plano
+
+Clic sobre el **borde del recinto**: aparece una cota dorada por arista con la separación hacia adentro (0 por defecto); los tramos curvos, dibujados con muchas aristas cortas, comparten una sola medida.
 
 Clic sobre una **oficina, columna o zona**: su separación aparece en dorado con una cota por lado (o una sola si no es rectangular). Clic en el número para escribir la medida en metros (Enter). Lo mismo con una **puerta** (fondo y ancho libres) y con un **escritorio** (silla, atrás, izquierda, derecha; se aplica a todo su tipo).
 

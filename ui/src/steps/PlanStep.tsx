@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { analyzePlan, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setScale } from '../actions';
+import { analyzePlan, deleteLayer, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setScale } from '../actions';
 import { Fold, Num } from '../components/ui';
 import { useApp, type Tool } from '../store';
 import type { DoorKind, LayerRole, ObstacleKind } from '../types';
@@ -205,6 +205,11 @@ export default function PlanStep() {
                       <select value={roles[l.name]} onChange={(e) => st.set({ roles: { ...roles, [l.name]: e.target.value as LayerRole } })}>
                         {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
+                    </td>
+                    <td>
+                      <button className="ghost small danger icon-btn" title={`Borrar todas las líneas y objetos de «${l.name}»`} aria-label={`Borrar la capa ${l.name}`} onClick={() => deleteLayer(l.name)}>
+                        <svg viewBox="0 0 16 16" aria-hidden><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" /></svg>
+                      </button>
                     </td>
                   </tr>
                 );

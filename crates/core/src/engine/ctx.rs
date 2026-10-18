@@ -409,6 +409,24 @@ impl Ctx {
         buffer(&col_g, p.o1, &mut keep0);
         buffer(&restr_g, p.o2, &mut keep0);
         buffer(&office_g, p.o3, &mut keep0);
+        // separaciones propias de las aristas del recinto (franja hacia adentro)
+        for (ri, ring) in plan.region.iter().enumerate() {
+            let Some(cl) = plan.region_clear.get(ri) else { continue };
+            let k = ring.len();
+            for i in 0..k {
+                let d = cl.get(i).copied().unwrap_or(0.0);
+                if d <= 0.0 {
+                    continue;
+                }
+                let a = ring[i];
+                let b = ring[(i + 1) % k];
+                let u = (b - a).norm();
+                let nn = u.perp();
+                let m = a.lerp(b, 0.5);
+                let inn = if point_in_region(m + nn * 60.0, &plan.region) { nn } else { -nn };
+                raster::fill_polygon(&f, &mut keep0, &[a, b, b + inn * d, a + inn * d], true);
+            }
+        }
         // separaciones propias de cada obstáculo (por lado o una sola para todo el contorno)
         for o in custom {
             for z in obstacle_clear_zones(o) {
@@ -435,6 +453,7 @@ impl Ctx {
             let mid = d.mid();
             let probe = |s: f64| -> usize { (1..=8).filter(|k| inside(mid + nrm * (s * (*k as f64) * 150.0))).count() };
             let inward = if probe(1.0) >= probe(-1.0) { nrm } else { -nrm };
+            let inward = if d.flip { -inward } else { inward };
             // semillas: celdas libres justo adentro del vano
             let mut seeds = Vec::new();
             for k in 0..=12 {

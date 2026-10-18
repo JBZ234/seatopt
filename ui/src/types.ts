@@ -6,11 +6,11 @@ export type ObstacleKind = 'column' | 'fixedOffice' | 'restricted' | 'reserved';
 export interface Obstacle { id: string; kind: ObstacleKind; poly: Pt[]; label: string; clear?: number[] }
 
 export type DoorKind = 'main' | 'exit' | 'office' | 'ignore';
-export interface Door { id: string; kind: DoorKind; a: Pt; b: Pt; label: string; clearDepth?: number | null; clearWidth?: number | null }
+export interface Door { id: string; kind: DoorKind; a: Pt; b: Pt; label: string; clearDepth?: number | null; clearWidth?: number | null; flip?: boolean }
 export interface Window { a: Pt; b: Pt }
 
 export interface Room { poly: Pt[]; label: string }
-export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[]; rooms?: Room[]; building?: Pt[] }
+export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[]; rooms?: Room[]; building?: Pt[]; regionClear?: number[][] }
 
 export type DeskShape = 'straight' | 'l';
 export interface DeskType {

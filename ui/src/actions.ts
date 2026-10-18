@@ -37,9 +37,31 @@ export function closePlan() {
   s.set({
     drawing: null, plan: null, layout: null, background: null, hiddenLayers: [], notes: [], areaM2: 0, roles: {},
     variants: [], suggestions: null, capacity: null, selection: { modules: [], obstacles: [], doors: [], windows: [] },
-    history: [], step: 0, tool: 'select', calib: [], scaleConfirmed: false, mainConfirmed: true, alternatives: [],
+    history: [], future: [], step: 0, tool: 'select', calib: [], scaleConfirmed: false, mainConfirmed: true, alternatives: [],
   });
   s.updateConfig((c) => { c.pinned = []; });
+}
+
+/** Borra del dibujo todas las líneas y objetos de una capa. */
+export async function deleteLayer(name: string) {
+  const s = S();
+  const d = s.drawing;
+  if (!d?.drawingId) return;
+  const l = d.layers.find((x) => x.name === name);
+  if (!l || !confirm(`¿Borrar la capa «${name}» (${l.paths} trazos) del dibujo? No se puede deshacer (vuelve a abrir el archivo para recuperarla).`)) return;
+  try {
+    const n = await call<number>('delete_layer', { drawingId: d.drawingId, layer: name });
+    const role = s.roles[name];
+    const roles = { ...s.roles };
+    delete roles[name];
+    S().set({ drawing: { ...d, layers: d.layers.filter((x) => x.name !== name) }, roles, hiddenLayers: s.hiddenLayers.filter((h) => h !== name) });
+    await loadBackground();
+    // si la capa influía en el área (muros, puertas, columnas…), volver a detectar
+    if (!['ignore', 'furniture', 'room', 'building'].includes(role)) await analyzePlan(null);
+    S().say(`Capa «${name}» borrada (${n} elementos).`);
+  } catch (e) {
+    S().say(String(e instanceof Error ? e.message : e), 'error');
+  }
 }
 
 export async function loadBackground() {

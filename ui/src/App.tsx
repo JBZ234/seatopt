@@ -44,6 +44,7 @@ export default function App() {
       const ctrl = e.ctrlKey || e.metaKey;
       if (e.key === 'Escape') s.set({ tool: 'select', calib: [], selection: emptySel() });
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selCount(s.selection)) { e.preventDefault(); deleteSelection(); }
+      else if (ctrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); s.redo(); evaluateSoon(); }
       else if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); s.undo(); evaluateSoon(); }
       else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
       else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'r') s.set({ placeAngle: (s.placeAngle + 90) % 360 });

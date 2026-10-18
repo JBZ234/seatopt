@@ -70,13 +70,16 @@ export function pickPoint(p: Pt, tol: number): Selection {
     if (wi >= 0) { sel.windows.push(wi); return sel; }
     const o = [...plan.obstacles].reverse().find((o) => pip(p, o.poly));
     if (o) { sel.obstacles.push(o.id); return sel; }
+    // borde del recinto (para ver y editar su separación por arista)
+    const ri = plan.region.findIndex((r) => r.some((a, i) => distSeg(p, a, r[(i + 1) % r.length]) < tol * 1.5));
+    if (ri >= 0) { sel.region = [ri]; return sel; }
   }
   return sel;
 }
 
 export function mergeSel(a: Selection, b: Selection, remove: boolean): Selection {
   const op = <T,>(x: T[], y: T[]) => (remove ? x.filter((v) => !y.includes(v)) : [...x, ...y.filter((v) => !x.includes(v))]);
-  return { modules: op(a.modules, b.modules), obstacles: op(a.obstacles, b.obstacles), doors: op(a.doors, b.doors), windows: op(a.windows, b.windows) };
+  return { modules: op(a.modules, b.modules), obstacles: op(a.obstacles, b.obstacles), doors: op(a.doors, b.doors), windows: op(a.windows, b.windows), region: op(a.region ?? [], b.region ?? []) };
 }
 
 // ------------------------------------------------------------ transformaciones
@@ -243,6 +246,7 @@ export function describeSel(sel: Selection): string {
   if (sel.obstacles.length) parts.push(`${sel.obstacles.length} obstáculo${sel.obstacles.length > 1 ? 's' : ''}`);
   if (sel.doors.length) parts.push(`${sel.doors.length} puerta${sel.doors.length > 1 ? 's' : ''}`);
   if (sel.windows.length) parts.push(`${sel.windows.length} ventana${sel.windows.length > 1 ? 's' : ''}`);
+  if (sel.region?.length) parts.push('contorno del recinto');
   return parts.join(', ');
 }
 

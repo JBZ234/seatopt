@@ -110,6 +110,23 @@ fn drawing(id: &str) -> Result<Arc<Drawing>, String> {
     store().lock().unwrap().drawings.get(id).cloned().ok_or_else(|| "El dibujo ya no está en memoria; vuelve a importarlo.".into())
 }
 
+/// Borra del dibujo en memoria todas las líneas, curvas y textos de una capa.
+pub fn delete_layer(id: &str, layer: &str) -> Result<usize, String> {
+    let d = drawing(id)?;
+    let Some(li) = d.layers.iter().position(|l| l.name == layer) else { return Err(format!("No existe la capa «{layer}».")) };
+    let mut n = (*d).clone();
+    let li = li as u32;
+    let before = n.paths.len() + n.curves.len() + n.texts.len();
+    n.paths.retain(|p| p.layer != li);
+    n.curves.retain(|p| p.layer != li);
+    n.texts.retain(|t| t.layer != li);
+    n.layers[li as usize].paths = 0;
+    n.finalize();
+    let removed = before - (n.paths.len() + n.curves.len() + n.texts.len());
+    store().lock().unwrap().drawings.insert(id.to_string(), Arc::new(n));
+    Ok(removed)
+}
+
 /// Geometría de fondo por capa: listas planas [x0,y0,x1,y1,…] en mm, redondeadas a 1 mm.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -462,6 +479,11 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
             let mm = get("mmPerUnit").as_f64().unwrap_or(1.0);
             let ex: Vec<String> = serde_json::from_value(get("exclude")).unwrap_or_default();
             export_clean_dxf(&id, mm, &ex).map(Value::String)
+        }
+        "delete_layer" => {
+            let id = get("drawingId").as_str().unwrap_or("").to_string();
+            let layer = get("layer").as_str().unwrap_or("").to_string();
+            delete_layer(&id, &layer).map(|n| Value::from(n as u64))
         }
         "export_simple" => {
             let id = get("drawingId").as_str().unwrap_or("").to_string();

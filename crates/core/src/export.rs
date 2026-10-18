@@ -151,9 +151,8 @@ pub fn plan_dxf(plan: &Plan, out_mm: f64) -> String {
         };
         let w = dr.width();
         let u = (dr.b - dr.a).norm();
-        let n = u.perp();
         let m = dr.mid();
-        let inward = if point_in_region(m + n * 300.0, &plan.region) { n } else { -n };
+        let inward = dr.inward(plan);
         // convención de AutoCAD: hoja + arco en la capa de la puerta; el vano, aparte
         d.line("A-PUERTA-VANO", dr.a, dr.b);
         d.line(l, dr.a, dr.a + inward * w);

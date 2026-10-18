@@ -780,7 +780,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         if widest.map(|w: usize| merged[w].0.dist(merged[w].1) < a.dist(*b)).unwrap_or(true) {
             widest = Some(i);
         }
-        plan.doors.push(Door { id: format!("d{}", i + 1), kind, a: *a, b: *b, label: String::new(), clear_depth: None, clear_width: None });
+        plan.doors.push(Door { id: format!("d{}", i + 1), kind, a: *a, b: *b, label: String::new(), clear_depth: None, clear_width: None, flip: false });
     }
     if !plan.doors.iter().any(|d| d.kind == DoorKind::Main) {
         if let Some(w) = widest {
