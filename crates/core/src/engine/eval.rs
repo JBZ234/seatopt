@@ -117,11 +117,26 @@ pub fn world_geometry_var(ctx: &Ctx, dec: &Decoded, variant: usize) -> (Vec<WMod
 }
 
 pub fn module_shapes(ctx: &Ctx, t: &DeskType, pm: &PModule, center: Pt, ang: f64, seats: &mut Vec<WSeat>, mi: usize) -> Vec<Pt> {
+    module_shapes_c(ctx.p.chair, t, pm, center, ang, seats, mi)
+}
+
+/// Contorno real de un escritorio fijado (la L o la forma del Studio, no su rectángulo).
+pub fn pinned_body(chair: f64, catalog: &[DeskType], m: &crate::model::Module) -> Vec<Pt> {
+    let Some(ti) = catalog.iter().position(|t| t.id == m.type_id) else { return m.body.clone() };
+    let t = &catalog[ti];
+    if t.shape == DeskShape::Straight && m.body.len() >= 3 {
+        return m.body.clone();
+    }
+    let p = PModule { t: ti, k: m.per_side, grid: 0, x0: 0.0, y0: 0.0, len: m.length, dep: m.depth, seats_up: m.seats_up, zone: 0 };
+    let mut tmp = Vec::new();
+    module_shapes_c(chair, t, &p, m.center, m.angle.to_radians(), &mut tmp, 0)
+}
+
+pub fn module_shapes_c(chair: f64, t: &DeskType, pm: &PModule, center: Pt, ang: f64, seats: &mut Vec<WSeat>, mi: usize) -> Vec<Pt> {
     let u = Pt::from_angle(ang);
     let v = u.perp();
     let w = |a: f64, b: f64| center + u * a + v * b;
     let (hl, hd) = (pm.len * 0.5, pm.dep * 0.5);
-    let chair = ctx.p.chair;
     let cw = 560.0f64.min(t.seat_width * 0.8);
     let mut add_seat = |a: f64, b: f64, face_sign: f64| {
         let pos = w(a, b);

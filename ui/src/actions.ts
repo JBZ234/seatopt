@@ -1,4 +1,4 @@
-import { deskDims } from './clear';
+import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { hasDemand, uid, useApp, type ProjectFile } from './store';
 import type {
@@ -234,12 +234,9 @@ export async function placeDesk(center: Pt, forced: string[] = []) {
   const t = c?.catalog.find((x) => x.id === s.placeType);
   if (!c || !t || !s.plan) return;
   const { per, length, depth } = deskDims(t);
-  const a = (s.placeAngle * Math.PI) / 180;
-  const u = { x: Math.cos(a), y: Math.sin(a) }, v = { x: -u.y, y: u.x };
-  const w = (p: number, q: number) => ({ x: center.x + u.x * p + v.x * q, y: center.y + u.y * p + v.y * q });
   const m: Module = {
     id: uid('mano'), typeId: t.id, center, angle: s.placeAngle, length, depth, perSide: per, seatsUp: s.placeUp,
-    body: [w(-length / 2, -depth / 2), w(length / 2, -depth / 2), w(length / 2, depth / 2), w(-length / 2, depth / 2)], pinned: true, people: [],
+    body: deskBody(t, center, s.placeAngle, s.placeUp).body, pinned: true, people: [],
   };
   s.snapshot();
   const base: Layout = s.layout ?? {

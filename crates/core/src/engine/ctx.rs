@@ -381,10 +381,11 @@ impl Ctx {
         let area_m2 = free.iter().filter(|&&b| b).count() as f64 * res * res / 1e6;
 
         let free_base = free.clone();
-        // pinned: cuerpos como obstáculos duros
-        for m in &cfg.pinned {
+        // pinned: cuerpos como obstáculos duros (con su forma real: L o del Studio)
+        let pinned_bodies: Vec<Vec<Pt>> = cfg.pinned.iter().map(|m| super::eval::pinned_body(p.chair, &cfg.catalog, m)).collect();
+        for body in &pinned_bodies {
             let mut tmp = vec![false; n];
-            raster::fill_polygon(&f, &mut tmp, &m.body, true);
+            raster::fill_polygon(&f, &mut tmp, body, true);
             for i in 0..n {
                 if tmp[i] {
                     free[i] = false;
@@ -517,9 +518,9 @@ impl Ctx {
         if exit_seeds.is_empty() {
             exit_seeds = main_seeds.clone();
         }
-        for m in &cfg.pinned {
+        for body in &pinned_bodies {
             let mut tmp = vec![false; n];
-            raster::fill_polygon(&f, &mut tmp, &m.body, true);
+            raster::fill_polygon(&f, &mut tmp, body, true);
             let d = raster::edt(&f, &tmp);
             for i in 0..n {
                 if (d[i] as f64) <= p.chair + 100.0 {

@@ -1,7 +1,7 @@
 // ¿Cabe un escritorio aquí? Revisión geométrica rápida (para la vista previa al colocar a mano):
 // recinto, obstáculos y sus separaciones, despejes de puertas, pasillo principal y otros escritorios
 // con sus sillas. La revisión completa (acceso a cada puesto, recorridos) la hace el motor al colocarlo.
-import { chairClear, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, regionInfo, ruleVal } from './clear';
+import { chairClear, deskBody, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, regionInfo, ruleVal } from './clear';
 import type { Config, DeskType, Layout, Plan, Pt } from './types';
 
 function pip(p: Pt, poly: Pt[]) {
@@ -100,6 +100,21 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
       return body.some((p) => pip(p, z));
     });
     if (bad) e2why.push(`Queda a menos de ${m2(e2se)} m detrás de la silla del puesto ${bad.number} (regla «silla con espalda»)`);
+  }
+
+  // escritorios en L o del Studio: la silla tiene que tener por dónde salir (no encajonada contra los muros)
+  const shaped = deskBody(t, center, angleDeg, seatsUp);
+  if (shaped.chairs?.length) {
+    const sq = ruleVal(config, 'C2', 'paso_sillas') ?? 600;
+    const freeAt = (q: Pt) => inRegion(q, plan.region) && !pip(q, shaped.body) && !obst.some((o) => pip(q, o.poly)) && !(mods.length && bodies.some((b) => pip(q, b.poly)));
+    for (const c of shaped.chairs) {
+      const ok = [0, 45, 90, 135, 180, 225, 270, 315].some((deg) => {
+        const r = (deg * Math.PI) / 180;
+        // un paso de ancho mínimo hacia afuera: tres puntos seguidos libres
+        return [0.6, 1.0, 1.4].every((f) => freeAt({ x: c.x + Math.cos(r) * (sq * f + 250), y: c.y + Math.sin(r) * (sq * f + 250) }));
+      });
+      if (!ok) e2why.push('La silla queda encajonada: no tiene por dónde salir');
+    }
   }
 
   const why = new Set<string>();
