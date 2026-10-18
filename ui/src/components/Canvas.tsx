@@ -244,7 +244,58 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     if (st.snapGrid) return { p: gridSnap(w), kind: 'grid' };
     return { p: w, kind: null };
   };
-  const objectSnapNow = () => SNAP_TOOLS.includes(tool) || (tool === 'select' && !!moving);
+  const objectSnapNow = () => SNAP_TOOLS.includes(tool);
+
+  /** Al mover: engancha los vértices de lo que se mueve a vértices y bordes de lo demás
+   *  (otros escritorios, obstáculos, recinto, puertas); si no hay nada cerca, a la cuadrícula. */
+  const snapMove = (dx: number, dy: number): { d: Pt; mark: { p: Pt; kind: SnapKind } | null } => {
+    const raw = { x: dx, y: dy };
+    if (noSnap) return { d: raw, mark: null };
+    const selMods = new Set(sel.modules), selObs = new Set(sel.obstacles), selDoors = new Set(sel.doors);
+    const moving: Pt[] = [];
+    layout?.modules.forEach((m) => { if (selMods.has(m.id)) moving.push(...m.body); });
+    plan?.obstacles.forEach((o) => { if (selObs.has(o.id)) moving.push(...o.poly); });
+    plan?.doors.forEach((d) => { if (selDoors.has(d.id)) moving.push(d.a, d.b); });
+    if (!moving.length) return { d: raw, mark: null };
+    const rings: Pt[][] = [];
+    layout?.modules.forEach((m) => { if (!selMods.has(m.id)) rings.push(m.body); });
+    plan?.obstacles.forEach((o) => { if (!selObs.has(o.id)) rings.push(o.poly); });
+    plan?.region.forEach((r) => rings.push(r));
+    plan?.doors.forEach((d) => { if (!selDoors.has(d.id)) rings.push([d.a, d.b]); });
+    const r = 10 / view.k;
+    let best: { c: Pt; dist: number; p: Pt; kind: SnapKind } | null = null;
+    // vértice con vértice
+    for (const p of moving) {
+      const q = { x: p.x + dx, y: p.y + dy };
+      for (const ring of rings) for (const t of ring) {
+        const dd = Math.hypot(t.x - q.x, t.y - q.y);
+        if (dd < r && (!best || dd < best.dist)) best = { c: { x: t.x - q.x, y: t.y - q.y }, dist: dd, p: t, kind: 'vertex' };
+      }
+    }
+    // vértice sobre borde (pegar un escritorio contra otro o contra el muro)
+    if (!best) {
+      for (const p of moving) {
+        const q = { x: p.x + dx, y: p.y + dy };
+        for (const ring of rings) for (let i = 0; i < ring.length; i++) {
+          const a = ring[i], b = ring[(i + 1) % ring.length];
+          const ex = b.x - a.x, ey = b.y - a.y, l2 = ex * ex + ey * ey;
+          if (l2 < 1) continue;
+          const u = Math.max(0, Math.min(1, ((q.x - a.x) * ex + (q.y - a.y) * ey) / l2));
+          const t = { x: a.x + ex * u, y: a.y + ey * u };
+          const dd = Math.hypot(t.x - q.x, t.y - q.y);
+          if (dd < r && (!best || dd < best.dist)) best = { c: { x: t.x - q.x, y: t.y - q.y }, dist: dd, p: t, kind: 'edge' };
+        }
+      }
+    }
+    if (best) return { d: { x: dx + best.c.x, y: dy + best.c.y }, mark: { p: best.p, kind: best.kind } };
+    if (st.snapGrid) {
+      // la primera esquina cae en la cuadrícula
+      const p0 = moving[0];
+      const g = gridSnap({ x: p0.x + dx, y: p0.y + dy });
+      return { d: { x: g.x - p0.x, y: g.y - p0.y }, mark: { p: g, kind: 'grid' } };
+    }
+    return { d: raw, mark: null };
+  };
   const worldAt = (sx: number, sy: number): Pt => snapAll(toWorld(sx, sy), objectSnapNow()).p;
   // contorno dibujado a mano
   const [outline, setOutline] = useState<Pt[]>([]);
@@ -518,7 +569,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const hit = pickPoint(toWorld(x, y), 8 / view.k);
       const already = hit.modules.some((id) => sel.modules.includes(id)) || hit.obstacles.some((id) => sel.obstacles.includes(id))
         || hit.doors.some((id) => sel.doors.includes(id)) || hit.windows.some((i) => sel.windows.includes(i));
-      if (already && !e.shiftKey && !(e.ctrlKey || e.metaKey)) { const a = snapAll(toWorld(x, y), true).p; setMoving({ a, b: a }); }
+      if (already && !e.shiftKey && !(e.ctrlKey || e.metaKey)) { const a = toWorld(x, y); setMoving({ a, b: a }); }
       else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
@@ -550,7 +601,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       return;
     }
     if (moving) {
-      setMoving({ a: moving.a, b: w });
+      const raw = toWorld(x, y);
+      const sm = snapMove(raw.x - moving.a.x, raw.y - moving.a.y);
+      setMoving({ a: moving.a, b: { x: moving.a.x + sm.d.x, y: moving.a.y + sm.d.y } });
+      setSnapMark(sm.mark);
       return;
     }
     const s = seatAt(w);
