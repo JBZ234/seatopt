@@ -181,6 +181,8 @@ fn relleno_de_huecos_y_alternativas() {
     ];
     cfg.settings.time_limit = 6.0;
     cfg.settings.alternatives = 5;
+    // el pasillo principal viene apagado por defecto; aquí se prueba con él
+    if let Some(r) = cfg.rules.iter_mut().find(|r| r.id == "C1") { r.enabled = true; }
     let l = search::optimize(&Problem { plan: r.plan, config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap();
     assert!(l.kpis.seats_placed >= 84, "puestos: {}", l.kpis.seats_placed);
     assert!(!l.alternatives.is_empty() && l.alternatives.len() <= 5);

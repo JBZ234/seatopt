@@ -9,7 +9,9 @@ const S = () => useApp.getState();
 
 export async function loadDefaults(): Promise<Config> {
   const d = await call<Defaults>('defaults');
-  return { catalog: d.catalog, demand: [], rules: d.rules, customRules: [], weights: d.weights, org: { roles: [], clients: [], teams: [], affinities: [] }, settings: { ...d.settings, timeLimit: 10 }, pinned: [] };
+  // por defecto: el escritorio recto básico, todos los que quepan
+  const basic = d.catalog.find((t) => t.id === 'recto_120') ?? d.catalog[0];
+  return { catalog: d.catalog, demand: basic ? [{ typeId: basic.id, quantity: 0, max: true }] : [], rules: d.rules, customRules: [], weights: d.weights, org: { roles: [], clients: [], teams: [], affinities: [] }, settings: { ...d.settings, timeLimit: 0 }, pinned: [] };
 }
 
 export async function ensureConfig() {
@@ -23,7 +25,12 @@ export async function importPlan() {
     const roles: Record<string, typeof out.layers[number]['role']> = {};
     out.layers.forEach((l) => (roles[l.name] = l.role));
     S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
-    await ensureConfig();
+    // plano nuevo: reglas y ajustes por defecto (los que dan más puestos); se conservan los
+    // escritorios propios del catálogo (los del Studio y los editados)
+    const def = await loadDefaults();
+    const prev = S().config;
+    const extra = prev ? prev.catalog.filter((t) => !def.catalog.some((d) => d.id === t.id)) : [];
+    S().set({ config: { ...def, catalog: [...def.catalog, ...extra] } });
     await loadBackground();
     await analyzePlan(null);
   } catch (e) {

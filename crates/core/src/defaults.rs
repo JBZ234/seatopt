@@ -243,10 +243,12 @@ pub fn default_rules() -> Vec<Rule> {
     ]
 }
 
-/// Configuración por defecto enfocada en capacidad: solo espacios de circulación y acceso.
-/// Las demás reglas existen pero vienen apagadas.
+/// Configuración por defecto: la que da más puestos. Solo quedan encendidas las medidas físicas
+/// mínimas (espacio de la silla y entre filas), que ningún puesto quede encerrado ni ninguna puerta
+/// bloqueada, y respetar las zonas reservadas que se dibujen. Todo lo demás viene apagado y se
+/// enciende a gusto en «Espacios».
 fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
-    const ON: [&str; 13] = ["C1", "C2", "C3", "C4", "C7", "E1", "E2", "E3", "E6", "E8", "O1", "O2", "O4"];
+    const ON: [&str; 5] = ["C2", "C7", "E1", "E2", "O4"];
     const ORG: [&str; 5] = ["R1", "R2", "R3", "R4", "R5"];
     for r in rules.iter_mut() {
         r.enabled = ON.contains(&r.id.as_str()) || ORG.contains(&r.id.as_str());
@@ -268,10 +270,7 @@ fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
                 set(r, "silla_silla", 1600.0);
                 set(r, "silla_espalda", 1100.0);
             }
-            "O3" => {
-                r.enabled = true;
-                set(r, "dist", 300.0);
-            }
+            "O3" => set(r, "dist", 300.0),
             _ => {}
         }
     }
@@ -281,7 +280,8 @@ fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
 pub fn default_config() -> Config {
     Config {
         catalog: default_catalog(),
-        demand: vec![],
+        // por defecto: el escritorio recto básico, todos los que quepan
+        demand: vec![Demand { type_id: "recto_120".into(), quantity: 0, max: true }],
         rules: capacity_focus(default_rules()),
         custom_rules: vec![],
         weights: Weights::default(),
