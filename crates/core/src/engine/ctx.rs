@@ -412,10 +412,11 @@ impl Ctx {
         buffer(&office_g, p.o3, &mut keep0);
         // separaciones propias de las aristas del recinto (franja hacia adentro)
         for (ri, ring) in plan.region.iter().enumerate() {
-            let Some(cl) = plan.region_clear.get(ri) else { continue };
+            let cl = plan.region_clear.get(ri);
             let k = ring.len();
             for i in 0..k {
-                let d = cl.get(i).copied().unwrap_or(0.0);
+                // propia de la arista, o la general de paredes (E8)
+                let d = cl.and_then(|c| c.get(i).copied()).filter(|&x| x >= 0.0).unwrap_or(p.e8_sep);
                 if d <= 0.0 {
                     continue;
                 }

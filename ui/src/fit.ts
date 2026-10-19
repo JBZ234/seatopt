@@ -1,7 +1,7 @@
 // ¿Cabe un escritorio aquí? Revisión geométrica rápida (para la vista previa al colocar a mano):
 // recinto, obstáculos y sus separaciones, despejes de puertas, pasillo principal y otros escritorios
 // con sus sillas. La revisión completa (acceso a cada puesto, recorridos) la hace el motor al colocarlo.
-import { chairClear, deskBody, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, regionInfo, ruleVal } from './clear';
+import { chairClear, deskBody, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, regionInfo, ruleVal, wallDefault } from './clear';
 import type { Config, DeskType, Layout, Plan, Pt } from './types';
 
 function pip(p: Pt, poly: Pt[]) {
@@ -56,7 +56,7 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
   const blocking = plan.obstacles.filter((o) => o.kind !== 'reserved');
   const obst = blocking.map((o) => shape(o.poly));
   const obstClear = blocking.flatMap((o) => obstacleInfo(config, o).zones).map(shape);
-  const wallClear = plan.region.flatMap((_, i) => regionInfo(plan, i).zones).map(shape);
+  const wallClear = plan.region.flatMap((_, i) => regionInfo(plan, i, wallDefault(config)).zones).map(shape);
   const doorZones = [...plan.doors.filter((d) => d.kind !== 'ignore').flatMap((d) => doorInfo(config, plan, d).zones), ...(layout?.keepouts ?? [])].map(shape);
   const corridor = (layout?.corridors ?? []).map(shape);
   const mods = layout?.modules ?? [];

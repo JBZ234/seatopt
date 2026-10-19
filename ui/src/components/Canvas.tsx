@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { placeDesk } from '../actions';
-import { deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, type ClearInfo, type ClearKey } from '../clear';
+import { deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
 import { emptySel, selCount, useApp, uid, type Tool } from '../store';
@@ -549,7 +549,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const t = m && cf.catalog.find((x) => x.id === m.typeId);
       return m && t ? moduleInfo(cf, m, t) : null;
     }
-    if (sel.region?.length) return regionInfo(pl, sel.region[0]);
+    if (sel.region?.length) return regionInfo(pl, sel.region[0], wallDefault(cf));
     return null;
   };
   const clr: ClearInfo | null = useMemo(() => (one && config && plan ? infoFor(plan, config) : null),
@@ -567,7 +567,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           const rc = p.regionClear ? p.regionClear.map((r) => [...r]) : [];
           while (rc.length < p.region.length) rc.push([]);
           const row = rc[ri];
-          while (row.length < p.region[ri].length) row.push(0);
+          while (row.length < p.region[ri].length) row.push(-1); // -1 = la general de paredes
           for (const e of edges) row[e] = mm;
           p.regionClear = rc;
         },

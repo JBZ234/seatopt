@@ -248,7 +248,7 @@ pub fn default_rules() -> Vec<Rule> {
 /// bloqueada, y respetar las zonas reservadas que se dibujen. Todo lo demás viene apagado y se
 /// enciende a gusto en «Espacios».
 fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
-    const ON: [&str; 5] = ["C2", "C7", "E1", "E2", "O4"];
+    const ON: [&str; 8] = ["C2", "C7", "E1", "E2", "E8", "O1", "O3", "O4"];
     const ORG: [&str; 5] = ["R1", "R2", "R3", "R4", "R5"];
     for r in rules.iter_mut() {
         r.enabled = ON.contains(&r.id.as_str()) || ORG.contains(&r.id.as_str());
@@ -264,7 +264,15 @@ fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
                 set(r, "ancho", 2000.0);
             }
             "C4" => set(r, "extra", 900.0),
+            "O1" => set(r, "dist", 200.0),
             "O3" => set(r, "dist", 300.0),
+            // paredes del recinto: 0,20 m libres (los lados sin silla ya no tocan el muro)
+            "E8" => {
+                set(r, "separacion", 200.0);
+                if let Some(i) = r.items.iter_mut().find(|i| i.id == "tocar") {
+                    i.enabled = false;
+                }
+            }
             _ => {}
         }
     }

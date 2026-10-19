@@ -198,12 +198,18 @@ export function deskBody(t: DeskType, center: Pt, angleDeg: number, seatsUp = tr
 
 /** Separación hacia adentro de cada arista del contorno del recinto. Las aristas cortas seguidas
  *  (curvas dibujadas con muchos tramos) se agrupan y comparten una sola medida. */
-export function regionInfo(plan: Plan, ri: number): ClearInfo {
+/** Separación general a las paredes del recinto (E8, si no se permite tocar el muro). */
+export function wallDefault(c: Config): number {
+  if (!ruleOn(c, 'E8') || ruleOn(c, 'E8', 'tocar')) return 0;
+  return ruleVal(c, 'E8', 'separacion') ?? 300;
+}
+
+export function regionInfo(plan: Plan, ri: number, def = 0): ClearInfo {
   const ring = plan.region[ri];
   if (!ring || ring.length < 3) return { zones: [], labels: [] };
   const n = ring.length;
   const cl = plan.regionClear?.[ri] ?? [];
-  const val = (i: number) => Math.max(0, cl[i] ?? 0);
+  const val = (i: number) => { const x = cl[i]; return Math.max(0, x === undefined || x === null || x < 0 ? def : x); };
   const len = (i: number) => Math.hypot(ring[(i + 1) % n].x - ring[i].x, ring[(i + 1) % n].y - ring[i].y);
   const inward = (i: number) => {
     const a = ring[i], b = ring[(i + 1) % n];
