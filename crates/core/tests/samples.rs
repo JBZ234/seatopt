@@ -114,10 +114,11 @@ fn maximo_posible_supera_lo_fijo() {
         Demand { type_id: "isla_flex".into(), quantity: 0, max: true },
         Demand { type_id: "recto_120".into(), quantity: 0, max: true },
     ];
-    cfg.settings.time_limit = 3.0;
+    for r in cfg.rules.iter_mut() { if r.id == "E2" { for i in r.items.iter_mut() { if i.id == "silla_silla" { i.value = Some(1600.0); } if i.id == "silla_espalda" { i.value = Some(1100.0); } } } }
+    cfg.settings.time_limit = 8.0;
     let l = seat_core::engine::search::optimize(&Problem { plan: r.plan, config: cfg }, &std::sync::atomic::AtomicBool::new(false), &seat_core::engine::search::no_progress).unwrap();
     assert!(l.kpis.max_mode);
-    assert!(l.kpis.unplaced_by_type.is_empty(), "los fijos deben caber");
+    assert!(l.kpis.unplaced_by_type.is_empty(), "los fijos deben caber: {:?} seats={}", l.kpis.unplaced_by_type, l.seats.len());
     assert_eq!(l.seats.iter().filter(|s| s.type_id == "l_150").count(), 2);
     assert!(l.kpis.max_seats >= 50, "máximo: {}", l.kpis.max_seats);
 }

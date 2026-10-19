@@ -136,7 +136,7 @@ export default function App() {
         <div className="file-actions">
           <button className="ghost small" disabled={!st.plan} onClick={saveProject}>Guardar</button>
           <button className="ghost small" onClick={closePlan}>Cerrar plano</button>
-          <ThemeSwitch />
+          <ThemeSwitch collapsible />
         </div>
       </header>
       <aside className="panel" key={'step' + st.step}>
@@ -182,24 +182,36 @@ export default function App() {
   );
 }
 
-function ThemeSwitch() {
+/**
+ * Paleta + claro/oscuro/sistema. `collapsible`: muestra solo el color y el tema actuales; al pasar el
+ * mouse (o con foco de teclado) se despliega sobre lo que tiene alrededor, sin mover nada.
+ */
+function ThemeSwitch({ collapsible = false }: { collapsible?: boolean }) {
   const theme = useApp((s) => s.theme);
   const palette = useApp((s) => s.palette);
   const set = useApp((s) => s.set);
-  return (
+  const body = (live: boolean) => (
     <div className="theme-row">
-      <div className="palette-switch" role="radiogroup" aria-label="Paleta de color">
-        {PALETTES.map((p) => (
-          <button key={p.id} role="radio" aria-checked={palette === p.id} aria-label={p.name} title={p.name}
-            className={'swatch' + (palette === p.id ? ' on' : '')} style={{ '--sw': p.dark, '--sw2': p.light } as CSSProperties}
+      <div className="palette-switch" role={live ? 'radiogroup' : undefined} aria-label={live ? 'Paleta de color' : undefined}>
+        {PALETTES.map((p, i) => (
+          <button key={p.id} role="radio" aria-checked={palette === p.id} aria-label={p.name} title={p.name} tabIndex={live ? 0 : -1}
+            className={'swatch opt' + (palette === p.id ? ' on cur' : '')} style={{ '--sw': p.dark, '--sw2': p.light, '--i': i } as CSSProperties}
             onClick={() => set({ palette: p.id })} />
         ))}
       </div>
-      <div className="theme-switch" role="radiogroup" aria-label="Tema">
-        {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l]) => (
-          <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => set({ theme: t })}>{l}</button>
+      <div className="theme-switch" role={live ? 'radiogroup' : undefined} aria-label={live ? 'Tema' : undefined}>
+        {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l], i) => (
+          <button key={t} role="radio" aria-checked={theme === t} tabIndex={live ? 0 : -1} style={{ '--i': i } as CSSProperties}
+            className={'opt' + (theme === t ? ' on cur' : '')} onClick={() => set({ theme: t })}>{l}</button>
         ))}
       </div>
+    </div>
+  );
+  if (!collapsible) return body(true);
+  return (
+    <div className="ap">
+      <div className="ap-ghost" aria-hidden="true">{body(false)}</div>
+      <div className="ap-live">{body(true)}</div>
     </div>
   );
 }

@@ -452,7 +452,7 @@ button.active-tool { outline: 2px solid var(--mat); outline-offset: 1px; }
 .section-label { margin-top: 26px; color: var(--graphite-2); font-size: 14px; }
 
 /* ---------------------------------------------------------------- tema */
-.theme-switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; margin-left: 8px; }
+.theme-switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; }
 .theme-switch button { border: none; background: transparent; padding: 2px 9px; border-radius: 999px; font-size: 12px; color: var(--graphite-2); }
 .theme-switch button.on { background: var(--graphite); color: var(--paper); }
 
@@ -836,3 +836,25 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 14px color-mix(in srgb, 
 .v-handle.mid { fill: var(--sel); }
 .studio-dim.sel { fill: #fff; font-weight: 600; paint-order: stroke; stroke: color-mix(in srgb, var(--sel) 80%, #000); stroke-width: 3px; stroke-linejoin: round; }
 .studio-desk { pointer-events: none; }
+
+/* ---------------------------------------------------------------- selector de apariencia contraíble:
+   solo el color y el tema actuales hasta que se pasa el mouse; entonces se despliega por encima */
+.ap { position: relative; display: inline-flex; flex: none; margin-left: 8px; }
+.ap-ghost { visibility: hidden; pointer-events: none; }
+.ap-ghost .opt:not(.cur) { display: none; }
+.ap-live { position: absolute; top: 0; right: 0; z-index: 40; padding: 0; border-radius: 999px;
+  transition: padding 0.28s var(--ease-out), margin 0.28s var(--ease-out), background-color 0.2s, box-shadow 0.28s; }
+.ap .theme-row { gap: 6px; flex-wrap: nowrap; }
+.ap .palette-switch { gap: 0; transition: padding 0.28s var(--ease-out); }
+.ap .theme-switch { white-space: nowrap; }
+.ap .opt { overflow: hidden; flex: none;
+  transition: max-width 0.32s var(--ease-out), opacity 0.22s ease, transform 0.32s var(--ease-spring), margin 0.32s var(--ease-out), padding 0.32s var(--ease-out), background-color 0.25s ease, color 0.25s ease;
+  transition-delay: calc(var(--i, 0) * 22ms); }
+.ap .swatch.opt { margin: 0 2.5px; max-width: 16px; }
+.ap .theme-switch .opt { max-width: 80px; }
+.ap .opt:not(.cur) { max-width: 0; opacity: 0; transform: scale(0.4); margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; pointer-events: none; }
+.ap:hover .ap-live, .ap:has(:focus-visible) .ap-live { padding: 4px; margin: -4px; background: var(--panel); box-shadow: 0 4px 16px var(--shadow); border: 1px solid var(--rule); }
+.ap:hover .opt:not(.cur), .ap:has(:focus-visible) .opt:not(.cur) { opacity: 1; transform: none; pointer-events: auto; }
+.ap:hover .swatch.opt:not(.cur), .ap:has(:focus-visible) .swatch.opt:not(.cur) { max-width: 16px; margin: 0 2.5px; }
+.ap:hover .theme-switch .opt:not(.cur), .ap:has(:focus-visible) .theme-switch .opt:not(.cur) { max-width: 80px; padding-left: 9px; padding-right: 9px; }
+@media (prefers-reduced-motion: reduce) { .ap .opt, .ap-live { transition: none; } }
