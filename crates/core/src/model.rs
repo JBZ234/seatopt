@@ -117,6 +117,46 @@ pub struct Plan {
     /// Vacío = sin separación propia (cuentan las reglas de silla y pasillos).
     #[serde(default)]
     pub region_clear: Vec<Vec<f64>>,
+    /// Circulation paths (entrance → doors, office ↔ office). Kept ones stay clear of desks.
+    #[serde(default)]
+    pub paths: Vec<CircPath>,
+}
+
+/// Primary: from the main entrance to an office door or exit. Secondary: office ↔ office.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PathKind {
+    #[default]
+    Primary,
+    Secondary,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A circulation path: a polyline (centerline) with a clear width.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircPath {
+    pub id: String,
+    #[serde(default)]
+    pub kind: PathKind,
+    /// Door ids at both ends ("" = main entrance).
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+    pub pts: Vec<Pt>,
+    /// Own clear width (mm). None = the general width for its kind (rule P1).
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// Kept paths are respected by the optimizer; the others are only shown.
+    #[serde(default = "yes")]
+    pub keep: bool,
+    /// Edited by hand (recalculating keeps it).
+    #[serde(default)]
+    pub edited: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -480,6 +520,14 @@ pub struct Weights {
     /// Preferir escritorios con la espalda contra un muro.
     #[serde(default = "default_wall")]
     pub wall: f64,
+    /// Tidiness, in seats: what a lone desk (1–2 seats touching nothing) or an extra row direction
+    /// costs. 0 = only the seat count matters; higher = cleaner layouts that may give up a seat.
+    #[serde(default = "default_tidy")]
+    pub tidy: f64,
+}
+
+fn default_tidy() -> f64 {
+    1.2
 }
 
 fn default_wall() -> f64 {
@@ -489,7 +537,7 @@ fn default_wall() -> f64 {
 impl Default for Weights {
     fn default() -> Self {
         // foco: la mayor cantidad de puestos; solo un leve orden visual de desempate
-        Self { order: 4.0, daylight: 0.0, window_side: 0.0, privacy: 0.0, travel: 0.0, compact: 0.0, reserve: 0.0, grouping: 6.0, wall: 5.0 }
+        Self { order: 4.0, daylight: 0.0, window_side: 0.0, privacy: 0.0, travel: 0.0, compact: 0.0, reserve: 0.0, grouping: 6.0, wall: 5.0, tidy: default_tidy() }
     }
 }
 
@@ -498,7 +546,7 @@ impl Weights {
         [self.order, self.daylight, self.window_side, self.privacy, self.travel, self.compact, self.reserve, self.grouping]
     }
     pub fn from_vec(v: [f64; 8]) -> Self {
-        Self { order: v[0], daylight: v[1], window_side: v[2], privacy: v[3], travel: v[4], compact: v[5], reserve: v[6], grouping: v[7], wall: default_wall() }
+        Self { order: v[0], daylight: v[1], window_side: v[2], privacy: v[3], travel: v[4], compact: v[5], reserve: v[6], grouping: v[7], wall: default_wall(), tidy: default_tidy() }
     }
 }
 

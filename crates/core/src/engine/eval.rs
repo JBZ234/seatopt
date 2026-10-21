@@ -33,6 +33,32 @@ pub struct WModule {
     pub people: Vec<SeatPerson>,
 }
 
+/// Do two desks touch (or nearly, ≤ 150 mm)? Compared on their bounding boxes along the first
+/// desk's axes, which is exact for parallel or perpendicular desks.
+fn touching(a: &WModule, b: &WModule) -> bool {
+    const GAP: f64 = 150.0;
+    if a.center.dist(b.center) > (a.pm.len + a.pm.dep + b.pm.len + b.pm.dep) * 0.5 + GAP {
+        return false;
+    }
+    let u = Pt::from_angle(a.angle.to_radians());
+    let v = u.perp();
+    let ext = |m: &WModule, ax: Pt| -> (f64, f64) {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for q in &m.body {
+            let t = q.dot(ax);
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        (lo, hi)
+    };
+    let (au0, au1) = ext(a, u);
+    let (bu0, bu1) = ext(b, u);
+    let (av0, av1) = ext(a, v);
+    let (bv0, bv1) = ext(b, v);
+    au0 <= bu1 + GAP && bu0 <= au1 + GAP && av0 <= bv1 + GAP && bv0 <= av1 + GAP
+}
+
 /// Puesto que falta de un tipo en «máximo posible» (maximizar).
 pub const W_UNPLACED: f64 = 10_000.0;
 /// Peso relativo de un puesto de relleno frente a uno en fila flexible.
@@ -638,6 +664,12 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
         }
     }
     ev.soft = soft * 10.0;
+    // tidiness, measured in seats: lone small desks and extra row directions
+    if w.tidy > 0.0 {
+        let ok: Vec<usize> = (0..mods.len()).filter(|&i| ev.module_ok.get(i).copied().unwrap_or(false) || mods[i].pinned).collect();
+        let strays = ok.iter().filter(|&&i| !mods[i].pinned && mods[i].seats.len() <= 2 && !ok.iter().any(|&j| j != i && touching(&mods[i], &mods[j]))).count();
+        ev.soft += w.tidy * W_UNPLACED * (strays as f64 + (ev.orientations.max(1) - 1) as f64);
+    }
     // a igual cantidad de puestos, preferir menos módulos (islas grandes en vez de muchos sueltos)
     if ctx.is_max.iter().any(|&m| m) {
         ev.soft += mods.iter().filter(|m| !m.pinned).count() as f64 * 40.0;

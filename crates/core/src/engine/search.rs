@@ -503,7 +503,12 @@ pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, gen
         weights: weights.clone(),
         genome,
         corridor_lines: var.corridor_lines.clone(),
-        access_paths: access_paths(ctx, &mods, &seats, &(0..mods.len()).map(|i| ev.module_ok[i] || mods[i].pinned).collect::<Vec<_>>()),
+        // with circulation paths kept by the user, those are the routes; no extra drawing
+        access_paths: if ctx.p.paths_on && ctx.plan.paths.iter().any(|c| c.keep) {
+            vec![]
+        } else {
+            access_paths(ctx, &mods, &seats, &(0..mods.len()).map(|i| ev.module_ok[i] || mods[i].pinned).collect::<Vec<_>>())
+        },
         corridor_width: if var.corridor_lines.is_empty() { 0.0 } else { ctx.p.c1_w },
         alternatives: vec![],
     }
@@ -511,7 +516,7 @@ pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, gen
 
 /// «Tensa» una polilínea de celdas: desde cada punto salta al más lejano que se ve en línea recta
 /// por celdas permitidas. Queda una sucesión de rectas (las curvas las pone el dibujo en las esquinas).
-fn taut(f: &crate::raster::Frame, ok: &[bool], pts: &[Pt]) -> Vec<Pt> {
+pub(crate) fn taut(f: &crate::raster::Frame, ok: &[bool], pts: &[Pt]) -> Vec<Pt> {
     if pts.len() <= 2 {
         return pts.to_vec();
     }
@@ -653,7 +658,12 @@ pub(crate) fn axis_of(v: Pt) -> Option<bool> {
 
 /// Si dos recorridos van casi juntos por el mismo pasillo, el segundo se monta sobre el primero
 /// (una sola línea en vez de dos paralelas pegadas). Solo mueve tramos interiores y si sigue libre.
-fn bundle(f: &crate::raster::Frame, pass: &[bool], paths: &mut [Vec<Pt>]) {
+pub(crate) fn bundle(f: &crate::raster::Frame, pass: &[bool], paths: &mut [Vec<Pt>]) {
+    bundle_within(f, pass, paths, 450.0);
+}
+
+/// Like `bundle`, merging parallel runs closer than `reach` (mm).
+pub(crate) fn bundle_within(f: &crate::raster::Frame, pass: &[bool], paths: &mut [Vec<Pt>], reach: f64) {
     let eps = 1.0;
     let step = f.res * 0.5;
     let see = |a: Pt, b: Pt| -> bool {
@@ -680,7 +690,7 @@ fn bundle(f: &crate::raster::Frame, pass: &[bool], paths: &mut [Vec<Pt>]) {
                 let v = (a.x - b.x).abs() < eps;
                 if !h && !v { continue; }
                 let (c, lo, hi) = if h { (a.y, a.x.min(b.x), a.x.max(b.x)) } else { (a.x, a.y.min(b.y), a.y.max(b.y)) };
-                let best = lanes.iter().filter(|l| l.0 == h && (l.1 - c).abs() > eps && (l.1 - c).abs() < 450.0 && l.2.max(lo) < l.3.min(hi))
+                let best = lanes.iter().filter(|l| l.0 == h && (l.1 - c).abs() > eps && (l.1 - c).abs() < reach && l.2.max(lo) < l.3.min(hi))
                     .min_by(|x, y| (x.1 - c).abs().partial_cmp(&(y.1 - c).abs()).unwrap()).map(|l| l.1);
                 let Some(nc) = best else { continue };
                 let mv = |q: Pt| if h { Pt { x: q.x, y: nc } } else { Pt { x: nc, y: q.y } };

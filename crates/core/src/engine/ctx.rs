@@ -20,6 +20,10 @@ pub struct P {
     pub c2_w: f64,
     pub squeeze: f64,
     pub c3: Option<(f64, f64)>,
+    /// Circulation paths (P1): respected or not, and the general widths.
+    pub paths_on: bool,
+    pub path_w1: f64,
+    pub path_w2: f64,
     pub c4_on: bool,
     pub c4_swing: bool,
     pub c4_extra: f64,
@@ -79,6 +83,9 @@ impl P {
             c2_w,
             squeeze,
             c3: if r.on("C3") { Some((r.val("C3", "profundidad").unwrap_or(0.0), r.val("C3", "ancho").unwrap_or(0.0))) } else { None },
+            paths_on: r.on("P1"),
+            path_w1: r.val_or("P1", "primary", 1200.0),
+            path_w2: r.val_or("P1", "secondary", 900.0),
             c4_on: r.on("C4"),
             c4_swing: r.item_on("C4", "barrido"),
             c4_extra: r.val("C4", "extra").unwrap_or(0.0),
@@ -507,6 +514,15 @@ impl Ctx {
                 keep_polys.push(z);
             }
             doors.push(DoorInfo { door: d.clone(), inward, seeds, reachable_empty: true });
+        }
+        // circulation paths that are kept: a clear band of their width (no desks, no chairs)
+        if p.paths_on {
+            for cp in plan.paths.iter().filter(|c| c.keep && c.pts.len() >= 2) {
+                let w = cp.width.unwrap_or(if cp.kind == PathKind::Primary { p.path_w1 } else { p.path_w2 });
+                for s in cp.pts.windows(2) {
+                    raster::stroke_segment(&f, &mut keep0, s[0], s[1], w * 0.5, true);
+                }
+            }
         }
         let mut violations = Vec::new();
         if main_seeds.is_empty() {

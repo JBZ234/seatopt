@@ -199,3 +199,40 @@ fn relleno_de_huecos_y_alternativas() {
     assert!(!l.alternatives.is_empty() && l.alternatives.len() <= 5);
     assert!(!l.corridor_lines.is_empty(), "pasillo con ejes para dibujar");
 }
+
+#[test]
+fn circulation_paths_are_kept_clear() {
+    let path = format!("{}/../../samples/03_planta_L_oficinas.dxf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let sg = guess_scale(&d, &roles);
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let mut cfg = default_config();
+    cfg.settings.time_limit = 3.0;
+    let mut plan = r.plan.clone();
+    let paths = seat_core::engine::circulation::compute(&Problem { plan: plan.clone(), config: cfg.clone() }).unwrap();
+    let doors = plan.doors.iter().filter(|d| matches!(d.kind, DoorKind::Office | DoorKind::Exit)).count();
+    let prim: Vec<_> = paths.iter().filter(|p| p.kind == PathKind::Primary).collect();
+    assert_eq!(prim.len(), doors, "one entrance path per office door and exit");
+    assert!(paths.iter().any(|p| p.kind == PathKind::Secondary && !p.keep), "office-to-office paths start unkept");
+    // every run is horizontal or vertical
+    for p in &paths {
+        for w in p.pts.windows(2) {
+            assert!((w[0].x - w[1].x).abs() < 1.0 || (w[0].y - w[1].y).abs() < 1.0, "diagonal run in {}", p.id);
+        }
+    }
+    plan.paths = paths;
+    let l = search::optimize(&Problem { plan: plan.clone(), config: cfg }, &AtomicBool::new(false), &search::no_progress).unwrap();
+    // no desk centre within the kept bands (half width minus a cell of tolerance)
+    for p in plan.paths.iter().filter(|p| p.keep) {
+        for m in &l.modules {
+            for w in p.pts.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                let ab = b - a;
+                let t = ((m.center - a).dot(ab) / ab.dot(ab).max(1.0)).clamp(0.0, 1.0);
+                let q = a + ab * t;
+                assert!(q.dist(m.center) > 600.0 - 100.0 + 250.0, "desk {} on path {}", m.id, p.id);
+            }
+        }
+    }
+}

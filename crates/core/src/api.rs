@@ -479,6 +479,10 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
             let l: Layout = serde_json::from_value(get("layout")).map_err(|e| e.to_string())?;
             reassign(&p, &l).map(|v| serde_json::to_value(v).unwrap())
         }
+        "circulation" => {
+            let p: Problem = de(get("problem"))?;
+            crate::engine::circulation::compute(&p).map(|v| serde_json::to_value(v).unwrap())
+        }
         "evaluate" => {
             let p = de(get("problem"))?;
             let l: Layout = serde_json::from_value(get("layout")).map_err(|e| e.to_string())?;

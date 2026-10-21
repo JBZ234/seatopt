@@ -103,6 +103,12 @@ pub fn default_rules() -> Vec<Rule> {
                 item("paso_sillas", "Paso mínimo entre escritorios", Some(600.0), "mm", 400.0, 1200.0, 50.0, Some(500.0),
                     "Hueco más angosto por el que se puede pasar entre escritorios, muros u obstáculos. Las sillas no cuentan: se corren."),
             ]),
+        rule("P1", G_CIRC, "Circulation paths",
+            "Paths from the entrance to every office door and exit (and, if you keep them, between offices). Kept paths stay clear: no desk or chair goes on them.",
+            true, false, 1.0, vec![
+                mm("primary", "Entrance paths width", 1200.0, 600.0, 3000.0, Some(900.0), "Clear width of paths from the entrance to doors."),
+                mm("secondary", "Office-to-office paths width", 900.0, 600.0, 3000.0, Some(800.0), "Clear width of paths between offices."),
+            ]),
         rule("C3", G_CIRC, "Vestíbulo libre en la puerta principal",
             "Zona libre frente a la puerta principal para que no quede bloqueada.",
             true, false, 1.0, vec![
@@ -248,7 +254,7 @@ pub fn default_rules() -> Vec<Rule> {
 /// bloqueada, y respetar las zonas reservadas que se dibujen. Todo lo demás viene apagado y se
 /// enciende a gusto en «Espacios».
 fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
-    const ON: [&str; 8] = ["C2", "C7", "E1", "E2", "E8", "O1", "O3", "O4"];
+    const ON: [&str; 10] = ["C2", "C4", "C7", "E1", "E2", "E8", "O1", "O3", "O4", "P1"];
     const ORG: [&str; 5] = ["R1", "R2", "R3", "R4", "R5"];
     for r in rules.iter_mut() {
         r.enabled = ON.contains(&r.id.as_str()) || ORG.contains(&r.id.as_str());
@@ -263,7 +269,8 @@ fn capacity_focus(mut rules: Vec<Rule>) -> Vec<Rule> {
                 set(r, "profundidad", 1500.0);
                 set(r, "ancho", 2000.0);
             }
-            "C4" => set(r, "extra", 900.0),
+            // doors: the leaf swing plus 0.60 m clear in front (main entrance, exits and offices)
+            "C4" => set(r, "extra", 600.0),
             "O1" => set(r, "dist", 200.0),
             "O3" => set(r, "dist", 300.0),
             // paredes del recinto: 0,20 m libres (los lados sin silla ya no tocan el muro)
