@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 // Tres formas de correr la misma interfaz:
 //  - App de escritorio (Tauri): `npm run tauri dev` / `npm run tauri build`.
 //  - Navegador con el servidor de desarrollo (`npm run dev`): la API la sirve `seatopt-devserver` en :8787.
-//  - Versión web (GitHub Pages): `npm run build:web` (modo «web», ver .env.web). El motor va compilado a WebAssembly dentro de la
+//  - Versión web (GitHub Pages): `npm run build:web` (modo «web»). El motor va compilado a WebAssembly dentro de la
 //    página (ver `crates/web` y `scripts/build-wasm.sh`). BASE es la ruta del sitio, p. ej. /seatopt/.
 
 /** GitHub Pages no deja poner cabeceras: este service worker las agrega para poder usar hilos. */
@@ -24,6 +24,8 @@ export default defineConfig(({ mode }) => {
   const web = mode === 'web';
   return {
   base: web ? process.env.BASE || './' : '/',
+  // en modo web la interfaz habla con el motor WebAssembly en vez de Tauri o el servidor
+  define: { 'import.meta.env.VITE_WEB': JSON.stringify(web ? '1' : '') },
   plugins: [react(), coi(web), wasmStub(web)],
   clearScreen: false,
   server: {

@@ -5,3 +5,10 @@ ui/dist-web/
 ui/src/wasm/
 src-tauri/gen/
 *.log
+
+# archivos de trabajo propios (planos reales, proyectos guardados): no se suben al repositorio
+/*.pdf
+/*.dxf
+/*.dwg
+/*.puestos.json
+/planos_prueba/
