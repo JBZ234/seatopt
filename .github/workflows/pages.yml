@@ -1,6 +1,6 @@
-# Publica la versión web en GitHub Pages cada vez que se sube algo a main.
-# Compila el mismo motor (seat_core) a WebAssembly, con hilos, y la interfaz en modo web.
-name: Versión web (GitHub Pages)
+# Publishes the web version on GitHub Pages on every push to main.
+# Builds the same engine (seat_core) to WebAssembly, with threads, and the interface in web mode.
+name: Web version (GitHub Pages)
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rust (estable, con rust-src para compilar std con hilos)
+      - name: Rust (stable, with rust-src to build std with threads)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -37,7 +37,7 @@ jobs:
         with:
           tool: wasm-bindgen-cli@0.2.129
 
-      - name: Motor a WebAssembly
+      - name: Engine to WebAssembly
         run: bash ./scripts/build-wasm.sh
 
       - uses: actions/setup-node@v4
@@ -46,7 +46,7 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
-      - name: Interfaz (modo web)
+      - name: Interface (web mode)
         working-directory: ui
         run: |
           npm ci
