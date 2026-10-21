@@ -363,8 +363,8 @@ fn units(ctx: &Ctx, pm: &PModule) -> u32 {
 }
 
 /// Quita los módulos inválidos y rellena huecos. Devuelve la evaluación final.
-pub fn fill_gaps(ctx: &Ctx, dec: &mut Decoded, variant: usize, weights: &Weights, deadline: std::time::Instant) -> Eval {
-    use std::time::Instant;
+pub fn fill_gaps(ctx: &Ctx, dec: &mut Decoded, variant: usize, weights: &Weights, deadline: crate::time::Instant) -> Eval {
+    use crate::time::Instant;
     let (mut ev, mut mods, mut seats) = evaluate(ctx, dec, variant, weights, false);
     // descartar inválidos (se devuelven sus unidades)
     let np = ctx.pinned.len();

@@ -1,0 +1,24 @@
+[package]
+name = "seat_web"
+version = "0.1.0"
+edition = "2021"
+description = "El mismo motor de seat_core compilado a WebAssembly para la versión web (GitHub Pages)."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+seat_core = { path = "../core" }
+serde_json = { workspace = true }
+wasm-bindgen = "=0.2.129"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# aleatoriedad del navegador para las dependencias de lectura de DXF/PDF
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+uuid = { version = "1", features = ["js"] }
+# hilos en el navegador: grupo de rayon sobre Web Workers (solo en la compilación con atomics)
+wasm-bindgen-rayon = { version = "1.3", optional = true }
+
+[features]
+threads = ["dep:wasm-bindgen-rayon"]

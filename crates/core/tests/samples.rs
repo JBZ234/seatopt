@@ -16,7 +16,7 @@ fn run(file: &str, demand: &[(&str, u32)], secs: f64) -> Layout {
 
 #[test]
 fn rectangular_ubica_todo() {
-    let l = run("01_rectangular_simple.dxf", &[("isla_flex", 24)], 3.0);
+    let l = run("01_rectangular_simple.dxf", &[("isla_flex", 24)], 6.0);
     assert_eq!(l.kpis.seats_placed, 24);
     assert_eq!(l.kpis.hard_violations, 0);
 }

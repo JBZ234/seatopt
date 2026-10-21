@@ -1,10 +1,47 @@
-// Puente con el núcleo en Rust: comandos de Tauri en la app de escritorio,
-// o HTTP contra `seatopt-devserver` cuando se usa en el navegador.
+// Puente con el núcleo en Rust: comandos de Tauri en la app de escritorio, HTTP contra
+// `seatopt-devserver` en desarrollo, o el mismo motor compilado a WebAssembly en la versión web
+// (GitHub Pages). Los tres hablan la misma API (`seat_core::api::dispatch`).
 import type { ImportOut, JobKind, JobState, Problem } from './types';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+/** Versión web: el motor corre dentro del navegador. */
+export const isWeb = !isTauri && import.meta.env.VITE_WEB === '1';
 
-export const backendName = isTauri ? 'escritorio' : 'navegador';
+export const backendName = isTauri ? 'escritorio' : isWeb ? 'web' : 'navegador';
+
+// ---- motor WebAssembly en un Web Worker (solo versión web)
+let worker: Worker | null = null;
+let seq = 0;
+const pending = new Map<number, (out: string) => void>();
+function engine(): Worker {
+  if (!worker) {
+    // la condición es constante al compilar: en escritorio el worker ni se empaqueta
+    if (import.meta.env.VITE_WEB !== '1') throw new Error('Motor web no disponible en esta compilación');
+    worker = new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (ev: MessageEvent<{ id: number; out: string }>) => {
+      const f = pending.get(ev.data.id);
+      pending.delete(ev.data.id);
+      f?.(ev.data.out);
+    };
+  }
+  return worker;
+}
+function wasmCall<T>(msg: Record<string, unknown>, transfer: Transferable[] = []): Promise<T> {
+  const id = ++seq;
+  return new Promise<T>((resolve, reject) => {
+    pending.set(id, (out) => {
+      const j = JSON.parse(out);
+      if (j.error) reject(new Error(j.error));
+      else resolve(j.ok as T);
+    });
+    engine().postMessage({ id, ...msg }, transfer);
+  });
+}
+/** Hilos que usa el motor web (1 si el navegador no permite hilos). */
+export async function engineThreads(): Promise<number> {
+  if (!isWeb) return 0;
+  return (await wasmCall<{ threads: number }>({ cmd: '__info' })).threads;
+}
 
 async function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');
@@ -13,6 +50,7 @@ async function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promi
 
 export async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   if (isTauri) return tauriInvoke<T>('call', { cmd, args });
+  if (isWeb) return wasmCall<T>({ cmd, args });
   const r = await fetch(`/api/${cmd}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
   const j = await r.json();
   if (j.error) throw new Error(j.error);
@@ -27,12 +65,13 @@ export async function openPlan(converter?: string): Promise<ImportOut | null> {
     if (!path || Array.isArray(path)) return null;
     return tauriInvoke<ImportOut>('import_path', { path, converter: converter || null });
   }
-  const file = await pickFile('.dxf,.dwg,.pdf');
+  const file = await pickFile(isWeb ? '.dxf,.pdf' : '.dxf,.dwg,.pdf');
   if (!file) return null;
   return importBytes(file.name, await file.arrayBuffer());
 }
 
 export async function importBytes(name: string, bytes: ArrayBuffer): Promise<ImportOut> {
+  if (isWeb) return wasmCall<ImportOut>({ cmd: '__import', name, bytes }, [bytes]);
   const r = await fetch(`/api/import?name=${encodeURIComponent(name)}`, { method: 'POST', body: bytes });
   const j = await r.json();
   if (j.error) throw new Error(j.error);

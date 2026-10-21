@@ -1,0 +1,67 @@
+# Publica la versión web en GitHub Pages cada vez que se sube algo a main.
+# Compila el mismo motor (seat_core) a WebAssembly, con hilos, y la interfaz en modo web.
+name: Versión web (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust (estable, con rust-src para compilar std con hilos)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: true
+
+      - name: wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.129
+
+      - name: Motor a WebAssembly
+        run: ./scripts/build-wasm.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Interfaz (modo web)
+        working-directory: ui
+        run: |
+          npm ci
+          BASE="/${{ github.event.repository.name }}/" npm run build:web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ui/dist-web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

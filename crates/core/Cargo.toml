@@ -7,5 +7,7 @@ edition = "2021"
 serde = { workspace = true }
 serde_json = { workspace = true }
 rayon = { workspace = true }
+# reloj que también funciona en el navegador (en escritorio es el mismo std::time)
+web-time = "1"
 dxf = "0.6"
 lopdf = "0.36"

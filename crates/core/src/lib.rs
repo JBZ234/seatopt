@@ -1,4 +1,8 @@
 //! Núcleo del optimizador de puestos de trabajo.
+/// Reloj: en escritorio es `std::time`; compilado a WebAssembly usa el reloj del navegador.
+pub mod time {
+    pub use web_time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+}
 pub mod analyze;
 pub mod defaults;
 pub mod geom;

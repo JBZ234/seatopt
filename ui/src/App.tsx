@@ -1,7 +1,7 @@
 import { useEffect, type CSSProperties } from 'react';
 import { applyPalette, PALETTES } from './palette';
 import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, saveProject, setScale } from './actions';
-import { backendName } from './api';
+import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
@@ -109,11 +109,13 @@ export default function App() {
           <p>DXF, DWG o PDF vectorial. Después te guío para marcar la escala, el área y la puerta principal.</p>
           <button className="primary huge" onClick={importPlan}>Seleccionar archivo…</button>
           <button className="ghost" onClick={openProject}>Abrir un proyecto guardado (.puestos.json)</button>
-          <details className="welcome-cfg">
+          {isWeb ? (
+            <p className="hint">Versión web: DXF y PDF vectorial. Los DWG guárdalos como DXF desde AutoCAD (o usa la app de escritorio). El plano no sale de tu computador.</p>
+          ) : <details className="welcome-cfg">
             <summary>Archivos DWG</summary>
             <p className="hint">Se convierten con ODA File Converter (gratuito) o LibreDWG. Si está en otra carpeta, indica la ruta:</p>
             <input value={st.converter} placeholder="C:\Program Files\ODA\ODAFileConverter 25.x\ODAFileConverter.exe" onChange={(e) => st.set({ converter: e.target.value })} />
-          </details>
+          </details>}
           <ThemeSwitch />
         </div>
         {st.toast && <div className={'toast ' + st.toast.tone} role="status" onClick={() => st.set({ toast: null })}>{st.toast.text}</div>}

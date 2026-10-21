@@ -724,7 +724,7 @@ fn wrap(s: &str, width: f64, size: f64) -> Vec<String> {
 
 fn today() -> String {
     // fecha civil a partir del reloj del sistema (UTC)
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+    let secs = crate::time::SystemTime::now().duration_since(crate::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
     let days = secs.div_euclid(86_400);
     let z = days + 719_468;
     let era = z.div_euclid(146_097);

@@ -1,5 +1,7 @@
 target/
 node_modules/
 ui/dist/
+ui/dist-web/
+ui/src/wasm/
 src-tauri/gen/
 *.log

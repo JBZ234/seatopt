@@ -174,7 +174,7 @@ pub fn start_job(kind: JobKind, problem: Problem, explore_n: Option<usize>) -> S
     let id = format!("job{}", COUNTER.fetch_add(1, Ordering::Relaxed));
     let job = Arc::new(Job { cancel: AtomicBool::new(false), state: Mutex::new(JobState::default()) });
     store().lock().unwrap().jobs.insert(id.clone(), job.clone());
-    std::thread::spawn(move || {
+    let run = move || {
         let j2 = job.clone();
         let progress = move |p: Progress| {
             j2.state.lock().unwrap().progress = p;
@@ -191,8 +191,27 @@ pub fn start_job(kind: JobKind, problem: Problem, explore_n: Option<usize>) -> S
             Ok(v) => st.result = Some(v),
             Err(e) => st.error = Some(e),
         }
-    });
+    };
+    spawn_job(run);
     id
+}
+
+/// Escritorio: un hilo propio por trabajo. Navegador con hilos (WebAssembly + atomics): el trabajo
+/// corre en el grupo de hilos de rayon (Web Workers) y la interfaz sigue sondeando igual.
+/// Navegador sin hilos: corre en el acto y queda terminado al volver.
+fn spawn_job(run: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::spawn(run);
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "atomics"))]
+    {
+        rayon::spawn(run);
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    {
+        run();
+    }
 }
 
 pub fn job_status(id: &str) -> Result<JobState, String> {

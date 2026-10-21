@@ -1,3 +1,4 @@
+import { isWeb } from '../api';
 import { useEffect, useRef } from 'react';
 import { analyzePlan, deleteLayer, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setScale } from '../actions';
 import { Fold, Num } from '../components/ui';
@@ -46,12 +47,14 @@ export default function PlanStep() {
           <button className="primary" onClick={importPlan}>Abrir plano</button>
           <button onClick={openProject}>Abrir proyecto guardado</button>
         </div>
+        {isWeb ? <p className="hint">Versión web: abre DXF o PDF vectorial. Los DWG guárdalos antes como DXF.</p> : <>
         <p className="hint">Los DWG se convierten con ODA File Converter (gratuito) o LibreDWG. Si está instalado en otra carpeta, indica la ruta en «Configuración».</p>
         <Fold title="Configuración">
           <label className="stack">Ruta de ODA File Converter o dwg2dxf (opcional)
             <input value={st.converter} placeholder="C:\Program Files\ODA\ODAFileConverter 25.x\ODAFileConverter.exe" onChange={(e) => st.set({ converter: e.target.value })} />
           </label>
         </Fold>
+        </>}
       </div>
     );
   }

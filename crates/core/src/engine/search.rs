@@ -9,7 +9,12 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+use crate::time::Instant;
+
+/// Hilos disponibles para la búsqueda.
+pub fn thread_count() -> usize {
+    rayon::current_num_threads().max(1)
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -971,10 +976,10 @@ pub fn finish(ctx: &Ctx, pool: &[(f64, Genome)], weights: &Weights, n: usize, fi
         (ev.score, l)
     };
     // el mejor recibe la mitad del tiempo de relleno; el resto se reparte en tandas paralelas
-    let first = run(&picks[0], Instant::now() + std::time::Duration::from_secs_f64((fill_secs * 0.5).max(0.3)));
+    let first = run(&picks[0], Instant::now() + crate::time::Duration::from_secs_f64((fill_secs * 0.5).max(0.3)));
     let rest = &picks[1..];
     let waves = rest.len().div_ceil(rayon::current_num_threads().max(1)).max(1);
-    let per = std::time::Duration::from_secs_f64((fill_secs * 0.5 / waves as f64).max(0.15));
+    let per = crate::time::Duration::from_secs_f64((fill_secs * 0.5 / waves as f64).max(0.15));
     let mut outs: Vec<(f64, Layout)> = rest.par_iter().map(|g| run(g, Instant::now() + per)).collect();
     outs.push(first);
     // orden para mostrar: primero las que ubican todos los fijos y cumplen las reglas duras;

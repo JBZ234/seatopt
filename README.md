@@ -35,6 +35,34 @@ cargo run --release -p seatopt-devserver -- 8787 ui/dist   # abre http://127.0.0
 
 Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo y ejecuta `npm --prefix ui run dev` (http://localhost:1420).
 
+## Versión web (GitHub Pages)
+
+Además de la app de escritorio hay una versión web que se abre con un enlace, sin instalar nada.
+Usa **el mismo motor**: `seat_core` compilado a WebAssembly (`crates/web`), con hilos (rayon sobre
+Web Workers, uno por núcleo), así que da los mismos resultados que la app de escritorio. El plano se
+procesa en el navegador y no se sube a ningún lado. La app de escritorio no cambia: sigue usando el
+motor nativo.
+
+Diferencias de la versión web:
+- Abre DXF y PDF vectorial; los DWG hay que guardarlos antes como DXF.
+- Guardar y exportar descargan el archivo (no hay diálogo de carpeta).
+- Los hilos necesitan aislamiento de origen; GitHub Pages no deja poner cabeceras, así que
+  `coi-serviceworker` las agrega (la primera visita recarga la página una vez). Si el navegador no
+  lo permite, el motor corre en un solo hilo: mismo resultado, más lento.
+
+**Publicar:** sube el proyecto a un repositorio de GitHub, entra a *Settings → Pages* y en *Source*
+elige **GitHub Actions**. Cada `push` a `main` compila y publica (`.github/workflows/pages.yml`).
+El enlace queda en `https://<usuario>.github.io/<repositorio>/`.
+
+**Probar en local** (Linux/macOS o WSL; necesita `rustup component add rust-src`,
+`rustup target add wasm32-unknown-unknown` y `cargo install wasm-bindgen-cli --version 0.2.129 --locked`):
+
+```bash
+./scripts/build-wasm.sh          # motor → ui/src/wasm (una vez, o cuando cambie el motor)
+npm --prefix ui run dev:web      # http://localhost:1420, con hilos
+npm --prefix ui run build:web    # sitio estático en ui/dist-web
+```
+
 ## Flujo de uso
 
 Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un proyecto guardado). Arriba a la derecha, **Cerrar plano** vuelve a esa pantalla.
@@ -196,6 +224,9 @@ crates/core        núcleo en Rust (sin interfaz)
   engine/fill.rs     relleno de huecos después de las filas
   api.rs             fachada JSON + trabajos en segundo plano
 crates/devserver   servidor HTTP con la misma API (modo navegador)
+crates/web         el mismo núcleo compilado a WebAssembly (versión web)
+scripts/           build-wasm.sh: compila crates/web en dos variantes (con hilos y de un hilo)
+.github/workflows  pages.yml: publica la versión web en GitHub Pages
 src-tauri          app de escritorio
 ui                 interfaz React + TypeScript
 samples            planos de prueba (DXF, PDF) y su generador
