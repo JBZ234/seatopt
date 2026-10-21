@@ -284,7 +284,7 @@ pub fn to_dxf(plan: &Plan, layout: &Layout, cfg: &Config, mm_per_unit: f64, incl
 }
 
 pub fn to_csv(layout: &Layout, cfg: &Config) -> String {
-    let mut s = String::from("numero;tipo;rol;cliente;x_mm;y_mm;orientacion_grados;modulo;avisos\n");
+    let mut s = String::from("number;type;role;client;x_mm;y_mm;facing_degrees;module;warnings\n");
     for st in &layout.seats {
         let tipo = cfg.catalog.iter().find(|t| t.id == st.type_id).map(|t| t.name.as_str()).unwrap_or(&st.type_id);
         let rol = cfg.org.roles.iter().find(|r| r.id == st.role_id).map(|r| r.name.as_str()).unwrap_or("");

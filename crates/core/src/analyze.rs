@@ -265,13 +265,13 @@ pub fn guess_scale(d: &Drawing, roles: &HashMap<String, LayerRole>) -> ScaleGues
                 let n_raw = raw / pt_mm;
                 let best = scales.iter().copied().min_by(|a, b| (a / n_raw).ln().abs().partial_cmp(&(b / n_raw).ln().abs()).unwrap()).unwrap();
                 let (mm, ps, why) = if (best / n_raw).ln().abs() < 0.2 {
-                    (best * pt_mm, Some(best), format!("Escala estimada 1:{best} a partir de {} puertas (puertas típicas de 0,8–0,9 m).", radii.len()))
+                    (best * pt_mm, Some(best), format!("Scale estimated at 1:{best} from {} doors (typical doors are 0.8–0.9 m).", radii.len()))
                 } else {
-                    (raw, Some(n_raw.round()), format!("Escala aproximada 1:{:.0} (no estándar) a partir de {} puertas.", n_raw, radii.len()))
+                    (raw, Some(n_raw.round()), format!("Approximate scale 1:{:.0} (non-standard) from {} doors.", n_raw, radii.len()))
                 };
-                ScaleGuess { mm_per_unit: mm, paper_scale: ps, reason: why + " Verifica con la herramienta de calibración." }
+                ScaleGuess { mm_per_unit: mm, paper_scale: ps, reason: why + " Check it with the calibration tool." }
             } else {
-                ScaleGuess { mm_per_unit: 100.0 * pt_mm, paper_scale: Some(100.0), reason: "No se encontraron puertas: se asume 1:100. Calibra con una medida conocida.".into() }
+                ScaleGuess { mm_per_unit: 100.0 * pt_mm, paper_scale: Some(100.0), reason: "No doors were found: 1:100 is assumed. Calibrate with a known length.".into() }
             }
         }
         _ => {
@@ -281,12 +281,12 @@ pub fn guess_scale(d: &Drawing, roles: &HashMap<String, LayerRole>) -> ScaleGues
             let cands = [1.0, 10.0, 1000.0, 25.4, 304.8];
             if let Some(r) = med {
                 let best = cands.iter().copied().min_by(|a, b| ((a * r) / 900.0).ln().abs().partial_cmp(&((b * r) / 900.0).ln().abs()).unwrap()).unwrap();
-                ScaleGuess { mm_per_unit: best, paper_scale: None, reason: format!("Unidades estimadas por el tamaño de {} puertas.", radii.len()) }
+                ScaleGuess { mm_per_unit: best, paper_scale: None, reason: format!("Units estimated from the size of {} doors.", radii.len()) }
             } else {
                 // por tamaño del dibujo: una oficina mide 5–200 m
                 let span = d.bounds.w().max(d.bounds.h());
                 let best = cands.iter().copied().min_by(|a, b| ((a * span) / 30000.0).ln().abs().partial_cmp(&((b * span) / 30000.0).ln().abs()).unwrap()).unwrap();
-                ScaleGuess { mm_per_unit: best, paper_scale: None, reason: "Unidades estimadas por el tamaño total del dibujo.".into() }
+                ScaleGuess { mm_per_unit: best, paper_scale: None, reason: "Units estimated from the overall size of the drawing.".into() }
             }
         }
     }
@@ -408,7 +408,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
     let g = to_mm(d, opts);
     let mut notes = Vec::new();
     if g.paths.is_empty() {
-        return Err("Ninguna capa está marcada como muro o contorno. En «Capas del dibujo» asigna «Muro / bloquea» a las capas de muros, o marca el área a mano con «Dibujar contorno».".into());
+        return Err("No layer is marked as wall or outline. In “Drawing layers” set “Wall / blocks” on the wall layers, or mark the area by hand with “Draw outline”.".into());
     }
     let mut plan = Plan::default();
     let mut oid = 0;
@@ -443,7 +443,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         }
     }
     if !bb.is_valid() {
-        return Err("Las capas marcadas como muro no tienen trazos. Revisa los roles de capa o usa «Dibujar contorno».".into());
+        return Err("The layers marked as wall have no strokes. Check the layer roles or use “Draw outline”.".into());
     }
     let area_bb = bb.w() * bb.h();
     let res = if area_bb > 9.0e9 { 100.0 } else if area_bb > 2.5e9 { 75.0 } else { 50.0 };
@@ -473,7 +473,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         let biggest = outlines.iter().max_by(|a, b| polygon_area(a).abs().partial_cmp(&polygon_area(b).abs()).unwrap()).unwrap();
         plan.region = vec![biggest.clone()];
         plan.building = biggest.clone();
-        notes.push("Recinto tomado de la capa de contorno.".into());
+        notes.push("Area taken from the outline layer.".into());
         // recintos y edificio de referencia, si vienen en sus capas
         for (r, p, c) in &g.paths {
             if !closed_like(p, *c) || p.len() < 3 {
@@ -503,13 +503,13 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         let seed_label = match opts.seed.and_then(|s| f.cell_idx(s)) {
             Some(i) if lab[i] != 0 => lab[i],
             Some(_) => {
-                return Err("El punto elegido cae sobre un muro o en un espacio menor al ancho de cierre de vanos. Haz clic más adentro del área.".into());
+                return Err("The chosen point is on a wall or in a space narrower than the opening-closing width. Click further inside the area.".into());
             }
             None => {
                 let best = (1..sizes.len()).filter(|&i| !touches_border[i]).max_by_key(|&i| sizes[i]);
                 match best {
                     Some(b) => b as u32,
-                    None => return Err("No se encontró un recinto cerrado. Revisa los roles de capa o dibuja el contorno.".into()),
+                    None => return Err("No closed area was found. Check the layer roles or draw the outline.".into()),
                 }
             }
         };
@@ -586,7 +586,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         let mut rings: Vec<Vec<Pt>> = rings.into_iter().map(|r| simplify_ring(&r, res * 1.2)).filter(|r| r.len() >= 3).collect();
         rings.sort_by(|a, b| polygon_area(b).abs().partial_cmp(&polygon_area(a).abs()).unwrap());
         if rings.is_empty() {
-            return Err("No se pudo trazar el contorno del recinto.".into());
+            return Err("The outline of the area could not be traced.".into());
         }
         let outer = rings.remove(0);
         plan.region = vec![outer];
@@ -600,7 +600,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
             let id = next_id(if kind == ObstacleKind::Column { "col" } else { "of" });
             plan.obstacles.push(Obstacle { id, kind, poly: h, label: String::new(), clear: vec![] });
         }
-        notes.push(format!("Recinto detectado por inundación (vanos ≤ {:.0} mm cerrados).", opts.gap_close));
+        notes.push(format!("Area detected by flood fill (openings ≤ {:.0} mm closed).", opts.gap_close));
     }
 
     // ---------------------------------------------------------------- obstáculos explícitos por capa
@@ -785,9 +785,9 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
     if !plan.doors.iter().any(|d| d.kind == DoorKind::Main) {
         if let Some(w) = widest {
             plan.doors[w].kind = DoorKind::Main;
-            notes.push("Se marcó como puerta principal la más ancha. Revísalo en la pestaña Plano.".into());
+            notes.push("The widest door was marked as main entrance. Check it in the Plan step.".into());
         } else {
-            notes.push("No se detectaron puertas: marca la puerta principal manualmente.".into());
+            notes.push("No doors were detected: mark the main entrance by hand.".into());
         }
     }
     // rótulos de puertas cercanos
@@ -842,7 +842,7 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
     if !outlines.is_empty() {
         area -= plan.obstacles.iter().map(|o| polygon_area(&o.poly).abs() / 1e6).sum::<f64>();
     }
-    notes.push(format!("{} puertas, {} obstáculos, {} tramos de ventana detectados.", plan.doors.len(), plan.obstacles.len(), plan.windows.len()));
+    notes.push(format!("{} doors, {} obstacles, {} window stretches detected.", plan.doors.len(), plan.obstacles.len(), plan.windows.len()));
     Ok(AnalyzeResult { plan, notes, area_m2: area })
 }
 

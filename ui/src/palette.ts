@@ -1,15 +1,15 @@
-// Paletas de color. «Verde» es la original (los valores exactos están en styles.css); las demás
+// Paletas de color. “Verde” es la original (los valores exactos están en styles.css); las demás
 // tiñen los fondos con su propio matiz, como el resaltado de los videos de YouTube.
 export interface Palette { id: string; name: string; hue: number; sat: number; dark: string; light: string }
 
 export const PALETTES: Palette[] = [
-  { id: 'verde', name: 'Verde', hue: 152, sat: 1, dark: '#45b08f', light: '#1f6f5c' },
-  { id: 'oceano', name: 'Océano', hue: 212, sat: 1.5, dark: '#5fa4e6', light: '#2363a6' },
-  { id: 'ciruela', name: 'Ciruela', hue: 266, sat: 1.5, dark: '#a98cf5', light: '#6a4cc0' },
+  { id: 'verde', name: 'Green', hue: 152, sat: 1, dark: '#45b08f', light: '#1f6f5c' },
+  { id: 'oceano', name: 'Ocean', hue: 212, sat: 1.5, dark: '#5fa4e6', light: '#2363a6' },
+  { id: 'ciruela', name: 'Plum', hue: 266, sat: 1.5, dark: '#a98cf5', light: '#6a4cc0' },
   { id: 'sakura', name: 'Sakura', hue: 330, sat: 1.6, dark: '#f08cc0', light: '#b33c7b' },
-  { id: 'ambar', name: 'Ámbar', hue: 32, sat: 1.7, dark: '#e3a75b', light: '#a3651c' },
-  { id: 'granate', name: 'Granate', hue: 356, sat: 1.5, dark: '#ec7d74', light: '#ad3a34' },
-  { id: 'grafito', name: 'Grafito', hue: 218, sat: 0.55, dark: '#a3b3c7', light: '#46576d' },
+  { id: 'ambar', name: 'Amber', hue: 32, sat: 1.7, dark: '#e3a75b', light: '#a3651c' },
+  { id: 'granate', name: 'Garnet', hue: 356, sat: 1.5, dark: '#ec7d74', light: '#ad3a34' },
+  { id: 'grafito', name: 'Graphite', hue: 218, sat: 0.55, dark: '#a3b3c7', light: '#46576d' },
 ];
 
 const VARS = ['--vellum', '--paper', '--panel', '--rule', '--region', '--graphite', '--graphite-2', '--muted', '--mat', '--mat-ink'];

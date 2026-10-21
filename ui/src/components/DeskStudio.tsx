@@ -1,5 +1,5 @@
 // Studio de escritorios: se arma la forma juntando rectángulos, se ponen las sillas y se deciden
-// las separaciones. El resultado es un tipo más del catálogo (forma «propia»).
+// las separaciones. El resultado es un tipo más del catálogo (forma “propia”).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ruleVal } from '../clear';
 import { uid, useApp } from '../store';
@@ -99,11 +99,11 @@ function seatOnEdge(poly: Pt[], p: Pt, step: number): CustomSeat | null {
 const seatTop = (x: number, top: number): CustomSeat => ({ x, y: top + CHAIR / 2, facing: { x: 0, y: -1 } });
 const seatBottom = (x: number, bottom: number): CustomSeat => ({ x, y: bottom - CHAIR / 2, facing: { x: 0, y: 1 } });
 const TEMPLATES: { id: string; name: string; make: () => { parts: Part[]; seats: CustomSeat[] } }[] = [
-  { id: 'rect', name: 'Recto', make: () => ({ parts: [{ x: -600, y: -300, w: 1200, h: 600 }], seats: [seatTop(0, 300)] }) },
-  { id: 'l', name: 'En L', make: () => ({ parts: [{ x: -750, y: 0, w: 1500, h: 600 }, { x: -750, y: -900, w: 600, h: 900 }], seats: [seatBottom(225, 0)] }) },
-  { id: 'u', name: 'En U', make: () => ({ parts: [{ x: -900, y: 0, w: 1800, h: 600 }, { x: -900, y: -900, w: 500, h: 900 }, { x: 400, y: -900, w: 500, h: 900 }], seats: [seatBottom(0, 0)] }) },
-  { id: 'pair', name: 'Pareja', make: () => ({ parts: [{ x: -600, y: -600, w: 1200, h: 600 }, { x: -600, y: 0, w: 1200, h: 600 }], seats: [seatTop(0, 600), seatBottom(0, -600)] }) },
-  { id: 'isla4', name: 'Isla de 4', make: () => ({ parts: [{ x: -1200, y: -600, w: 2400, h: 1200 }], seats: [seatTop(-600, 600), seatTop(600, 600), seatBottom(-600, -600), seatBottom(600, -600)] }) },
+  { id: 'rect', name: 'Straight', make: () => ({ parts: [{ x: -600, y: -300, w: 1200, h: 600 }], seats: [seatTop(0, 300)] }) },
+  { id: 'l', name: 'L-shaped', make: () => ({ parts: [{ x: -750, y: 0, w: 1500, h: 600 }, { x: -750, y: -900, w: 600, h: 900 }], seats: [seatBottom(225, 0)] }) },
+  { id: 'u', name: 'U-shaped', make: () => ({ parts: [{ x: -900, y: 0, w: 1800, h: 600 }, { x: -900, y: -900, w: 500, h: 900 }, { x: 400, y: -900, w: 500, h: 900 }], seats: [seatBottom(0, 0)] }) },
+  { id: 'pair', name: 'Pair', make: () => ({ parts: [{ x: -600, y: -600, w: 1200, h: 600 }, { x: -600, y: 0, w: 1200, h: 600 }], seats: [seatTop(0, 600), seatBottom(0, -600)] }) },
+  { id: 'isla4', name: 'Island of 4', make: () => ({ parts: [{ x: -1200, y: -600, w: 2400, h: 1200 }], seats: [seatTop(-600, 600), seatTop(600, 600), seatBottom(-600, -600), seatBottom(600, -600)] }) },
 ];
 
 export default function DeskStudio() {
@@ -125,7 +125,7 @@ export default function DeskStudio() {
     const t = TEMPLATES[0].make();
     return { ...t, clr: { chair: null, back: 0, left: 0, right: 0 } };
   };
-  const [name, setName] = useState(editT?.name ?? 'Escritorio propio');
+  const [name, setName] = useState(editT?.name ?? 'Custom desk');
   const [color, setColor] = useState(editT?.color ?? '#7a8fb5');
   const [doc, setDocRaw] = useState<Doc>(initial);
   const [past, setPast] = useState<Doc[]>([]);
@@ -169,7 +169,7 @@ export default function DeskStudio() {
     return { x: view.x0 + (sx - ox) / k, y: view.y0 + view.h - (sy - oy) / k };
   };
   const ptsD = (ps: Pt[]) => ps.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)} ${Y(p.y).toFixed(1)}`).join('') + 'Z';
-  // la vista no se reacomoda mientras se arrastra (si no, la pieza «huye» del mouse)
+  // la vista no se reacomoda mientras se arrastra (si no, la pieza “huye” del mouse)
   const frozen = useRef<{ view: typeof view; k: number; ox: number; oy: number } | null>(null);
   if (!drag) frozen.current = null;
   else if (!frozen.current) frozen.current = { view, k, ox, oy };
@@ -281,18 +281,18 @@ export default function DeskStudio() {
     const z: { d: string; label: string; x: number; y: number }[] = [];
     const R = (x0: number, y0: number, x1: number, y1: number) => `M${Xf(x0)} ${Yf(y0)}L${Xf(x1)} ${Yf(y0)}L${Xf(x1)} ${Yf(y1)}L${Xf(x0)} ${Yf(y1)}Z`;
     const m2 = (v: number) => (v / 1000).toFixed(2);
-    if (sides.top || (!sides.bottom && !sides.left && !sides.right)) z.push({ d: R(bb.x0, bb.y1, bb.x1, bb.y1 + chairClear), label: `silla ${m2(chairClear)}`, x: bb.cx, y: bb.y1 + chairClear / 2 });
-    if (sides.bottom) z.push({ d: R(bb.x0, bb.y0 - chairClear, bb.x1, bb.y0), label: `silla ${m2(chairClear)}`, x: bb.cx, y: bb.y0 - chairClear / 2 });
-    else if (clr.back > 0) z.push({ d: R(bb.x0, bb.y0 - clr.back, bb.x1, bb.y0), label: `atrás ${m2(clr.back)}`, x: bb.cx, y: bb.y0 - clr.back / 2 });
-    if (clr.left > 0) z.push({ d: R(bb.x0 - clr.left, bb.y0, bb.x0, bb.y1), label: `izq. ${m2(clr.left)}`, x: bb.x0 - clr.left / 2, y: bb.cy });
-    if (clr.right > 0) z.push({ d: R(bb.x1, bb.y0, bb.x1 + clr.right, bb.y1), label: `der. ${m2(clr.right)}`, x: bb.x1 + clr.right / 2, y: bb.cy });
+    if (sides.top || (!sides.bottom && !sides.left && !sides.right)) z.push({ d: R(bb.x0, bb.y1, bb.x1, bb.y1 + chairClear), label: `chair ${m2(chairClear)}`, x: bb.cx, y: bb.y1 + chairClear / 2 });
+    if (sides.bottom) z.push({ d: R(bb.x0, bb.y0 - chairClear, bb.x1, bb.y0), label: `chair ${m2(chairClear)}`, x: bb.cx, y: bb.y0 - chairClear / 2 });
+    else if (clr.back > 0) z.push({ d: R(bb.x0, bb.y0 - clr.back, bb.x1, bb.y0), label: `back ${m2(clr.back)}`, x: bb.cx, y: bb.y0 - clr.back / 2 });
+    if (clr.left > 0) z.push({ d: R(bb.x0 - clr.left, bb.y0, bb.x0, bb.y1), label: `left ${m2(clr.left)}`, x: bb.x0 - clr.left / 2, y: bb.cy });
+    if (clr.right > 0) z.push({ d: R(bb.x1, bb.y0, bb.x1 + clr.right, bb.y1), label: `right ${m2(clr.right)}`, x: bb.x1 + clr.right / 2, y: bb.cy });
     return z;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, chairClear, k, drag]);
 
   const problems: string[] = [];
-  if (!outline) problems.push('Las piezas deben tocarse para formar un solo escritorio.');
-  if (seats.length === 0) problems.push('Agrega al menos una silla.');
+  if (!outline) problems.push('The pieces must touch to form a single desk.');
+  if (seats.length === 0) problems.push('Add at least one chair.');
 
   const save = () => {
     if (!c || problems.length || !outline) return;
@@ -310,7 +310,7 @@ export default function DeskStudio() {
     }
     const two = sides.top && sides.bottom;
     const t: DeskType & { parts: Part[] } = {
-      id: editT?.id ?? uid('custom'), name: name.trim() || 'Escritorio propio', color, shape: 'custom',
+      id: editT?.id ?? uid('custom'), name: name.trim() || 'Custom desk', color, shape: 'custom',
       seatWidth: Math.round(bb.w), depth: Math.round(bb.h), sides: two ? 2 : 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1,
       returnLength: 0, returnDepth: 0,
       clearChair: clr.chair, clearBack: two ? 0 : back, clearLeft: clr.left, clearRight: clr.right,
@@ -322,7 +322,7 @@ export default function DeskStudio() {
       if (i >= 0) cc.catalog[i] = t; else cc.catalog.push(t);
     });
     st.set({ studio: null });
-    st.say(editT ? `«${t.name}» actualizado.` : `«${t.name}» agregado al catálogo (${ss.length} puesto${ss.length > 1 ? 's' : ''}). Pon su cantidad en Escritorios o colócalo con el botón +.`);
+    st.say(editT ? `“${t.name}” updated.` : `“${t.name}” added to the catalog (${ss.length} seat${ss.length > 1 ? 's' : ''}). Set its number in Desks or place it with the + button.`);
   };
 
   const handles = (r: Part, i: number) => {
@@ -338,56 +338,56 @@ export default function DeskStudio() {
   const gstep = Math.max(grid, 50);
 
   return (
-    <div className="studio-back" role="dialog" aria-modal="true" aria-label="Studio de escritorios" onMouseDown={(e) => { if (e.target === e.currentTarget) st.set({ studio: null }); }}>
+    <div className="studio-back" role="dialog" aria-modal="true" aria-label="Desk Studio" onMouseDown={(e) => { if (e.target === e.currentTarget) st.set({ studio: null }); }}>
       <div className="studio">
         <header>
-          <h2>{editT ? 'Studio · editar escritorio' : 'Studio de escritorios'}</h2>
+          <h2>{editT ? 'Studio · edit desk' : 'Desk Studio'}</h2>
           <div className="studio-hist">
-            <button className="ghost small" disabled={!past.length} onClick={undo} title="Deshacer (Ctrl+Z)">↶ Deshacer</button>
-            <button className="ghost small" disabled={!future.length} onClick={redo} title="Rehacer (Ctrl+Y)">↷ Rehacer</button>
-            <button className="ghost small" onClick={restart} title="Volver a un escritorio recto con una silla">Empezar de nuevo</button>
-            <button className="ghost small" onClick={() => st.set({ studio: null })} aria-label="Cerrar">✕</button>
+            <button className="ghost small" disabled={!past.length} onClick={undo} title="Undo (Ctrl+Z)">↶ Undo</button>
+            <button className="ghost small" disabled={!future.length} onClick={redo} title="Redo (Ctrl+Y)">↷ Redo</button>
+            <button className="ghost small" onClick={restart} title="Back to a straight desk with one chair">Start over</button>
+            <button className="ghost small" onClick={() => st.set({ studio: null })} aria-label="Close">✕</button>
           </div>
         </header>
         <div className="studio-body">
           <div className="studio-side">
-            <label className="field">Nombre<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+            <label className="field">Name<input value={name} onChange={(e) => setName(e.target.value)} /></label>
             <label className="field inline">Color<input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
 
-            <h3>1 · Forma con rectángulos</h3>
+            <h3>1 · Shape from rectangles</h3>
             <div className="studio-templates">
               {TEMPLATES.map((t) => <button key={t.id} className="small" onClick={() => useTemplate(t.id)}>{t.name}</button>)}
             </div>
             <div className="row wrap">
-              <button className="small" onClick={addPart}>+ Rectángulo</button>
-              {selPart && doc.parts.length > 1 && <button className="small danger" onClick={() => { setDoc(reattach({ ...doc, parts: doc.parts.filter((_, i) => i !== sel!.i) })); setSel(null); }}>Quitar rectángulo</button>}
+              <button className="small" onClick={addPart}>+ Rectangle</button>
+              {selPart && doc.parts.length > 1 && <button className="small danger" onClick={() => { setDoc(reattach({ ...doc, parts: doc.parts.filter((_, i) => i !== sel!.i) })); setSel(null); }}>Remove rectangle</button>}
             </div>
             {selPart ? (
               <div className="dims">
-                <label>Ancho<Num value={selPart.w} unit="mm" min={100} onChange={(v) => updPart((p) => ({ ...p, w: Math.max(100, v) }))} /></label>
-                <label>Fondo<Num value={selPart.h} unit="mm" min={100} onChange={(v) => updPart((p) => ({ ...p, h: Math.max(100, v) }))} /></label>
+                <label>Width<Num value={selPart.w} unit="mm" min={100} onChange={(v) => updPart((p) => ({ ...p, w: Math.max(100, v) }))} /></label>
+                <label>Depth<Num value={selPart.h} unit="mm" min={100} onChange={(v) => updPart((p) => ({ ...p, h: Math.max(100, v) }))} /></label>
               </div>
-            ) : <p className="hint">Arrastra un rectángulo para moverlo y sus manijas para cambiar el tamaño. Haz clic en uno para escribir sus medidas.</p>}
+            ) : <p className="hint">Drag a rectangle to move it and its handles to resize it. Click one to type its size.</p>}
 
-            <h3>2 · Sillas</h3>
+            <h3>2 · Chairs</h3>
             <div className="row wrap">
-              <button className={'small' + (mode === 'seat' ? ' active-tool' : '')} disabled={!outline} onClick={() => setMode(mode === 'seat' ? 'edit' : 'seat')}>{mode === 'seat' ? 'Clic junto a un borde…' : '+ Silla'}</button>
-              {sel?.kind === 'seat' && <button className="small danger" onClick={() => { setDoc({ ...doc, seats: doc.seats.filter((_, i) => i !== sel.i) }); setSel(null); }}>Quitar silla</button>}
+              <button className={'small' + (mode === 'seat' ? ' active-tool' : '')} disabled={!outline} onClick={() => setMode(mode === 'seat' ? 'edit' : 'seat')}>{mode === 'seat' ? 'Click next to an edge…' : '+ Chair'}</button>
+              {sel?.kind === 'seat' && <button className="small danger" onClick={() => { setDoc({ ...doc, seats: doc.seats.filter((_, i) => i !== sel.i) }); setSel(null); }}>Remove chair</button>}
             </div>
-            <p className="hint">La silla se pega al borde más cercano y la persona mira hacia el escritorio. Arrástrala para moverla.</p>
+            <p className="hint">The chair sticks to the nearest edge and the person faces the desk. Drag it to move it.</p>
 
-            <h3>3 · Separaciones</h3>
+            <h3>3 · Clearances</h3>
             <div className="dims clears">
-              <label title="Vacío = el de «Espacios»">Lado de la silla<Num value={chairClear} unit="mm" min={0} onChange={(v) => setClr({ chair: v })} /></label>
-              {!(sides.top && sides.bottom) && <label>Atrás<Num value={clr.back} unit="mm" min={0} onChange={(v) => setClr({ back: v })} /></label>}
-              <label>Izquierda<Num value={clr.left} unit="mm" min={0} onChange={(v) => setClr({ left: v })} /></label>
-              <label>Derecha<Num value={clr.right} unit="mm" min={0} onChange={(v) => setClr({ right: v })} /></label>
+              <label title="Empty = the one in “Rules”">Chair side<Num value={chairClear} unit="mm" min={0} onChange={(v) => setClr({ chair: v })} /></label>
+              {!(sides.top && sides.bottom) && <label>Back<Num value={clr.back} unit="mm" min={0} onChange={(v) => setClr({ back: v })} /></label>}
+              <label>Left<Num value={clr.left} unit="mm" min={0} onChange={(v) => setClr({ left: v })} /></label>
+              <label>Right<Num value={clr.right} unit="mm" min={0} onChange={(v) => setClr({ right: v })} /></label>
             </div>
           </div>
           <div className="studio-canvas">
             <div className="studio-bar">
-              <label className="inline">Snap <Switch small on={snapOn} label="Snap a la cuadrícula" onChange={setSnapOn} /></label>
-              <select value={grid} aria-label="Tamaño de la cuadrícula" onChange={(e) => setGrid(parseInt(e.target.value))}>
+              <label className="inline">Snap <Switch small on={snapOn} label="Snap to grid" onChange={setSnapOn} /></label>
+              <select value={grid} aria-label="Grid size" onChange={(e) => setGrid(parseInt(e.target.value))}>
                 {[10, 25, 50, 100, 200].map((g) => <option key={g} value={g}>{g >= 100 ? `${g / 1000} m` : `${g / 10} cm`}</option>)}
               </select>
               <span className="spacer" />
@@ -430,14 +430,14 @@ export default function DeskStudio() {
                 return s ? <circle className="studio-ghost" cx={Xf(s.x)} cy={Yf(s.y)} r={CW * 0.45 * (fv?.k ?? k)} /> : null;
               })()}
             </svg>
-            <p className="hint">Ctrl+Z deshace, Ctrl+Y rehace, Supr quita lo seleccionado. El optimizador acomoda el rectángulo que contiene la forma, con las separaciones doradas alrededor.</p>
+            <p className="hint">Ctrl+Z undoes, Ctrl+Y redoes, Delete removes the selection. The optimizer places the rectangle that contains the shape, with the gold clearances around it.</p>
           </div>
         </div>
         <footer>
           {problems.map((p) => <span key={p} className="studio-warn">{p}</span>)}
           <span className="spacer" />
-          <button className="ghost" onClick={() => st.set({ studio: null })}>Cancelar</button>
-          <button className="primary" disabled={problems.length > 0} onClick={save}>{editT ? 'Guardar cambios' : 'Agregar al catálogo'}</button>
+          <button className="ghost" onClick={() => st.set({ studio: null })}>Cancel</button>
+          <button className="primary" disabled={problems.length > 0} onClick={save}>{editT ? 'Save changes' : 'Add to catalog'}</button>
         </footer>
       </div>
     </div>

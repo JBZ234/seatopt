@@ -94,14 +94,14 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
             let mut c = 0.0;
             if r1_on && !role.desk_types.is_empty() && !role.desk_types.contains(&s.type_id) {
                 c += r1_w;
-                unary_why[si * nk + ki].push(format!("{} no usa este tipo de escritorio", role.name));
+                unary_why[si * nk + ki].push(format!("{} does not use this desk type", role.name));
             }
             if r4_on {
                 for nt in &role.near {
                     if let Some((d, _)) = custom::target_nearest(ctx, None, &nt.target, s.pos) {
                         if d > nt.max_dist {
                             c += r4_w * ((d - nt.max_dist) / nt.max_dist.max(1000.0)).min(3.0);
-                            unary_why[si * nk + ki].push(format!("{} lejos de su referencia", role.name));
+                            unary_why[si * nk + ki].push(format!("{} far from their reference", role.name));
                         }
                     }
                 }
@@ -285,7 +285,7 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
                 }
             }
             if !has_mate {
-                why.push("Separado de su equipo".into());
+                why.push("Away from their team".into());
             }
         }
         if !why.is_empty() {
@@ -301,7 +301,7 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
     layout.kpis.misplaced_people = misplaced;
     let free_ns = is_locked.iter().filter(|l| !**l).count();
     if slots.len() > free_ns {
-        layout.violations.push(Violation { rule_id: "R".into(), message: format!("Hay {} personas sin puesto.", slots.len() - free_ns), at: None, hard: false });
+        layout.violations.push(Violation { rule_id: "R".into(), message: format!("{} people have no seat.", slots.len() - free_ns), at: None, hard: false });
     }
     // reglas personalizadas por pares / grupos: solo informe
     let infos: Vec<SeatInfo> = layout
@@ -317,7 +317,7 @@ pub fn assign(ctx: &Ctx, cfg: &Config, layout: &mut Layout) {
         }
         let (bad, excess) = custom::eval_rule(ctx, None, r, &infos, &active);
         if !bad.is_empty() || excess > 0 {
-            extra.push(Violation { rule_id: r.id.clone(), message: format!("{}: {} incumplimientos", r.name, bad.len() as u32 + excess), at: bad.first().map(|&i| layout.seats[i].pos), hard: r.hard });
+            extra.push(Violation { rule_id: r.id.clone(), message: format!("{}: {} breaches", r.name, bad.len() as u32 + excess), at: bad.first().map(|&i| layout.seats[i].pos), hard: r.hard });
         }
     }
     layout.violations.extend(extra);

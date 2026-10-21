@@ -167,9 +167,9 @@ pub fn layout_penalty(
             continue;
         }
         for &i in &bad {
-            flags[i].push(format!("Regla: {}", r.name));
+            flags[i].push(format!("Rule: {}", r.name));
         }
-        violations.push(Violation { rule_id: r.id.clone(), message: format!("{}: {} incumplimientos", r.name, cnt), at: bad.first().map(|&i| infos[i].pos), hard: r.hard });
+        violations.push(Violation { rule_id: r.id.clone(), message: format!("{}: {} breaches", r.name, cnt), at: bad.first().map(|&i| infos[i].pos), hard: r.hard });
         if r.hard {
             *hard += cnt;
         } else {

@@ -18,7 +18,7 @@ async function load() {
       await (m as unknown as { initThreadPool(n: number): Promise<void> }).initThreadPool(n);
       return { eng: m as unknown as Engine, threads: m.threads() };
     } catch (e) {
-      console.warn('[motor] sin hilos:', e);
+      console.warn('[engine] no threads:', e);
     }
   }
   // @ts-ignore: se genera al compilar el motor (scripts/build-wasm.sh)

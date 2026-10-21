@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { placeDesk } from '../actions';
-import { deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
+import { circWidth, deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
-import { emptySel, selCount, useApp, uid, type Tool } from '../store';
-import type { Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
+import { emptySel, selCount, STEP, useApp, uid, type Tool } from '../store';
+import type { CircPath, Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
 const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
 const OBS_FILL: Record<ObstacleKind, string> = { column: 'var(--column)', fixedOffice: 'var(--office)', restricted: 'var(--restricted)', reserved: 'var(--reserved)' };
@@ -34,6 +34,28 @@ function roundedD(pts: Pt[], r: number) {
     d += `L${f(p1)}C${f(c1)} ${f(c2)} ${f(p2)}`;
   }
   return d + `L${f(pts[pts.length - 1])}`;
+}
+
+const lineD = (pts: Pt[]) => pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(0)} ${p.y.toFixed(0)}`).join('');
+
+/** Without repeated points or interior nodes that sit on a straight run. */
+function cleanPath(pts: Pt[]): Pt[] {
+  const out: Pt[] = [];
+  for (const p of pts) if (!out.length || Math.hypot(p.x - out[out.length - 1].x, p.y - out[out.length - 1].y) > 1) out.push(p);
+  for (let i = out.length - 2; i >= 1; i--) {
+    const a = out[i - 1], b = out[i], c = out[i + 1];
+    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y);
+    if (Math.abs(cross) < 1 * Math.hypot(c.x - a.x, c.y - a.y) && dot > 0) out.splice(i, 1);
+  }
+  return out;
+}
+
+/** Point of the door segment closest to `q` (kept inside the opening). */
+function onDoor(q: Pt, d: Door): Pt {
+  const dx = d.b.x - d.a.x, dy = d.b.y - d.a.y, l2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0.08, Math.min(0.92, ((q.x - d.a.x) * dx + (q.y - d.a.y) * dy) / l2));
+  return { x: d.a.x + dx * t, y: d.a.y + dy * t };
 }
 
 function distSeg(p: Pt, a: Pt, b: Pt) {
@@ -96,6 +118,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   // arrastre de una esquina de columna u oficina (agrandar / reducir)
   const [vEdit, setVEdit] = useState<{ id: string; idx: number; orig: Pt[]; poly: Pt[] } | null>(null);
   // arrastre de un recuadro dorado: cambia la medida en vivo
+  // editing a circulation path: a node, or a whole run (segment) shifted sideways
+  const [pdrag, setPdrag] = useState<{ id: string; mode: 'node' | 'seg'; idx: number; orig: Pt[]; pts: Pt[]; a: Pt; sx: number; sy: number; moved: boolean } | null>(null);
+  const editPaths = st.step === STEP.paths && tool === 'select';
   const [cdrag, setCdrag] = useState<{ key: ClearKey; dir: Pt; mult: number; v0: number; a: Pt; sx: number; sy: number; val: number; moved: boolean } | null>(null);
 
   // tamaño
@@ -225,14 +250,14 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     const isField = (e: KeyboardEvent) => { const t = e.target as HTMLElement; return !!t && ['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName); };
     const down = (e: KeyboardEvent) => {
       if (e.code !== 'Space' || isField(e)) return;
-      // que la barra no «vuelva a pulsar» el último botón usado
+      // que la barra no “vuelva a pulsar” el último botón usado
       e.preventDefault();
       if ((e.target as HTMLElement)?.tagName === 'BUTTON') (e.target as HTMLElement).blur();
       if (e.ctrlKey || e.metaKey) {
         if (!e.repeat) {
           const on = !useApp.getState().snapGrid;
           useApp.getState().set({ snapGrid: on });
-          useApp.getState().say(on ? 'Snap a la cuadrícula activado' : 'Snap a la cuadrícula desactivado');
+          useApp.getState().say(on ? 'Grid snap on' : 'Grid snap off');
         }
         return;
       }
@@ -377,7 +402,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     if (cur) st.snapshot();
     st.set({ plan: { region: [pts], obstacles: cur?.obstacles ?? [], doors: cur?.doors ?? [], windows: cur?.windows ?? [] }, areaM2: area, tool: 'select' });
     setOutline([]);
-    st.say((cur?.doors.some((d) => d.kind === 'main') ? 'Contorno listo.' : 'Contorno listo. Ahora marca la puerta principal con «Dibujar puerta».'));
+    st.say((cur?.doors.some((d) => d.kind === 'main') ? 'Outline ready.' : 'Outline ready. Now mark the main entrance with “Door”.'));
   };
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -434,12 +459,96 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     );
   }, [plan, layout?.keepouts, layout?.corridors, layout?.corridorLines, layout?.corridorWidth, showKeepouts, st.showCorridor]);
 
+  // ------------------------------------------------ circulation paths (bands of their width + centerline)
+  const doorOf = (id: string): Door | undefined => plan?.doors.find((d) => (id ? d.id === id : d.kind === 'main'));
+  const selPathId = st.pathSel?.id ?? null;
+  const shownPaths = useMemo(() => (plan?.paths ?? []).filter((p) => (st.step === STEP.paths ? p.kind === 'primary' || st.showSecondary || p.keep : p.keep)),
+    [plan?.paths, st.step, st.showSecondary]);
+  const circEls = useMemo(() => {
+    if (!config || !shownPaths.length) return null;
+    const on = config.rules.find((r) => r.id === 'P1')?.enabled ?? false;
+    return (
+      <g className={'circs' + (on ? '' : ' unused') + (editPaths ? ' editable' : '')} clipPath="url(#region-clip)">
+        {shownPaths.map((p) => {
+          const pts = pdrag?.id === p.id ? pdrag.pts : p.pts;
+          const w = circWidth(config, p);
+          return (
+            <g key={p.id} className={'circ' + (p.keep ? '' : ' off') + (p.kind === 'secondary' ? ' sec' : '') + (selPathId === p.id ? ' picked' : '')}>
+              <path className="circ-band" d={lineD(pts)} strokeWidth={w}
+                onMouseDown={editPaths ? (e) => { if (e.button !== 0) return; e.stopPropagation(); if (selPathId !== p.id) st.set({ pathSel: { id: p.id, node: null }, selection: emptySel() }); } : undefined}
+                onDoubleClick={editPaths ? (e) => { e.stopPropagation(); insertNode(p, e); } : undefined}>
+                {editPaths && <title>Click to edit · double-click to add a node</title>}
+              </path>
+              <path className="circ-line" d={roundedD(pts, Math.min(w / 2, 600))} />
+            </g>
+          );
+        })}
+      </g>
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownPaths, config, pdrag, selPathId, editPaths]);
+  /** Double-click on a run: a new node there (on the run). */
+  const insertNode = (p: CircPath, e: React.MouseEvent) => {
+    if (!svgRef.current) return;
+    const r = svgRef.current.getBoundingClientRect();
+    const q = toWorld(e.clientX - r.left, e.clientY - r.top);
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i + 1 < p.pts.length; i++) { const d = distSeg(q, p.pts[i], p.pts[i + 1]); if (d < bd) { bd = d; bi = i; } }
+    const a = p.pts[bi], b = p.pts[bi + 1];
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2));
+    const np = { x: a.x + dx * t, y: a.y + dy * t };
+    st.updatePlan((pl) => { const x = pl.paths?.find((z) => z.id === p.id); if (x) { x.pts.splice(bi + 1, 0, np); x.edited = true; } });
+    st.set({ pathSel: { id: p.id, node: bi + 1 }, layout: null });
+  };
+  /** Shape of the path while dragging (from the original points). */
+  const dragPath = (d: NonNullable<typeof pdrag>, q: Pt): Pt[] => {
+    const p = plan?.paths?.find((x) => x.id === d.id);
+    const pts = d.orig.map((x) => ({ ...x }));
+    const n = pts.length;
+    const tol = 10 / view.k;
+    const g = (v: number) => (st.snapGrid && !noSnap ? Math.round(v / st.gridSize) * st.gridSize : v);
+    if (d.mode === 'node') {
+      const i = d.idx;
+      if (i === 0 || i === n - 1) {
+        const door = doorOf(i === 0 ? p?.from ?? '' : p?.to ?? '');
+        pts[i] = door ? onDoor(q, door) : q;
+        return pts;
+      }
+      let np = { x: g(q.x), y: g(q.y) };
+      if (!noSnap) for (const nb of [pts[i - 1], pts[i + 1]]) {
+        if (Math.abs(np.x - nb.x) < tol) np = { ...np, x: nb.x };
+        if (Math.abs(np.y - nb.y) < tol) np = { ...np, y: nb.y };
+      }
+      pts[i] = np;
+      return pts;
+    }
+    // whole run: sideways (keeps it horizontal / vertical); at the ends it slides along the door
+    let s = d.idx;
+    const a0 = pts[s], b0 = pts[s + 1];
+    const hor = Math.abs(a0.y - b0.y) < 1, ver = Math.abs(a0.x - b0.x) < 1;
+    const dx = q.x - d.a.x, dy = q.y - d.a.y;
+    const sh = (v: Pt): Pt => (hor ? { x: v.x, y: g(a0.y + dy) } : ver ? { x: g(a0.x + dx), y: v.y } : { x: v.x + dx, y: v.y + dy });
+    const na = sh(a0), nb = sh(b0);
+    const out = pts;
+    const fits = (pt: Pt, door: Door | undefined) => !!door && Math.hypot(onDoor(pt, door).x - pt.x, onDoor(pt, door).y - pt.y) < 1;
+    if (s + 1 === n - 1) {
+      const door = doorOf(p?.to ?? '');
+      if (fits(nb, door)) out[s + 1] = nb; else { out.splice(s + 2, 0, { ...b0 }); out[s + 1] = nb; }
+    } else out[s + 1] = nb;
+    if (s === 0) {
+      const door = doorOf(p?.from ?? '');
+      if (fits(na, door)) out[0] = na; else { out.splice(0, 0, { ...a0 }); s = 1; out[1] = na; }
+    } else out[s] = na;
+    return out;
+  };
+
   // recorridos (encima de los escritorios): eje del pasillo principal y caminos a las oficinas
   const pathEls = useMemo(() => {
     if (!layout) return null;
     const main = st.showCorridor && layout.corridorLines?.length ? layout.corridorLines.map((l) => roundedD(l, 900)).join('') : '';
     const acc = st.showAccess && layout.accessPaths?.length ? layout.accessPaths.map((l) => roundedD(l, 600)) : [];
-    // cada recorrido se «dibuja» desde la entrada al aparecer
+    // cada recorrido se “dibuja” desde la entrada al aparecer
     return (
       <g className="paths" clipPath="url(#region-clip)" key={'p' + st.reveal}>
         {main && <path className="corridor-axis" d={main} />}
@@ -623,7 +732,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     if (m.config) {
       st.snapshot();
       st.updateConfig(m.config);
-      st.say('Separación del tipo de escritorio cambiada: se aplica a todos los de ese tipo en la próxima optimización.');
+      st.say('Clearance of the desk type changed: it applies to all desks of that type in the next optimization.');
     }
   };
   /** Nueva forma al llevar la esquina `idx` a `p`: los rectángulos siguen siendo rectángulos
@@ -702,6 +811,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       panRef.current = { sx: x, sy: y, tx: view.tx, ty: view.ty };
       return;
     }
+    if (editPaths && e.button === 0 && st.pathSel && !e.shiftKey) st.set({ pathSel: null });
     if (tool === 'select' && e.button === 0) {
       // ¿clic sobre algo ya seleccionado? → mover
       const hit = pickPoint(toWorld(x, y), 8 / view.k);
@@ -718,6 +828,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onMove = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
+    if (pdrag) {
+      const moved = pdrag.moved || Math.hypot(x - pdrag.sx, y - pdrag.sy) > 3;
+      if (moved) setPdrag({ ...pdrag, moved, pts: dragPath(pdrag, toWorld(x, y)) });
+      return;
+    }
     if (vEdit) {
       const sn2 = snapAll(toWorld(x, y), true);
       setVEdit({ ...vEdit, poly: resizePoly(vEdit.orig, vEdit.idx, sn2.p) });
@@ -777,6 +892,16 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const onUp = (e: React.MouseEvent) => {
     const { sx: x, sy: y } = evPt(e);
+    if (pdrag) {
+      const d = pdrag;
+      setPdrag(null);
+      if (d.moved) {
+        const pts = cleanPath(d.pts);
+        st.updatePlan((pl) => { const q = pl.paths?.find((z) => z.id === d.id); if (q) { q.pts = pts; q.edited = true; } });
+        st.set({ pathSel: { id: d.id, node: d.mode === 'node' && pts.length === d.pts.length ? d.idx : null }, layout: null });
+      } else if (d.mode === 'node') st.set({ pathSel: { id: d.id, node: d.idx } });
+      return;
+    }
     if (vEdit) {
       const v = vEdit;
       setVEdit(null);
@@ -847,10 +972,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           p.doors.push({ id: uid('d'), kind, a, b, label: '' });
         });
         if (kind === 'main') st.set({ mainConfirmed: true, tool: 'select' });
-        st.say(kind === 'main' ? 'Puerta principal agregada. Las siguientes que dibujes serán de oficina; cámbialas con «Cambiar tipo».' : 'Puerta agregada.');
+        st.say(kind === 'main' ? 'Main entrance added. The next doors you draw will be office doors; change them with “Change type”.' : 'Door added.');
       } else {
         const kind = tool as ObstacleKind;
-        const label = kind === 'reserved' ? (prompt('Nombre de la zona reservada (p. ej. Impresoras):') ?? '') : '';
+        const label = kind === 'reserved' ? (prompt('Name of the reserved area (e.g. Printers):') ?? '') : '';
         st.updatePlan((p) => {
           p.obstacles.push({
             id: uid('ob'), kind, label,
@@ -874,15 +999,15 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         onSeed(w);
         break;
       case 'placeDesk':
-        if (fitWhy.length && !e.shiftKey) { st.say('No cabe ahí: ' + fitWhy.join('; ') + '. Shift+clic lo ubica de todas formas; Espacio lo mueve sin enganche.', 'error'); break; }
+        if (fitWhy.length && !e.shiftKey) { st.say('It does not fit there: ' + fitWhy.join('; ') + '. Shift+click places it anyway; hold Space to move it without snapping.', 'error'); break; }
         placeDesk(placeSnap(toWorld(x, y)).c, fitWhy);
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
         const d = nearestDoor(toWorld(x, y));
-        if (!d) { st.say('No hay una puerta ahí: haz clic sobre una línea de color en el borde, o usa «Dibujar puerta».'); return; }
+        if (!d) { st.say('There is no door there: click a colored line on the edge, or use “Door”.'); return; }
         if (tool === 'mainDoor') {
           st.set({ mainConfirmed: true, tool: 'select' });
-          st.say('Puerta principal marcada.');
+          st.say('Main entrance set.');
         }
         st.updatePlan((p) => {
           const dd = p.doors.find((x) => x.id === d.id)!;
@@ -942,17 +1067,18 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const cursorCls = tool === 'pan' ? 'grab' : tool === 'select' ? (moving ? 'grab' : 'arrow') : 'cross';
   const moveOff = moving ? { x: moving.b.x - moving.a.x, y: moving.b.y - moving.a.y } : null;
-  const flagged = (s: Seat) => s.flags.some((f) => f.startsWith('Sin acceso') || f.startsWith('Recorrido') || f.startsWith('Regla'));
+  const flagged = (s: Seat) => s.flags.some((f) => f.startsWith('No access') || f.startsWith('Travel') || f.startsWith('Common travel') || f.startsWith('Rule'));
 
   return (
     <div className={'canvas ' + cursorCls}>
       <svg ref={svgRef} width={size.w} height={size.h} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
         onMouseLeave={() => { panRef.current = null; setHover(null); setCursor(null); }} onWheel={onWheel}
-        onContextMenu={(e) => e.preventDefault()} onDoubleClick={() => { if (tool === 'outline') finishOutline(outline); }} role="img" aria-label="Plano de la oficina">
+        onContextMenu={(e) => e.preventDefault()} onDoubleClick={() => { if (tool === 'outline') finishOutline(outline); }} role="img" aria-label="Office plan">
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k} ${-view.k})`}>
           {showBackground && <g className="bg">{bgEls}</g>}
           {planEls}
           {gridEls}
+          {circEls}
           {layoutEls}
           {pathEls}
           {clrShown?.zones.map((z, i) => <path key={'cz' + i} className="clear-zone" d={ringD(z)} />)}
@@ -961,7 +1087,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
               x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y}
               style={{ cursor: Math.abs(g.dir.y) > Math.abs(g.dir.x) ? 'ns-resize' : 'ew-resize' }}
               onMouseDown={(e) => startCdrag(e, g.key, g.dir, g.mult ?? 1, g.value)}>
-              <title>Arrastra la línea para cambiar la separación</title>
+              <title>Drag the line to change the clearance</title>
             </line>
           ))}
           {vEdit && vEdit.poly.length > 0 && <path className="sel" d={ringD(vEdit.poly)} />}
@@ -1019,6 +1145,43 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
               <text x={sx(l.pos)} y={sy(l.pos) + 4}>{l.prefix ? `${l.prefix} ` : ''}{(l.value / 1000).toFixed(2)}</text>
             </g>
           ))}
+          {editPaths && selPathId && (() => {
+            const p = plan?.paths?.find((x) => x.id === selPathId);
+            if (!p) return null;
+            const pts = pdrag?.id === p.id ? pdrag.pts : p.pts;
+            const start = (e: React.MouseEvent, mode: 'node' | 'seg', idx: number) => {
+              if (e.button !== 0) return;
+              e.stopPropagation();
+              const { sx: x, sy: y } = evPt(e);
+              setPdrag({ id: p.id, mode, idx, orig: p.pts, pts: p.pts, a: toWorld(x, y), sx: x, sy: y, moved: false });
+            };
+            return (
+              <g className="p-handles">
+                {!pdrag && pts.slice(0, -1).map((a, i) => {
+                  const b = pts[i + 1];
+                  const len = Math.hypot(b.x - a.x, b.y - a.y) * view.k;
+                  if (len < 34) return null;
+                  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+                  const ang = (Math.atan2(-(b.y - a.y), b.x - a.x) * 180) / Math.PI;
+                  const hor = Math.abs(a.y - b.y) < 1;
+                  return (
+                    <rect key={'sg' + i} className="p-seg" x={sx(m) - 9} y={sy(m) - 3.5} width={18} height={7} rx={3.5}
+                      transform={`rotate(${ang} ${sx(m)} ${sy(m)})`} style={{ cursor: hor ? 'ns-resize' : 'ew-resize' }}
+                      onMouseDown={(e) => start(e, 'seg', i)}>
+                      <title>Drag to shift this run</title>
+                    </rect>
+                  );
+                })}
+                {pts.map((q, i) => (
+                  <circle key={'pn' + i} className={'p-node' + (i === 0 || i === pts.length - 1 ? ' end' : '') + (st.pathSel?.node === i ? ' on' : '')}
+                    cx={sx(q)} cy={sy(q)} r={i === 0 || i === pts.length - 1 ? 5 : 6}
+                    onMouseDown={(e) => start(e, 'node', i)}>
+                    <title>{i === 0 || i === pts.length - 1 ? 'Drag along the door' : 'Drag to move · Delete removes it'}</title>
+                  </circle>
+                ))}
+              </g>
+            );
+          })()}
           {one && tool === 'select' && !moving && sel.obstacles.length === 1 && (() => {
             const o = plan?.obstacles.find((x) => x.id === sel.obstacles[0]);
             if (!o) return null;
@@ -1026,7 +1189,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             return poly.map((q, i) => (
               <rect key={'vh' + i} className={'v-handle' + (vEdit?.idx === i ? ' on' : '')} x={sx(q) - 5} y={sy(q) - 5} width={10} height={10} rx={2}
                 onMouseDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); setVEdit({ id: o.id, idx: i, orig: o.poly, poly: o.poly }); }}>
-                <title>Arrastra la esquina para agrandar o reducir</title>
+                <title>Drag the corner to enlarge or shrink</title>
               </rect>
             ));
           })()}
@@ -1039,40 +1202,40 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         return <div className={'selbox ' + (crossing ? 'crossing' : 'window')} style={{ left: Math.min(box.ax, box.bx), top: Math.min(box.ay, box.by), width: Math.abs(box.bx - box.ax), height: Math.abs(box.by - box.ay) }} />;
       })()}
       {selCount(sel) > 0 && (
-        <div className="selbar" role="toolbar" aria-label="Acciones sobre la selección">
+        <div className="selbar" role="toolbar" aria-label="Selection actions">
           <span>{describeSel(sel)}</span>
-          {sel.modules.length > 0 && <button className="small" title="Conserva estos escritorios y a sus personas en las próximas optimizaciones (P)" onClick={() => pinSelection(true)}>Fijar y bloquear</button>}
-          {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Soltar</button>}
+          {sel.modules.length > 0 && <button className="small" title="Keep these desks and their people in the next optimizations (P)" onClick={() => pinSelection(true)}>Pin and lock</button>}
+          {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Release</button>}
           {sel.doors.length > 0 && (
-            <button className="small" title="Cambia el lado hacia el que abre la puerta (y su despeje)"
-              onClick={() => st.updatePlan((p) => { p.doors.forEach((d) => { if (sel.doors.includes(d.id)) d.flip = !d.flip; }); })}>Invertir sentido</button>
+            <button className="small" title="Flip the side the door opens to (and its clearance)"
+              onClick={() => st.updatePlan((p) => { p.doors.forEach((d) => { if (sel.doors.includes(d.id)) d.flip = !d.flip; }); })}>Flip swing</button>
           )}
-          {(sel.modules.length > 0 || sel.obstacles.length > 0) && <button className="small" title="Gira los escritorios u obstáculos seleccionados 90° sobre su centro (R)" onClick={() => rotateSelection(90)}>Girar 90°</button>}
-          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small danger" title="Supr" onClick={deleteSelection}>Borrar</button>}
-          {sel.region?.length ? <span className="hint-inline">Clic en un número dorado para la separación de esa arista</span> : null}
-          <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Quitar selección</button>
+          {(sel.modules.length > 0 || sel.obstacles.length > 0) && <button className="small" title="Rotate the selected desks or obstacles 90° about their center (R)" onClick={() => rotateSelection(90)}>Rotate 90°</button>}
+          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small danger" title="Delete" onClick={deleteSelection}>Delete</button>}
+          {sel.region?.length ? <span className="hint-inline">Click a gold number to set that edge's clearance</span> : null}
+          <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Clear selection</button>
         </div>
       )}
-      <div className="canvas-tools" role="toolbar" aria-label="Vista">
-        <button className={tool === 'select' ? 'on' : ''} aria-pressed={tool === 'select'} title="Seleccionar (Esc)" onClick={() => st.set({ tool: 'select' })}>
-          <svg viewBox="0 0 20 20" aria-hidden><path d="M5 3l10 7-4.5 1 2.5 5-2 1-2.5-5L5 15z" /></svg><span>Seleccionar</span>
+      <div className="canvas-tools" role="toolbar" aria-label="View">
+        <button className={tool === 'select' ? 'on' : ''} aria-pressed={tool === 'select'} title="Select (Esc)" onClick={() => st.set({ tool: 'select' })}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M5 3l10 7-4.5 1 2.5 5-2 1-2.5-5L5 15z" /></svg><span>Select</span>
         </button>
-        <button className={tool === 'pan' ? 'on' : ''} aria-pressed={tool === 'pan'} title="Mover el plano (también con botón derecho)" onClick={() => st.set({ tool: tool === 'pan' ? 'select' : 'pan' })}>
-          <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2v16M2 10h16M10 2l-2.5 2.5M10 2l2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5" /></svg><span>Mover</span>
+        <button className={tool === 'pan' ? 'on' : ''} aria-pressed={tool === 'pan'} title="Pan the plan (also with the right button)" onClick={() => st.set({ tool: tool === 'pan' ? 'select' : 'pan' })}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2v16M2 10h16M10 2l-2.5 2.5M10 2l2.5 2.5M10 18l-2.5-2.5M10 18l2.5-2.5M2 10l2.5-2.5M2 10l2.5 2.5M18 10l-2.5-2.5M18 10l-2.5 2.5" /></svg><span>Pan</span>
         </button>
         <hr />
-        <button title="Acercar (rueda del mouse)" onClick={() => zoomBy(1.4)}>
-          <svg viewBox="0 0 20 20" aria-hidden><path d="M10 4v12M4 10h12" /></svg><span>Acercar</span>
+        <button title="Zoom in (mouse wheel)" onClick={() => zoomBy(1.4)}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M10 4v12M4 10h12" /></svg><span>Zoom in</span>
         </button>
-        <button title="Alejar" onClick={() => zoomBy(1 / 1.4)}>
-          <svg viewBox="0 0 20 20" aria-hidden><path d="M4 10h12" /></svg><span>Alejar</span>
+        <button title="Zoom out" onClick={() => zoomBy(1 / 1.4)}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M4 10h12" /></svg><span>Zoom out</span>
         </button>
-        <button title="Encuadrar todo el plano" onClick={fit}>
-          <svg viewBox="0 0 20 20" aria-hidden><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg><span>Encuadrar</span>
+        <button title="Fit the whole plan" onClick={fit}>
+          <svg viewBox="0 0 20 20" aria-hidden><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg><span>Fit</span>
         </button>
       </div>
       {editing && (
-        <input className="clear-edit" autoFocus style={{ left: editing.x - 32, top: editing.y - 13 }} value={editing.text} aria-label="Separación en metros"
+        <input className="clear-edit" autoFocus style={{ left: editing.x - 32, top: editing.y - 13 }} value={editing.text} aria-label="Clearance in meters"
           onFocus={(e) => e.target.select()}
           onChange={(e) => setEditing({ ...editing, text: e.target.value })}
           onKeyDown={(e) => {
@@ -1086,32 +1249,32 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         <div className={'add-wrap fab-wrap' + (addOpen ? ' open' : '')}>
           {addOpen && (
             <div className="add-menu fab-menu" role="menu">
-              <div className="add-sec" style={{ '--i': 0 } as CSSProperties}>Escritorios</div>
+              <div className="add-sec" style={{ '--i': 0 } as CSSProperties}>Desks</div>
               {config.catalog.map((t, i) => (
                 <button key={t.id} role="menuitem" style={{ '--i': i + 1 } as CSSProperties} onClick={() => { setAddOpen(false); st.set({ tool: 'placeDesk', placeType: t.id, selection: emptySel() }); }}>
                   <span className="dot" style={{ background: t.color }} />{t.name}
                 </button>
               ))}
               <button role="menuitem" className="studio-item" style={{ '--i': config.catalog.length + 1 } as CSSProperties} onClick={() => { setAddOpen(false); st.set({ studio: { open: true } }); }}>
-                <span className="dot ring" />Diseñar en el Studio…
+                <span className="dot ring" />Design in Studio…
               </button>
-              <div className="add-sec" style={{ '--i': config.catalog.length + 2 } as CSSProperties}>Plano</div>
-              {([['column', 'Columna'], ['fixedOffice', 'Oficina o sala fija'], ['restricted', 'Tablero o zona restringida'], ['reserved', 'Zona reservada'], ['drawDoor', 'Puerta'], ['window', 'Ventana']] as [Tool, string][]).map(([k, l], i) => (
+              <div className="add-sec" style={{ '--i': config.catalog.length + 2 } as CSSProperties}>Plan</div>
+              {([['column', 'Column'], ['fixedOffice', 'Office or fixed room'], ['restricted', 'Panel or restricted area'], ['reserved', 'Reserved area'], ['drawDoor', 'Door'], ['window', 'Window']] as [Tool, string][]).map(([k, l], i) => (
                 <button key={k} role="menuitem" style={{ '--i': config.catalog.length + 3 + i } as CSSProperties} onClick={() => { setAddOpen(false); st.set({ tool: k, selection: emptySel() }); }}>
                   <span className={'dot ob-' + k} />{l}
                 </button>
               ))}
             </div>
           )}
-          <button className="fab" aria-expanded={addOpen} aria-label="Agregar" title="Agregar escritorios, columnas, oficinas, puertas…" onClick={() => setAddOpen(!addOpen)}>
+          <button className="fab" aria-expanded={addOpen} aria-label="Add" title="Add desks, columns, offices, doors…" onClick={() => setAddOpen(!addOpen)}>
             <svg viewBox="0 0 24 24" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
           </button>
         </div>
       )}
-      <div className="grid-ctl" role="group" aria-label="Cuadrícula">
-        <label><input type="checkbox" checked={st.gridOn} onChange={(e) => st.set({ gridOn: e.target.checked })} /> Cuadrícula</label>
-        <label title="El cursor se engancha a la cuadrícula (y siempre a vértices y bordes al dibujar o mover). Mantén la barra espaciadora para soltarlo un momento; Ctrl+Espacio lo activa o desactiva."><input type="checkbox" checked={st.snapGrid} onChange={(e) => st.set({ snapGrid: e.target.checked })} /> Snap</label>
-        <select value={st.gridSize} aria-label="Tamaño de la cuadrícula" onChange={(e) => st.set({ gridSize: parseFloat(e.target.value) })}>
+      <div className="grid-ctl" role="group" aria-label="Grid">
+        <label><input type="checkbox" checked={st.gridOn} onChange={(e) => st.set({ gridOn: e.target.checked })} /> Grid</label>
+        <label title="The cursor snaps to the grid (and always to corners and edges when drawing or moving). Hold the space bar to release it for a moment; Ctrl+Space turns it on or off."><input type="checkbox" checked={st.snapGrid} onChange={(e) => st.set({ snapGrid: e.target.checked })} /> Snap</label>
+        <select value={st.gridSize} aria-label="Grid size" onChange={(e) => st.set({ gridSize: parseFloat(e.target.value) })}>
           {[100, 250, 500, 1000].map((g) => <option key={g} value={g}>{(g / 1000).toFixed(g < 1000 ? 2 : 0)} m</option>)}
         </select>
       </div>
@@ -1122,7 +1285,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       </div>
       {tool === 'placeDesk' && cursor && placeType && (
         <div className={'fit-tip' + (fitWhy.length ? ' bad' : ' ok')} style={{ left: sx(cursor) + 18, top: sy(cursor) + 18 }}>
-          {fitWhy.length ? <><b>No cabe aquí</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul><small>Shift+clic para ubicarlo igual</small></> : <b>Cabe · clic para ubicarlo</b>}
+          {fitWhy.length ? <><b>It does not fit here</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul><small>Shift+click to place it anyway</small></> : <b>It fits · click to place it</b>}
         </div>
       )}
       {hover && <SeatTip layout={layout} seat={hover.seat} x={hover.sx} y={hover.sy} />}
@@ -1137,7 +1300,7 @@ function SeatTip({ seat, x, y }: { layout: Layout | null; seat: Seat; x: number;
   const c = config?.org.clients.find((c) => c.id === seat.clientId);
   return (
     <div className="tip" style={{ left: x + 14, top: y + 14 }}>
-      <strong>Puesto {seat.number}</strong>
+      <strong>Seat {seat.number}</strong>
       <div>{t?.name}</div>
       {(r || c) && <div>{[r?.name, c?.name].filter(Boolean).join(', ')}</div>}
       {seat.flags.length > 0 && <ul>{seat.flags.map((f, i) => <li key={i}>{f}</li>)}</ul>}

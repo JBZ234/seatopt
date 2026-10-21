@@ -1,8 +1,8 @@
 import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
-import { hasDemand, uid, useApp, type ProjectFile } from './store';
+import { hasDemand, STEP, uid, useApp, type ProjectFile } from './store';
 import type {
-  AnalyzeResult, BgLayer, Capacity, Config, Defaults, Layout, Module, Problem, Pt, Suggestion, Variant,
+  AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, Layout, Module, Problem, Pt, Suggestion, Variant,
 } from './types';
 
 const S = () => useApp.getState();
@@ -41,7 +41,7 @@ export async function importPlan() {
 /** Cierra el plano actual y vuelve a la pantalla de inicio (conserva el catálogo y las medidas). */
 export function closePlan() {
   const s = S();
-  if (s.layout && !confirm('¿Cerrar el plano? La distribución que no hayas guardado se pierde.')) return;
+  if (s.layout && !confirm('Close the plan? Any layout you have not saved will be lost.')) return;
   s.set({
     drawing: null, plan: null, layout: null, background: null, hiddenLayers: [], notes: [], areaM2: 0, roles: {},
     variants: [], suggestions: null, capacity: null, selection: { modules: [], obstacles: [], doors: [], windows: [] },
@@ -56,7 +56,7 @@ export async function deleteLayer(name: string) {
   const d = s.drawing;
   if (!d?.drawingId) return;
   const l = d.layers.find((x) => x.name === name);
-  if (!l || !confirm(`¿Borrar la capa «${name}» (${l.paths} trazos) del dibujo? No se puede deshacer (vuelve a abrir el archivo para recuperarla).`)) return;
+  if (!l || !confirm(`Delete layer “${name}” (${l.paths} strokes) from the drawing? This cannot be undone (open the file again to get it back).`)) return;
   try {
     const n = await call<number>('delete_layer', { drawingId: d.drawingId, layer: name });
     const role = s.roles[name];
@@ -66,7 +66,7 @@ export async function deleteLayer(name: string) {
     await loadBackground();
     // si la capa influía en el área (muros, puertas, columnas…), volver a detectar
     if (!['ignore', 'furniture', 'room', 'building'].includes(role)) await analyzePlan(null);
-    S().say(`Capa «${name}» borrada (${n} elementos).`);
+    S().say(`Layer “${name}” deleted (${n} items).`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
@@ -88,7 +88,7 @@ export async function analyzePlan(seed: Pt | null) {
   if (!drawing) return;
   try {
     const r = await call<AnalyzeResult>('analyze', { drawingId: drawing.drawingId, options: { mmPerUnit, roles, seed, gapClose } });
-    const auto = r.notes.some((n) => n.includes('más ancha'));
+    const auto = r.notes.some((n) => n.includes('widest'));
     S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, alternatives: [], capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
@@ -109,6 +109,33 @@ export function problem(): Problem | null {
   return { plan, config };
 }
 
+/** Calculates the circulation paths on the empty floor. Paths edited by hand are kept as they are;
+ *  the others are replaced, keeping whether they were kept and their own width. */
+export async function computePaths(onlyId?: string) {
+  const p = problem();
+  if (!p) return;
+  if (!p.plan.doors.some((d) => d.kind === 'main')) { S().say('Mark the main entrance first (step 1).', 'error'); return; }
+  try {
+    const fresh = await call<CircPath[]>('circulation', { problem: p });
+    const old = new Map((S().plan?.paths ?? []).map((x) => [x.id, x]));
+    let merged: CircPath[];
+    if (onlyId) {
+      const f = fresh.find((x) => x.id === onlyId);
+      merged = (S().plan?.paths ?? []).map((x) => (x.id === onlyId && f ? { ...f, keep: x.keep, width: x.width } : x));
+    } else {
+      merged = fresh.map((f) => { const o = old.get(f.id); return !o ? f : o.edited ? o : { ...f, keep: o.keep, width: o.width }; });
+    }
+    S().updatePlan((pl) => { pl.paths = merged; });
+    S().set({ pathSel: onlyId ? { id: onlyId, node: null } : null, layout: null, alternatives: [] });
+    if (!onlyId) {
+      const np = merged.filter((x) => x.kind === 'primary').length, ns = merged.filter((x) => x.kind === 'secondary').length;
+      S().say(`${np} entrance path${np === 1 ? '' : 's'} and ${ns} office-to-office path${ns === 1 ? '' : 's'} found.`);
+    }
+  } catch (e) {
+    S().say('Could not calculate the paths: ' + e, 'error');
+  }
+}
+
 function startJobUi(kind: string) {
   const signal = { cancel: false };
   S().set({ job: { kind, progress: null, signal } });
@@ -118,25 +145,25 @@ function startJobUi(kind: string) {
 export async function optimize(resume = false) {
   const p0 = problem();
   if (!p0) return;
-  // tiempo automático (0) y, con «Seguir buscando», el genoma de la solución actual
+  // tiempo automático (0) y, con “Seguir buscando”, el genoma de la solución actual
   const p = { ...p0, config: { ...p0.config, settings: { ...p0.config.settings, timeLimit: 0, resume: resume ? S().layout?.genome ?? null : null } } };
   if (!hasDemand(p.config)) {
-    S().say('Indica cuántos escritorios ubicar, o marca «Máximo posible», en el paso «Escritorios».', 'error');
-    S().set({ step: 1 });
+    S().say('Say how many desks to place, or turn on “As many as fit”, in the “Desks” step.', 'error');
+    S().set({ step: STEP.desks });
     return;
   }
-  const signal = startJobUi('Optimizando');
+  const signal = startJobUi('Optimizing');
   try {
-    const res = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizando', progress: st.progress, signal } }), { signal });
+    const res = await runJob<Layout>('optimize', p, (st) => S().set({ job: { kind: 'Optimizing', progress: st.progress, signal } }), { signal });
     const alts = (res.alternatives && res.alternatives.length ? res.alternatives : [res]).map((l) => ({ ...l, alternatives: undefined }));
     const layout = alts[0];
     S().set({ layout, alternatives: alts, suggestions: null, selection: { modules: [], obstacles: [], doors: [], windows: [] }, reveal: S().reveal + 1 });
     const k = layout.kpis;
     if (k.unplacedByType.length > 0) {
-      S().say('No caben todos los escritorios con cantidad fija. Prueba «Buscar mejores valores».', 'error');
+      S().say('Not all the fixed desks fit. Try “Find better values”.', 'error');
       S().set({ job: null });
     } else {
-      S().say(k.maxMode ? `Listo: caben ${k.seatsPlaced} puestos.` : `Listo: ${k.seatsPlaced} puestos ubicados.`);
+      S().say(k.maxMode ? `Done: ${k.seatsPlaced} seats fit.` : `Done: ${k.seatsPlaced} seats placed.`);
       S().set({ job: null });
     }
   } catch (e) {
@@ -149,11 +176,11 @@ export async function optimize(resume = false) {
 export async function explore(n = 10) {
   const p = problem();
   if (!p) return;
-  const signal = startJobUi('Explorando pesos');
+  const signal = startJobUi('Exploring weights');
   try {
-    const vars = await runJob<Variant[]>('explore', p, (st) => S().set({ job: { kind: 'Explorando pesos', progress: st.progress, signal } }), { n, signal });
+    const vars = await runJob<Variant[]>('explore', p, (st) => S().set({ job: { kind: 'Exploring weights', progress: st.progress, signal } }), { n, signal });
     S().set({ variants: vars });
-    S().say(`${vars.length} variantes; las del primer frente de Pareto no se pueden mejorar en un indicador sin empeorar otro.`);
+    S().say(`${vars.length} variants; those on the first Pareto front cannot improve one indicator without worsening another.`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   } finally {
@@ -164,9 +191,9 @@ export async function explore(n = 10) {
 export async function suggest() {
   const p = problem();
   if (!p) return;
-  const signal = startJobUi('Buscando sugerencias');
+  const signal = startJobUi('Looking for suggestions');
   try {
-    const sg = await runJob<Suggestion[]>('suggest', p, (st) => S().set({ job: { kind: 'Buscando sugerencias', progress: st.progress, signal } }), { signal });
+    const sg = await runJob<Suggestion[]>('suggest', p, (st) => S().set({ job: { kind: 'Looking for suggestions', progress: st.progress, signal } }), { signal });
     S().set({ suggestions: sg });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
@@ -178,9 +205,9 @@ export async function suggest() {
 export async function capacity() {
   const p = problem();
   if (!p) return;
-  const signal = startJobUi('Estimando capacidad');
+  const signal = startJobUi('Estimating capacity');
   try {
-    const c = await runJob<Capacity[]>('capacity', p, (st) => S().set({ job: { kind: 'Estimando capacidad', progress: st.progress, signal } }), { signal });
+    const c = await runJob<Capacity[]>('capacity', p, (st) => S().set({ job: { kind: 'Estimating capacity', progress: st.progress, signal } }), { signal });
     S().set({ capacity: c });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
@@ -220,9 +247,9 @@ export function applySuggestion(s: Suggestion) {
   if (s.layout) {
     const l = { ...s.layout, alternatives: undefined };
     S().set({ layout: l, alternatives: [l], selection: { modules: [], obstacles: [], doors: [], windows: [] }, reveal: S().reveal + 1 });
-    S().say(`Medida aplicada: ${l.kpis.seatsPlaced} puestos. Puedes optimizar de nuevo con más tiempo para afinar.`);
+    S().say(`Value applied: ${l.kpis.seatsPlaced} seats. You can optimize again with more time to refine.`);
   } else {
-    S().say('Medida aplicada. Vuelve a optimizar para ver el resultado.');
+    S().say('Value applied. Optimize again to see the result.');
   }
 }
 
@@ -256,8 +283,8 @@ export async function placeDesk(center: Pt, forced: string[] = []) {
     const nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout });
     S().set({ layout: nl });
     const flags = [...new Set([...forced, ...nl.seats.filter((x) => x.moduleId === m.id).flatMap((x) => x.flags)])];
-    if (flags.length) S().say(`Ubicado, pero no cumple: ${flags.join('; ')}. Ctrl+Z para quitarlo.`, 'error');
-    else S().say(`Puesto agregado: ${nl.kpis.seatsPlaced} puestos.`);
+    if (flags.length) S().say(`Placed, but it breaks: ${flags.join('; ')}. Ctrl+Z removes it.`, 'error');
+    else S().say(`Seat added: ${nl.kpis.seatsPlaced} seats.`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
@@ -285,8 +312,8 @@ export async function exportDxf(includePlan: boolean) {
   const src = S().drawing?.source;
   const mm = src === 'pdf' ? 1 : S().mmPerUnit;
   const txt = await call<string>('export_dxf', { problem: p, layout: l, mmPerUnit: mm, includePlan });
-  const path = await saveText(`${baseName()}_puestos.dxf`, txt, 'dxf');
-  if (path) S().say(`Guardado: ${path}`);
+  const path = await saveText(`${baseName()}_seats.dxf`, txt, 'dxf');
+  if (path) S().say(`Saved: ${path}`);
 }
 
 export async function exportCsv() {
@@ -294,15 +321,15 @@ export async function exportCsv() {
   const l = S().layout;
   if (!p || !l) return;
   const txt = await call<string>('export_csv', { problem: p, layout: l, mmPerUnit: 1 });
-  const path = await saveText(`${baseName()}_puestos.csv`, '﻿' + txt, 'csv');
-  if (path) S().say(`Guardado: ${path}`);
+  const path = await saveText(`${baseName()}_seats.csv`, '﻿' + txt, 'csv');
+  if (path) S().say(`Saved: ${path}`);
 }
 
 export async function saveProject() {
   const s = S();
   const pf: ProjectFile = { version: 1, drawingName: s.drawing?.name ?? '', mmPerUnit: s.mmPerUnit, roles: s.roles, plan: s.plan, config: s.config, layout: s.layout, background: s.background };
-  const path = await saveText(`${baseName()}.puestos.json`, JSON.stringify(pf), 'json');
-  if (path) S().say(`Proyecto guardado: ${path}`);
+  const path = await saveText(`${baseName()}.seats.json`, JSON.stringify(pf), 'json');
+  if (path) S().say(`Project saved: ${path}`);
 }
 
 export async function openProject() {
@@ -319,15 +346,18 @@ export async function openProject() {
         if (!d) return r;
         return { ...r, name: d.name, description: d.description, items: r.items.map((it) => { const di = d.items.find((x) => x.id === it.id); return di ? { ...it, label: di.label, help: di.help } : it; }) };
       });
+      // rules added in newer versions (e.g. circulation paths) come with their defaults
+      for (const d of def.rules) if (!config.rules.some((r) => r.id === d.id)) config.rules.push(d);
+      config.weights = { ...def.weights, ...config.weights };
     }
     S().set({
       drawing: pf.drawingName ? { drawingId: '', name: pf.drawingName, source: 'dxf', layers: [], scale: { mmPerUnit: pf.mmPerUnit, paperScale: null, reason: '' }, bounds: [0, 0, 0, 0], unitNote: '' } : null,
       mmPerUnit: pf.mmPerUnit, roles: pf.roles ?? {}, plan: pf.plan, config, layout: pf.layout, background: pf.background, hiddenLayers: [],
       step: pf.layout ? 4 : pf.plan ? 1 : 0, variants: [], suggestions: null, capacity: null,
-      notes: ['Proyecto abierto. Para volver a detectar el recinto o cambiar capas, vuelve a importar el plano.'],
+      notes: ['Project opened. To detect the area again or change layers, import the plan again.'],
     });
   } catch (e) {
-    S().say('No se pudo abrir el proyecto: ' + String(e instanceof Error ? e.message : e), 'error');
+    S().say('Could not open the project: ' + String(e instanceof Error ? e.message : e), 'error');
   }
 }
 
@@ -337,7 +367,7 @@ export async function exportPdf(o: { clean?: boolean; full?: boolean }) {
   const clean = !!o.clean;
   const full = !!o.full;
   if (!clean && !s.layout) return;
-  const title = full ? `${baseName()} — planta sin mobiliario` : clean ? `${baseName()} — planta para optimización` : `${baseName()} — distribución de puestos`;
+  const title = full ? `${baseName()} — plan without furniture` : clean ? `${baseName()} — plan for optimization` : `${baseName()} — seating layout`;
   const furniture = (s.drawing?.layers ?? []).filter((l) => s.roles[l.name] === 'furniture').map((l) => l.name);
   const hidden = Array.from(new Set([...s.hiddenLayers, ...furniture]));
   const p = problem();
@@ -352,9 +382,9 @@ export async function exportPdf(o: { clean?: boolean; full?: boolean }) {
         background: full || (!clean && s.pdfBackground), hiddenLayers: full ? furniture : hidden, clean, numbers: true,
       },
     });
-    const suffix = full ? 'sin_mobiliario' : clean ? 'plano_base' : 'puestos';
+    const suffix = full ? 'no_furniture' : clean ? 'base_plan' : 'seats';
     const path = await saveBase64(`${baseName()}_${suffix}_${s.pdfPaper}.pdf`, b64, 'pdf');
-    if (path) S().say(`Guardado: ${path}`);
+    if (path) S().say(`Saved: ${path}`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
@@ -367,8 +397,8 @@ export async function exportPlanDxf() {
   const outMm = s.drawing?.source === 'pdf' || !s.drawing ? 1 : s.mmPerUnit;
   try {
     const txt = await call<string>('export_plan_dxf', { plan: s.plan, outMm });
-    const path = await saveText(`${baseName()}_plano_base.dxf`, txt, 'dxf');
-    if (path) S().say(`Guardado: ${path}`);
+    const path = await saveText(`${baseName()}_base_plan.dxf`, txt, 'dxf');
+    if (path) S().say(`Saved: ${path}`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
@@ -380,8 +410,8 @@ export async function exportCleanDxf() {
   const exclude = s.drawing.layers.filter((l) => s.roles[l.name] === 'furniture').map((l) => l.name);
   try {
     const txt = await call<string>('export_clean_dxf', { drawingId: s.drawing.drawingId, mmPerUnit: s.mmPerUnit, exclude });
-    const path = await saveText(`${baseName()}_sin_mobiliario.dxf`, txt, 'dxf');
-    if (path) S().say(`Guardado: ${path} (${exclude.length} capas de mobiliario quitadas)`);
+    const path = await saveText(`${baseName()}_no_furniture.dxf`, txt, 'dxf');
+    if (path) S().say(`Saved: ${path} (${exclude.length} furniture layers removed)`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
@@ -391,18 +421,29 @@ export async function exportCleanDxf() {
 export async function exportSimple(format: 'dxf' | 'pdf') {
   const s = S();
   if (!s.drawing?.drawingId || !s.plan) return;
-  const args = { drawingId: s.drawing.drawingId, options: { mmPerUnit: s.mmPerUnit, roles: s.roles, seed: null, gapClose: s.gapClose }, plan: s.plan, format, paper: s.pdfPaper, title: `${baseName()} — líneas simples` };
-  const job = startJobUi('Simplificando el dibujo');
+  const args = { drawingId: s.drawing.drawingId, options: { mmPerUnit: s.mmPerUnit, roles: s.roles, seed: null, gapClose: s.gapClose }, plan: s.plan, format, paper: s.pdfPaper, title: `${baseName()} — single lines` };
+  const job = startJobUi('Simplifying the drawing');
   try {
     const out = await call<string>('export_simple', args);
     S().set({ job: null });
     const path = format === 'dxf'
-      ? await saveText(`${baseName()}_lineas_simples.dxf`, out, 'dxf')
-      : await saveBase64(`${baseName()}_lineas_simples_${s.pdfPaper}.pdf`, out, 'pdf');
-    if (path) S().say(`Guardado: ${path}`);
+      ? await saveText(`${baseName()}_single_lines.dxf`, out, 'dxf')
+      : await saveBase64(`${baseName()}_single_lines_${s.pdfPaper}.pdf`, out, 'pdf');
+    if (path) S().say(`Saved: ${path}`);
   } catch (e) {
     S().set({ job: null });
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
   void job;
+}
+
+/** Removes the selected interior node of the path being edited. */
+export function removePathNode() {
+  const sel = S().pathSel;
+  if (!sel || sel.node === null) return;
+  const p = S().plan?.paths?.find((x) => x.id === sel.id);
+  if (!p || sel.node <= 0 || sel.node >= p.pts.length - 1) { S().say('The ends of a path stay on their doors.'); return; }
+  const k = sel.node;
+  S().updatePlan((pl) => { const q = pl.paths?.find((x) => x.id === sel.id); if (q) { q.pts.splice(k, 1); q.edited = true; } });
+  S().set({ pathSel: { id: sel.id, node: null }, layout: null });
 }

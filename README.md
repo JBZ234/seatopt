@@ -1,243 +1,253 @@
-# Optimizador de Puestos
+# Seats — office layout optimizer
 
-App de escritorio (Tauri 2 + Rust + React) que recibe la planta de una oficina en **DXF, DWG o PDF vectorial** y calcula **cuántos puestos caben como máximo** según la geometría de los escritorios, los espacios para caminar y las entradas. Después sienta a las personas por **rol** y **cliente**.
+Desktop app (Tauri 2 + Rust + React), also available as a web page, that takes an office floor plan as **DXF, DWG or vector PDF** and works out **how many seats fit** given the desk geometry, the space people need to sit and walk, the circulation paths and the doors. It can then seat people by **role** and **client**.
 
 ```
-Plano ──▶ Escritorios ──▶ Espacios ──▶ Organización ──▶ Optimizar
-(capas,    (cantidades o    (pasillos,    (roles, clientes,   (resultado,
- escala,    «máximo          sillas,       opcional)           sugerencias,
- recinto)   posible»)        puertas)                          exportar)
+Plan ──▶ Circulation ──▶ Desks ──▶ Rules ──▶ Organization ──▶ Optimize
+(layers,  (paths from     (numbers   (spaces,   (roles, clients,   (result,
+ scale,    the entrance    or "as     priority,  optional)          suggestions,
+ area)     to the doors)   many as    style)                        export)
+                           fit")
 ```
 
-## Instalar y compilar en Windows
+## Install and build on Windows
 
-1. Requisitos (una sola vez):
-   - [Rust](https://rustup.rs) (toolchain MSVC).
-   - **Visual Studio Build Tools**, con la carga de trabajo «Desarrollo para el escritorio con C++».
-   - [Node.js](https://nodejs.org) 18 o superior.
-   - WebView2, que ya viene en Windows 10 y 11.
-2. En la carpeta del proyecto:
+1. Requirements (once):
+   - [Rust](https://rustup.rs) (MSVC toolchain).
+   - **Visual Studio Build Tools** with the "Desktop development with C++" workload.
+   - [Node.js](https://nodejs.org) 18 or later.
+   - WebView2, already included in Windows 10 and 11.
+2. In the project folder:
    ```powershell
-   npm install            # instala la CLI de Tauri y las dependencias de la interfaz
-   npm run tauri dev      # abre la app en modo desarrollo
-   npm run tauri build    # genera el instalador (.msi / .exe) en target/release/bundle/
+   npm install            # installs the Tauri CLI and the interface dependencies
+   npm run tauri dev      # opens the app in development mode
+   npm run tauri build    # builds the installer (.msi / .exe) in target/release/bundle/
    ```
-3. Para abrir **DWG**, instala [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter), que es gratuito. La app lo busca en `C:\Program Files\ODA\…`. Si está en otra ruta, indícala en *Plano → Configuración*. LibreDWG (`dwg2dxf`) también sirve.
+3. To open **DWG** files install [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter) (free). The app looks for it in `C:\Program Files\ODA\…`; if it is elsewhere, enter the path in *Plan → Settings*. LibreDWG (`dwg2dxf`) also works.
 
-### Usarla en el navegador, sin Tauri
+### Use it in the browser with the dev server
 
-Sirve para probar rápido o para compartir en la red local.
+Handy for quick tests or sharing on the local network.
 
 ```bash
 npm --prefix ui install && npm --prefix ui run build
-cargo run --release -p seatopt-devserver -- 8787 ui/dist   # abre http://127.0.0.1:8787
+cargo run --release -p seatopt-devserver -- 8787 ui/dist   # open http://127.0.0.1:8787
 ```
 
-Para desarrollar la interfaz con recarga en caliente, deja el servidor corriendo y ejecuta `npm --prefix ui run dev` (http://localhost:1420).
+For hot reload while working on the interface, keep the server running and run `npm --prefix ui run dev` (http://localhost:1420).
 
-## Versión web (GitHub Pages)
+## Web version (GitHub Pages)
 
-Además de la app de escritorio hay una versión web que se abre con un enlace, sin instalar nada.
-Usa **el mismo motor**: `seat_core` compilado a WebAssembly (`crates/web`), con hilos (rayon sobre
-Web Workers, uno por núcleo), así que da los mismos resultados que la app de escritorio. El plano se
-procesa en el navegador y no se sube a ningún lado. La app de escritorio no cambia: sigue usando el
-motor nativo.
+Besides the desktop app there is a web version that opens from a link, with nothing to install.
+It uses **the same engine**: `seat_core` compiled to WebAssembly (`crates/web`), with threads (rayon
+on Web Workers, one per core), so it gives the same results as the desktop app. The plan is
+processed in the browser and never uploaded. The desktop app is unchanged: it keeps using the native
+engine.
 
-Diferencias de la versión web:
-- Abre DXF y PDF vectorial; los DWG hay que guardarlos antes como DXF.
-- Guardar y exportar descargan el archivo (no hay diálogo de carpeta).
-- Los hilos necesitan aislamiento de origen; GitHub Pages no deja poner cabeceras, así que
-  `coi-serviceworker` las agrega (la primera visita recarga la página una vez). Si el navegador no
-  lo permite, el motor corre en un solo hilo: mismo resultado, más lento.
+Differences of the web version:
+- It opens DXF and vector PDF; save DWG files as DXF first.
+- Save and export download the file (there is no folder dialog).
+- Threads need cross-origin isolation; GitHub Pages does not allow custom headers, so
+  `coi-serviceworker` adds them (the first visit reloads the page once). If the browser does not
+  allow it, the engine runs on a single thread: same result, slower.
 
-**Publicar:** sube el proyecto a un repositorio de GitHub, entra a *Settings → Pages* y en *Source*
-elige **GitHub Actions**. Cada `push` a `main` compila y publica (`.github/workflows/pages.yml`).
-El enlace queda en `https://<usuario>.github.io/<repositorio>/`.
+**Publish:** push the project to a GitHub repository, open *Settings → Pages* and under *Source*
+choose **GitHub Actions**. Every push to `main` builds and publishes (`.github/workflows/pages.yml`).
+The site is at `https://<user>.github.io/<repository>/`.
 
-**Probar en local** (Linux/macOS o WSL; necesita `rustup component add rust-src`,
-`rustup target add wasm32-unknown-unknown` y `cargo install wasm-bindgen-cli --version 0.2.129 --locked`):
+**Try it locally** (Linux/macOS or WSL; needs `rustup component add rust-src`,
+`rustup target add wasm32-unknown-unknown` and `cargo install wasm-bindgen-cli --version 0.2.129 --locked`):
 
 ```bash
-bash scripts/build-wasm.sh       # motor → ui/src/wasm (una vez, o cuando cambie el motor)
-npm --prefix ui run dev:web      # http://localhost:1420, con hilos
-npm --prefix ui run build:web    # sitio estático en ui/dist-web
+bash scripts/build-wasm.sh       # engine → ui/src/wasm (once, or whenever the engine changes)
+npm --prefix ui run dev:web      # http://localhost:1420, with threads
+npm --prefix ui run build:web    # static site in ui/dist-web
 ```
 
-## Flujo de uso
+## How to use it
 
-Al abrir la app aparece una pantalla simple para **seleccionar el plano** (o un proyecto guardado). Arriba a la derecha, **Cerrar plano** vuelve a esa pantalla.
+The app opens on a simple screen to **choose the plan** (or a saved project). **Close plan**, top right, goes back to it.
 
-1. **Plano**: la app te guía con tres tareas, cada una con su estado. La tarea pendiente activa sola su herramienta y muestra la instrucción sobre el plano.
-   - **Escala:** se toma del archivo (unidades del DXF o la escala guardada en PDF exportados por la app) o se estima por el tamaño de las puertas. **Calibrar con una medida:** dos clics sobre algo que conozcas.
-   - **Área a amoblar:** se detecta sola (ignora el marco de la hoja). Si no queda bien, **clic dentro del área**, o **Dibujar contorno**, con enganche a los vértices del dibujo.
-   - **Puerta principal:** si la app eligió la más ancha, pide confirmar. **Marcar en el plano** o **Dibujar puerta** si no se detectó.
-   - Ajustes opcionales: salidas, obstáculos y zonas, roles de capas y **Exportar plano base**.
-2. **Escritorios**
-   - Para los tipos que ya sabes cuántos van (por ejemplo 5 en L y 5 parejas), escribe la cantidad: se ubican primero y siempre.
-   - Para los demás activa **Máximo posible**: el optimizador mete todos los que quepan.
-   - Si marcas un tipo **flexible** (isla o bench, que se arma del largo que haga falta) y uno **suelto** (individual o pareja), el flexible llena las áreas grandes y el suelto rellena los huecos pequeños (un puesto de relleno vale 0,7 de uno en fila).
-   - El ícono de papelera junto al nombre **borra el tipo** (y sus escritorios en el plano).
-   - **Estimar capacidad** calcula cuántos caben de cada tipo por separado.
-   - **Colocar a mano**: clic en el plano para poner escritorios de un tipo (R gira 90°, F cambia el lado de la silla). Quedan fijados: cuentan dentro de la cantidad y la optimización ubica el resto alrededor.
-   - En *Medidas* de cada tipo, **separación libre alrededor**: lado de la silla (por defecto la de *Espacios*), atrás, izquierda y derecha.
-3. **Espacios**: solo las medidas que deciden la capacidad, cada una con un dibujo: pasillo principal, pasillos hacia los puestos, espacio para la silla, separación entre filas, corte de filas largas, entrada libre, frente de las puertas y separación a columnas y oficinas.
-   - Siempre se cumple que todos los puestos se alcancen desde la entrada y que ninguna puerta quede bloqueada.
-   - **Calcular cuántos puestos gana cada medida** prueba cada ajuste y muestra la ganancia junto a la medida, con **Aplicar**.
-4. **Organización** (opcional): roles con color, tipo de escritorio, nivel de ruido y elemento al que deben estar cerca; clientes; matriz de cuántas personas de cada rol tiene cada cliente; afinidad entre roles.
-5. **Optimizar**
-   - La búsqueda **se detiene sola** cuando pasa un rato sin mejoras (más paciencia en planos grandes o con pocos núcleos; tope de 2 min). **Seguir buscando** continúa desde la solución que estás viendo.
-   - Controles: **orden de las filas** (0 = meter escritorios en cualquier hueco; alto = solo filas ordenadas y escritorios apoyados) y **pegar a los muros**.
-   - Presiona **Optimizar**. Después de armar las filas, un **relleno de huecos** busca dónde caben más escritorios en las dos orientaciones, prefiriendo los que quedan con la espalda contra un muro o espalda con espalda; cada uno se valida con todas las reglas.
-   - **Mostrar**: pasillo principal (franja suave con su eje), **recorridos a oficinas** (camino de referencia desde la entrada hasta cada puerta de oficina por el piso ya amoblado; solo se muestra, no cambia la optimización) y despejes de puertas.
-   - **Agregar a mano** (después de optimizar): eliges el tipo y lo mueves por el plano; en verde cabe, en rojo dice qué incumple (recinto, oficinas, columnas y sus separaciones, despejes de puertas, pasillo, otros escritorios). Al soltarlo el motor revisa también el acceso; si algo falla lo avisa (Ctrl+Z lo quita).
-   - **Mejores soluciones encontradas**: las N mejores distintas (10 por defecto) con vista previa; clic para verla en el plano.
-   - **Buscar mejores valores**: prueba bajar cada medida de *Espacios* a su mínimo razonable y cambiar de tipo; cada prueba es una optimización completa y se puede **Usar** directamente.
-   - Si no caben los fijos, la app prueba relajar cada medida y cambiar de tipo de escritorio, y muestra cuántos puestos gana cada cambio, con el botón **Aplicar**.
-   - Con equipos cargados en *Organización* aparece un único control: cuánto pesa sentar a cada equipo junto.
-   - **Bloquear puestos:** selecciona escritorios y usa «Fijar y bloquear». En la próxima optimización se conservan en su sitio con sus personas (rol y cliente) y se optimiza el resto.
-   - **Exportar** genera:
-     - un DXF en las coordenadas del plano original, para insertarlo como referencia externa;
-     - un **PDF vectorial a escala** (A4 a A0, escala automática o 1:N) con plano, puestos numerados, colores por tipo/rol/cliente, convenciones e indicadores;
-     - un CSV con número, tipo, rol, cliente, posición y avisos de cada puesto;
-     - el proyecto `.puestos.json`.
+1. **Plan** — three guided tasks, each with its status. The pending task turns on its tool and shows the instruction over the plan.
+   - **Scale:** read from the file (DXF units, or the scale saved in PDFs exported by the app) or estimated from the size of the doors. **Calibrate with a known length:** two clicks on something you know.
+   - **Area to furnish:** detected automatically (the sheet frame is ignored). If it is wrong, **click inside the area**, or **Draw outline** with snapping to the drawing.
+   - **Main entrance:** if the app picked the widest door it asks you to confirm. **Mark it on the plan** or **Draw door** if none was found.
+   - Optional settings: exits, obstacles and areas, layer roles and **Export base plan**.
+2. **Circulation** — walking routes, drawn before the desks.
+   - The app calculates a path from the main entrance to **every office door and exit**. They run along walls and obstacles like a real corridor, with straight horizontal and vertical runs, and paths that run almost side by side are merged into one band.
+   - **Office-to-office paths** (toggle) are secondary: each office door is linked to its two nearest ones. They start unchecked; check the ones the optimizer must keep.
+   - **Checked paths are kept clear:** no desk or chair goes on them. Unchecked ones are only drawn.
+   - **Edit a path:** click it on the plan (or in the list) to see its nodes. Drag a **node** to move it (it snaps to line up with its neighbours), drag the **bar** in the middle of a run to shift the whole run sideways, double-click a run to add a node, select a node and press **Delete** to remove it. The ends slide along their door.
+   - **Widths:** a general width for entrance paths (1.20 m) and for office-to-office paths (0.90 m), and an optional width per path. **Recalculate** keeps the paths you edited by hand.
+3. **Desks**
+   - For the types you know the number of (for example 5 L desks and 5 pairs), type the number: they are placed first, always.
+   - For the others turn on **As many as fit**: the optimizer places all that fit.
+   - If you turn it on for a **flexible** type (island or bench, built to whatever length is needed) and a **single** one (individual or pair), the flexible one fills the large areas and the single one fills the small gaps (a filler seat is worth 0.7 of a seat in a row).
+   - The bin icon next to the name **deletes the type** (and its desks on the plan).
+   - **Estimate capacity** works out how many of each type fit on their own.
+   - **Place by hand:** click on the plan to place desks of a type (R rotates 90°, F flips the chair side). They stay pinned: they count toward the numbers and the optimization places the rest around them.
+   - Under *Dimensions* of each type, **free space around**: chair side (by default the one in *Rules*), back, left and right.
+   - **Studio:** design your own desk from rectangles, with chairs and clearances.
+4. **Rules** — simple cards with a small drawing each.
+   - **Priority:** *Most seats* (every seat counts, desks go into any gap), *Balanced* (default: a lone desk or an extra row direction must be worth more than one seat) or *Tidy* (clean rows first, may give up a few seats).
+   - **Space for people:** chair space, space between rows (chairs back to back, chair to the back of a desk) and the narrowest gap between desks.
+   - **Clearances:** walls (0.20 m by default; each wall can have its own value), columns (0.20 m), fixed offices (0.30 m), doors (leaf swing + 0.60 m) and an optional entrance lobby.
+   - **Circulation:** path widths and whether the optimizer keeps them clear; optional main corridor.
+   - **Layout style:** one direction for all rows, break long rows, desks against walls, row order.
+   - **More rules:** the full catalog (egress distances, daylight, privacy, density, organization…), off by default.
+   - **Find values that gain seats** tries each measure and shows the gain next to it, with **Apply**.
+   - Always true: every seat can be reached (no seat boxed in) and no door is blocked.
+5. **Organization** (optional): roles with color, desk type, noise level and an element they should be near; clients; how many people of each role each client has; affinity between roles.
+6. **Optimize**
+   - The search **stops by itself** when a while passes without improvements (more patience on large plans or with few cores; 2 min cap). **Keep searching** continues from the layout you are looking at.
+   - After building the rows, a **gap filler** looks for more desks in both directions, preferring those with their back to a wall or back to back; each one is checked against all the rules.
+   - **Add desks by hand** (after optimizing): choose the type and move it over the plan; green means it fits, red tells you what it breaks. When you drop it the engine also checks access and warns you if something fails (Ctrl+Z removes it).
+   - **Best layouts found:** the N best different layouts (10 by default) with a preview; click to see one on the plan.
+   - **Find better values:** lowers each measure to its reasonable minimum and tries other desk types; each try is a full optimization and can be **Used** directly.
+   - **Lock seats:** select desks and use "Pin and lock". In the next optimization they stay in place with their people (role and client) and the rest is optimized.
+   - **Export:**
+     - a DXF in the coordinates of the original plan, to insert as an external reference;
+     - a **scaled vector PDF** (A4 to A0, automatic scale or 1:N) with the plan, circulation paths, numbered seats, colors by type/role/client, legend and indicators;
+     - a CSV with number, type, role, client, position and warnings of each seat;
+     - the `.seats.json` project (older `.puestos.json` projects still open).
 
-### Edición y selección como en AutoCAD
+### Editing and selection like AutoCAD
 
-| Acción | Cómo |
+| Action | How |
 |---|---|
-| Selección por ventana (azul) | Arrastrar de **izquierda a derecha**: toma lo que queda completamente adentro |
-| Selección por captura (verde) | Arrastrar de **derecha a izquierda**: toma todo lo que toque |
-| Agregar / quitar | Una selección nueva reemplaza la anterior; **Ctrl** + clic o barrido suma, **Shift** + clic o barrido quita |
-| Mover | Arrastrar lo seleccionado, o flechas (100 mm; Shift = 500 mm) |
-| Girar 90° | **R**: escritorios u obstáculos seleccionados, sobre su centro |
-| Invertir puerta | Botón «Invertir sentido» con la puerta seleccionada |
-| Fijar y bloquear personas | **P** o botón de la barra de selección |
-| Borrar | **Supr** |
-| Deshacer / rehacer | **Ctrl+Z** / **Ctrl+Y** (o Ctrl+Shift+Z) |
-| Seleccionar todos los escritorios | **Ctrl+A** |
-| Limpiar selección / salir de herramienta | **Esc** |
-| Desplazar / zoom | Botón derecho o central + arrastrar / rueda |
+| Window selection (blue) | Drag **left to right**: takes what is fully inside |
+| Crossing selection (green) | Drag **right to left**: takes everything it touches |
+| Add / remove | A new selection replaces the previous one; **Ctrl** + click or drag adds, **Shift** + click or drag removes |
+| Move | Drag the selection, or arrow keys (100 mm; Shift = 500 mm) |
+| Rotate 90° | **R**: selected desks or obstacles, about their center |
+| Flip a door | "Flip swing" button with the door selected |
+| Pin and lock people | **P** or the selection bar button |
+| Delete | **Delete** |
+| Undo / redo | **Ctrl+Z** / **Ctrl+Y** (or Ctrl+Shift+Z) |
+| Select all desks | **Ctrl+A** |
+| Clear selection / leave tool | **Esc** |
+| Pan / zoom | Right or middle button + drag / wheel |
 
-Lo que se mueve o gira a mano queda fijado. Después de cada edición la app recalcula los avisos (superposiciones, accesos, recorridos) sin mover nada.
+Whatever you move or rotate by hand stays pinned. After each edit the app recalculates the warnings (overlaps, access, travel) without moving anything.
 
-### Plano base (simplificado)
+### Base plan (simplified)
 
-En *Plano → Exportar plano base* se genera el plano mínimo para optimizar, en DXF y PDF a escala:
+*Plan → Export base plan* generates the minimal plan for optimizing, as DXF and scaled PDF:
 
-- **Contenido:** contorno del área amoblable, oficinas y recintos, columnas, zonas con despeje y puertas (hoja + barrido).
-- **Capas estándar:** `A-MURO-EXT`, `A-OFICINA-FIJA`, `A-RECINTOS`, `A-EDIFICIO`, `A-COLUMNA`, `A-PUERTA-PPAL`, `A-PUERTA-SALIDA`, `A-PUERTA-OFICINA`, `A-PUERTA-VANO`.
-- **Escala:** el PDF guarda capas y escala, así que reimportarlo no pide asignar capas ni calibrar.
+- **Content:** outline of the usable area, offices and rooms, columns, areas with clearance and doors (leaf + swing).
+- **Standard layers:** `A-MURO-EXT`, `A-OFICINA-FIJA`, `A-RECINTOS`, `A-EDIFICIO`, `A-COLUMNA`, `A-PUERTA-PPAL`, `A-PUERTA-SALIDA`, `A-PUERTA-OFICINA`, `A-PUERTA-VANO`.
+- **Scale:** the PDF keeps layers and scale, so importing it again needs no layer setup or calibration.
 
-También se puede exportar:
+You can also export:
 
-- **Líneas simples:** el dibujo original reducido a lo esencial. Cada muro (doble línea, fachada o vidrio) queda como **una sola línea** a eje; además columnas, escaleras y ascensores como bloque, puertas (hoja + arco) y el rótulo de las oficinas. Capas `MUROS`, `COLUMNAS`, `NUCLEO`, `PUERTAS`, `A-PUERTA-PPAL`, `TEXTO`. Delimita la misma área que el original, así que también sirve para reimportar.
-- El dibujo original completo quitando solo las capas de «Mobiliario existente».
+- **Single lines:** the original drawing reduced to the essentials. Each wall (double line, facade or glass) becomes **one centerline**; plus columns, stairs and elevators as blocks, doors (leaf + arc) and office labels. Layers `MUROS`, `COLUMNAS`, `NUCLEO`, `PUERTAS`, `A-PUERTA-PPAL`, `TEXTO`. It bounds the same area as the original, so it can be imported again.
+- The full original drawing with only the "Existing furniture" layers removed.
 
-En *Plano → Capas del dibujo*, el ícono de papelera **borra todas las líneas y objetos de esa capa** (si la capa afectaba el área, se vuelve a detectar).
+In *Plan → Drawing layers* the bin icon **deletes all the lines and objects of that layer** (if the layer affected the area, it is detected again).
 
-### Separaciones editables en el plano
+### Clearances you can edit on the plan
 
-Clic sobre el **borde del recinto**: aparece una cota dorada por arista con la separación hacia adentro (0 por defecto); los tramos curvos, dibujados con muchas aristas cortas, comparten una sola medida.
+Click the **area outline**: a gold dimension per edge shows its clearance inward (the general wall clearance by default); curved stretches drawn with many short edges share one value.
 
-Clic sobre una **oficina, columna o zona**: su separación aparece en dorado con una cota por lado (o una sola si no es rectangular). Clic en el número para escribir la medida en metros (Enter). Lo mismo con una **puerta** (fondo y ancho libres) y con un **escritorio** (silla, atrás, izquierda, derecha; se aplica a todo su tipo).
+Click an **office, column or area**: its clearance shows in gold with one dimension per side (or a single one if it is not rectangular). Click the number to type the value in meters (Enter), or drag the gold line. The same works for a **door** (free depth and width) and a **desk** (chair, back, left, right; it applies to the whole type).
 
-### Cuadrícula
+### Grid
 
-Abajo a la derecha: mostrar la cuadrícula, **Snap** y su tamaño.
+Bottom right: show the grid, **Snap** and its size.
 
-- Con Snap, el cursor se engancha a la cuadrícula. Al dibujar, colocar o mover también se engancha, con prioridad, a **vértices** (cuadrado) y **bordes** (×) del recinto, oficinas, columnas y líneas del dibujo; sobre un borde se queda en la línea de cuadrícula más cercana.
-- **Barra espaciadora sostenida**: sin enganche mientras la mantienes. **Ctrl+Espacio**: activa o desactiva el Snap.
+- With Snap the cursor snaps to the grid. When drawing, placing or moving it also snaps, first, to **corners** (square) and **edges** (×) of the area, offices, columns and drawing lines; on an edge it stays on the nearest grid line.
+- **Hold the space bar** to release snapping for a moment. **Ctrl+Space** turns Snap on or off.
 
-### Tema
+### Theme
 
-Arriba a la derecha: Claro, Oscuro o Sistema (sigue la configuración de Windows).
+Top right: color palette and Light, Dark or System (follows the operating system). It collapses and unfolds when you hover it.
 
-## Convención de capas recomendada
+## Recommended layer names
 
-Si dibujas tus plantas con estas capas, la importación es directa (los planos de `samples/` las usan). Con otros nombres se asignan a mano una sola vez.
+If you draw your plans with these layers the import is direct (the plans in `samples/` use them). With other names you assign them by hand once.
 
-| Capa | Contenido |
+| Layer | Content |
 |---|---|
-| `A-MURO-EXT` | Polilínea cerrada del recinto |
-| `A-COLUMNA` | Columnas (cerradas) |
-| `A-OFICINA-FIJA` | Oficinas, salas, baños, núcleos |
-| `A-PUERTA-PPAL` / `A-PUERTA-SALIDA` / `A-PUERTA-OFICINA` | Vano + hoja + arco de giro |
-| `A-VENTANA` | Tramos de fachada con ventana |
-| `A-ZONA-RESTRINGIDA` | Tableros, gabinetes contra incendio |
+| `A-MURO-EXT` | Closed polyline of the area |
+| `A-COLUMNA` | Columns (closed) |
+| `A-OFICINA-FIJA` | Offices, meeting rooms, toilets, cores |
+| `A-PUERTA-PPAL` / `A-PUERTA-SALIDA` / `A-PUERTA-OFICINA` | Opening + leaf + swing arc |
+| `A-VENTANA` | Facade stretches with windows |
+| `A-ZONA-RESTRINGIDA` | Electrical panels, fire cabinets |
 
-Los PDF exportados desde AutoCAD conservan las capas (Optional Content Groups) y la app las lee igual que en un DXF.
+PDFs exported from AutoCAD keep their layers (Optional Content Groups) and the app reads them just like a DXF.
 
-## Cómo funciona el optimizador
+## How the optimizer works
 
-Es un enfoque de *test-fit* / diseño generativo, como el de las herramientas comerciales de planeación de espacios.
+It is a *test-fit* / generative design approach, like the commercial space-planning tools.
 
-1. **Raster del piso** (50–100 mm por celda): área libre, obstáculos, despejes de puertas, vestíbulo de entrada y buffers alrededor de columnas, tableros y oficinas.
-2. **Pasillo principal primero.** Es un árbol de caminos desde la puerta principal hasta las salidas, calculado con Dijkstra con penalización de giros. Hay tres estilos: el más corto, por el centro y paralelo a los muros. Lo que queda se divide en **zonas**.
-3. **Llenado por filas.** Cada zona se llena con filas paralelas a un ángulo candidato (los ángulos dominantes de los muros, incluido 45°).
-   - En cada fila los módulos se agrupan en bloques de hasta *E3* puestos por lado, separados por un paso transversal.
-   - Entre filas se respetan *E2* (silla-silla, silla-espalda o espaldas pegadas).
-   - Las verificaciones son O(1) por columna gracias a «corridas verticales» precalculadas.
-4. **Validación sobre el piso amoblado.**
-   - Cada silla debe alcanzarse desde la puerta principal por pasillos del ancho mínimo (transformada de distancia + Dijkstra por cubetas).
-   - Se verifican el recorrido máximo a una salida, el recorrido común, las puertas no bloqueadas y los puestos accesibles en silla de ruedas.
-   - Un módulo con un puesto inválido se descarta.
-5. **Puntaje lexicográfico.** `100 000 × puestos fijos sin ubicar + 10 000 × puestos «máximo posible» que faltan (7 000 si es relleno) + 1 000 000 × reglas duras incumplidas + métricas blandas`. Ubicar los fijos siempre domina; después, más puestos; a igual cantidad, menos módulos sueltos.
-6. **Búsqueda.**
-   - Recocido simulado en paralelo sobre el «genoma»: ángulo, desfase, lado de inicio, alineación, emparejamiento y orden de tipos por zona, más la variante de pasillo.
-   - Arranca con un multi-inicio barato que usa solo el decodificador.
-   - Usa caché de disposiciones ya evaluadas.
-7. **Asignación de personas.** Recocido por intercambios con costos unarios (rol ↔ tipo de escritorio, rol cerca de un elemento, reglas propias) y por pares (bloques por cliente, afinidad, separación acústica).
+1. **Floor raster** (50–100 mm per cell): free area, obstacles, door clearances, entrance lobby, buffers around columns, panels and offices, and the **kept circulation paths** as clear bands.
+2. **Circulation first.** Paths are routed on the empty floor with Dijkstra (preferring to run along walls at half their width), then drawn with orthogonal runs and merged where they run side by side. An optional main corridor can be added too.
+3. **Row filling.** Each zone is filled with parallel rows at a candidate angle (the dominant wall angles, 45° included).
+   - In each row the desks are grouped in blocks of up to *E3* seats per side, separated by a cross gap.
+   - Between rows *E2* is respected (chair to chair, chair to back, or backs together).
+   - Checks are O(1) per column thanks to precomputed "vertical runs".
+4. **Validation on the furnished floor.**
+   - No seat may be boxed in: every chair is reached through gaps at least the narrowest-gap width (chairs move); comfortable aisles are preferred.
+   - Optional egress rules: maximum travel to an exit, common travel, wheelchair-accessible seats; doors must not be blocked.
+   - A desk with an invalid seat is discarded.
+5. **Lexicographic score.** `100,000 × fixed seats not placed + 10,000 × "as many as fit" seats missing (7,000 for filler) + 1,000,000 × hard rules broken + tidiness (in seats: lone desks and extra row directions, set by the priority) + soft metrics`. Placing the fixed desks always dominates; then more seats; with the same seats, tidier layouts with fewer separate desks.
+6. **Search.**
+   - Parallel simulated annealing over the "genome": angle, offset, start side, alignment, pairing and type order per zone, plus the corridor variant.
+   - It starts with a cheap multi-start that uses only the decoder.
+   - It caches layouts already evaluated.
+7. **Seating people.** Annealing by swaps with unary costs (role ↔ desk type, role near an element, custom rules) and pairwise costs (client blocks, affinity, acoustic separation).
 
-## Reglas del motor
+## Engine rules
 
-La pantalla *Espacios* muestra solo las medidas de capacidad. El motor conserva el catálogo completo de reglas (en el proyecto `.puestos.json`), pero por defecto solo están activas las de circulación, sillas, puertas, columnas y oficinas; las de evacuación por distancia, luz, privacidad y densidad vienen apagadas.
+The *Rules* screen shows the rules that decide capacity and look. The engine keeps the full catalog (saved in the project), but by default only circulation paths, chair space, rows, narrowest gap, walls, columns, offices, doors and reserved areas are on; egress distances, daylight, privacy and density are off.
 
-| ID | Regla | ID | Regla |
+| ID | Rule | ID | Rule |
 |---|---|---|---|
-| C1 | Pasillo principal (ancho, salidas, oficinas, tramos rectos) | E5 | No mezclar tipos en una bancada |
-| C2 | Paso mínimo entre escritorios (obligatorio) y ancho preferido de pasillos | E6 | Orientaciones permitidas (muros inclinados) |
-| C3 | Vestíbulo libre en la puerta principal | E7 | Misma dirección en todas las bancadas |
-| C4 | Despeje en puertas (barrido + espacio al frente) | E8 | Escritorios contra el muro |
-| C5 | Recorrido máximo hasta una salida 🔒 | O1 | Separación a columnas |
-| C6 | Recorrido común 🔒 | O2 | Despeje de tableros y gabinetes 🔒 |
-| C7 | Todos los puestos y puertas accesibles 🔒 | O3 | Distancia a oficinas fijas |
-| C8 | Puestos accesibles en silla de ruedas | O4 | Zonas reservadas |
-| E1 | Espacio para la silla | A1–A6 | Ventana lateral, espaldas, pantallas, luz, densidad, reserva |
-| E2 | Separación entre filas | R1–R5 | Rol↔tipo, clientes en bloque, afinidad, cercanía, acústica |
-| E3 | Máx. puestos seguidos por lado | | |
-| E4 | Distancia máx. de la silla al pasillo | | |
+| P1 | Circulation paths (widths; kept clear) | E4 | Maximum distance from chair to aisle |
+| C1 | Main corridor (width, exits, offices, straight runs) | E5 | Do not mix types in a bench |
+| C2 | Narrowest gap between desks (required) and preferred aisle width | E6 | Allowed directions (slanted walls) |
+| C3 | Entrance lobby | E7 | Same direction for all rows |
+| C4 | Door clearance (swing + space in front) | E8 | Desks against walls (clearance to walls) |
+| C5 | Maximum travel to an exit 🔒 | O1 | Clearance to columns |
+| C6 | Common path of travel 🔒 | O2 | Panel and cabinet clearance 🔒 |
+| C7 | No seat boxed in, no door blocked 🔒 | O3 | Clearance to fixed offices |
+| C8 | Wheelchair-accessible seats | O4 | Reserved areas |
+| E1 | Chair space | A1–A6 | Window beside the monitor, backs, screens, daylight, density, reserve |
+| E2 | Space between rows | R1–R5 | Role↔type, client blocks, affinity, nearness, acoustics |
+| E3 | Maximum seats in a row | | |
 
-Los valores por defecto son referencias típicas. **Verifica los de evacuación con la NSR-10, Título K.**
+The default values are typical references. **Check the egress values against your local building code.**
 
-## Estructura
+## Structure
 
 ```
-crates/core        núcleo en Rust (sin interfaz)
-  import/            DXF (bloques, bulges, splines), PDF con capas OCG, DWG vía convertidor
-  analyze.rs         roles de capas, escala, recinto por inundación, puertas, ventanas
-  engine/            ctx (raster, pasillos, zonas), decode (filas), eval (validación y puntaje),
-                     search (recocido, exploración, capacidad, sugerencias), custom (reglas propias)
-  assign.rs          roles y clientes
-  export.rs          DXF R12 y CSV
-  pdf_out.rs         PDF vectorial a escala y DXF sin mobiliario
-  simple.rs          plano de líneas simples (muros a eje por adelgazamiento)
-  engine/fill.rs     relleno de huecos después de las filas
-  api.rs             fachada JSON + trabajos en segundo plano
-crates/devserver   servidor HTTP con la misma API (modo navegador)
-crates/web         el mismo núcleo compilado a WebAssembly (versión web)
-scripts/           build-wasm.sh: compila crates/web en dos variantes (con hilos y de un hilo)
-.github/workflows  pages.yml: publica la versión web en GitHub Pages
-src-tauri          app de escritorio
-ui                 interfaz React + TypeScript
-samples            planos de prueba (DXF, PDF) y su generador
+crates/core        Rust core (no interface)
+  import/            DXF (blocks, bulges, splines), PDF with OCG layers, DWG through a converter
+  analyze.rs         layer roles, scale, area by flood fill, doors, windows
+  engine/            ctx (raster, corridors, zones), decode (rows), eval (validation and score),
+                     search (annealing, exploration, capacity, suggestions), custom (own rules),
+                     circulation (paths to the doors), fill (gap filler)
+  assign.rs          roles and clients
+  export.rs          DXF R12 and CSV
+  pdf_out.rs         scaled vector PDF and DXF without furniture
+  simple.rs          single-line plan (wall centerlines by thinning)
+  api.rs             JSON facade + background jobs
+crates/devserver   HTTP server with the same API (browser mode)
+crates/web         the same core compiled to WebAssembly (web version)
+scripts/           build-wasm.sh: builds crates/web in two variants (threads and single thread)
+.github/workflows  pages.yml: publishes the web version on GitHub Pages
+src-tauri          desktop app
+ui                 React + TypeScript interface
+samples            sample plans (DXF, PDF) and their generator
 ```
 
-Pruebas: `cargo test --release -p seat_core` (incluye el PDF real y los planos de muestra).
-Herramientas de consola: `cargo run --release -p seat_core --example run -- plano.dxf salida.svg isla_flex=40,recto_120=10 8`.
+Tests: `cargo test --release -p seat_core` (sample plans; tests that need a private real plan are skipped when it is missing).
+Console tools: `cargo run --release -p seat_core --example run -- plan.dxf out.svg isla_flex=40,recto_120=10 8` and `--example tidy` (compares the priorities on the samples).
 
-## Limitaciones conocidas
+## Known limitations
 
-- **Textos en PDF.** En los PDF de AutoCAD los textos suelen venir como trazos, así que no se leen los rótulos (OF 08, SALA…). En DXF sí se leen.
-- **Puerta principal.** Si no hay capa de puerta principal, se marca la puerta más ancha, que puede no ser el acceso; revísalo.
-- **Pasillo principal.** Se traza a 0°, 45° y 90° de la rejilla del dibujo. En plantas giradas un ángulo no múltiplo de 45° queda escalonado (las filas de escritorios sí siguen el ángulo de los muros).
-- **Velocidad.** El tiempo de búsqueda escala con los núcleos del procesador. Con 8 núcleos, 10–20 s bastan para una planta de ~800 m².
+- **Text in PDFs.** In AutoCAD PDFs text usually comes as strokes, so labels (OF 08, ROOM…) are not read. In DXF they are.
+- **Main entrance.** Without a main-entrance layer the widest door is marked, which may not be the entrance; check it.
+- **Main corridor.** It is routed at 0°, 45° and 90° to the drawing grid. In plans rotated by an angle that is not a multiple of 45° it comes out stepped (desk rows still follow the wall angle).
+- **Speed.** Search time scales with the processor cores. With 8 cores, 10–20 s are enough for a ~800 m² floor.

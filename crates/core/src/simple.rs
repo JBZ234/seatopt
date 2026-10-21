@@ -177,13 +177,13 @@ pub fn simple_plan(d: &Drawing, opts: &AnalyzeOptions, plan: &Plan, so: &SimpleO
     for r in &plan.rooms {
         let a = polygon_area(&r.poly).abs() / 1e6;
         if (6.0..60.0).contains(&a) {
-            let l = if r.label.is_empty() { "Oficina".to_string() } else { r.label.clone() };
+            let l = if r.label.is_empty() { "Office".to_string() } else { r.label.clone() };
             labels.push((centroid(&r.poly), l));
         }
     }
     for o in &plan.obstacles {
         if o.kind == ObstacleKind::FixedOffice {
-            labels.push((centroid(&o.poly), if o.label.is_empty() { "Oficina".into() } else { o.label.clone() }));
+            labels.push((centroid(&o.poly), if o.label.is_empty() { "Office".into() } else { o.label.clone() }));
         }
     }
     SimplePlan { walls, columns: cols, cores, doors, region: plan.region.clone(), labels }

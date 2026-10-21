@@ -12,11 +12,11 @@ export RUSTC_BOOTSTRAP=1   # -Z build-std (std con atomics) sin cambiar de toolc
 BASE_FLAGS='--cfg getrandom_backend="wasm_js"'
 STD='-Z build-std=std,panic_abort'
 
-echo "== motor web: un hilo"
+echo "== web engine: single thread"
 RUSTFLAGS="$BASE_FLAGS" CARGO_TARGET_DIR=target/wasm-st \
   cargo build --release -p seat_web --target wasm32-unknown-unknown $STD
 
-echo "== motor web: con hilos"
+echo "== web engine: with threads"
 RUSTFLAGS="$BASE_FLAGS -C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--max-memory=4294967296 -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base" \
   CARGO_TARGET_DIR=target/wasm-mt \
   cargo build --release -p seat_web --features threads --target wasm32-unknown-unknown $STD
@@ -28,4 +28,4 @@ for v in st mt; do
 done
 # wasm-bindgen-rayon importa el módulo principal como "../../.." desde sus snippets
 printf "export * from './seat.js';\nexport { default } from './seat.js';\n" > ui/src/wasm/mt/index.js
-echo "== listo: ui/src/wasm"
+echo "== done: ui/src/wasm"

@@ -182,7 +182,7 @@ pub fn import_bytes(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     } else if lower.ends_with(".dxf") {
         dxf_in::read_dxf(name, bytes)
     } else if lower.ends_with(".dwg") {
-        Err("Los archivos DWG se convierten primero a DXF con ODA File Converter o LibreDWG (ver Configuración).".into())
+        Err("DWG files are first converted to DXF with ODA File Converter or LibreDWG (see Settings).".into())
     } else {
         Err(format!("Formato no soportado: {name}"))
     }

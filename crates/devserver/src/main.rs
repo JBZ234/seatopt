@@ -8,8 +8,8 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let port = args.get(1).cloned().unwrap_or_else(|| "8787".into());
     let ui = args.get(2).cloned().unwrap_or_else(|| "ui/dist".into());
-    let server = Server::http(format!("127.0.0.1:{port}")).expect("no se pudo abrir el puerto");
-    eprintln!("Optimizador de puestos: http://127.0.0.1:{port}  (UI desde {ui})");
+    let server = Server::http(format!("127.0.0.1:{port}")).expect("could not open the port");
+    eprintln!("Seats optimizer: http://127.0.0.1:{port}  (UI from {ui})");
     for mut req in server.incoming_requests() {
         let url = req.url().to_string();
         let json = Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap();
@@ -24,7 +24,7 @@ fn main() {
             } else {
                 match serde_json::from_slice::<serde_json::Value>(&body) {
                     Ok(args) => api::dispatch(cmd, args),
-                    Err(e) => Err(format!("JSON inválido: {e}")),
+                    Err(e) => Err(format!("Invalid JSON: {e}")),
                 }
             };
             let (code, payload) = match result {
@@ -57,7 +57,7 @@ fn main() {
                 let _ = req.respond(Response::from_data(bytes).with_header(Header::from_bytes("Content-Type", ct).unwrap()));
             }
             Err(_) => {
-                let _ = req.respond(Response::from_string("Compila la interfaz primero: cd ui && npm run build").with_status_code(404));
+                let _ = req.respond(Response::from_string("Build the interface first: cd ui && npm run build").with_status_code(404));
             }
         }
     }

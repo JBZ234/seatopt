@@ -10,7 +10,10 @@ export interface Door { id: string; kind: DoorKind; a: Pt; b: Pt; label: string;
 export interface Window { a: Pt; b: Pt }
 
 export interface Room { poly: Pt[]; label: string }
-export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[]; rooms?: Room[]; building?: Pt[]; regionClear?: number[][] }
+export type PathKind = 'primary' | 'secondary';
+/** Circulation path: centerline + clear width. Kept paths stay free of desks and chairs. */
+export interface CircPath { id: string; kind: PathKind; from: string; to: string; pts: Pt[]; width?: number | null; keep: boolean; edited?: boolean }
+export interface Plan { region: Pt[][]; obstacles: Obstacle[]; doors: Door[]; windows: Window[]; rooms?: Room[]; building?: Pt[]; regionClear?: number[][]; paths?: CircPath[] }
 
 export type DeskShape = 'straight' | 'l' | 'custom';
 /** Silla de un escritorio propio: posición local (mm, +y = lado principal) y hacia dónde mira. */
@@ -57,6 +60,8 @@ export interface Organization { roles: Role[]; clients: Client[]; teams: TeamCou
 export interface Weights {
   order: number; daylight: number; windowSide: number; privacy: number;
   travel: number; compact: number; reserve: number; grouping: number; wall: number;
+  /** Tidiness in seats: cost of a lone desk or an extra row direction (0 = seats only). */
+  tidy?: number;
 }
 export interface Settings { resolution: number; timeLimit: number; seed: number; alternatives: number; resume?: unknown }
 

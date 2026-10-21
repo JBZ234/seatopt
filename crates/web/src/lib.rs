@@ -20,9 +20,9 @@ fn wrap(r: Result<serde_json::Value, String>) -> String {
 pub fn call(cmd: &str, args: &str) -> String {
     let args: serde_json::Value = match serde_json::from_str(args) {
         Ok(v) => v,
-        Err(e) => return wrap(Err(format!("JSON inválido: {e}"))),
+        Err(e) => return wrap(Err(format!("Invalid JSON: {e}"))),
     };
-    let r = std::panic::catch_unwind(|| api::dispatch(cmd, args)).unwrap_or_else(|_| Err("Error interno del motor".into()));
+    let r = std::panic::catch_unwind(|| api::dispatch(cmd, args)).unwrap_or_else(|_| Err("Internal engine error".into()));
     wrap(r)
 }
 
@@ -30,7 +30,7 @@ pub fn call(cmd: &str, args: &str) -> String {
 #[wasm_bindgen]
 pub fn import_bytes(name: &str, bytes: &[u8]) -> String {
     if name.to_lowercase().ends_with(".dwg") {
-        return wrap(Err("La versión web no lee DWG. Guárdalo como DXF desde AutoCAD (o usa la app de escritorio).".into()));
+        return wrap(Err("The web version does not read DWG. Save it as DXF from AutoCAD (or use the desktop app).".into()));
     }
     wrap(api::import_bytes(name, bytes).map(|v| serde_json::to_value(v).unwrap()))
 }

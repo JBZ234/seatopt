@@ -1,7 +1,7 @@
 // ¿Cabe un escritorio aquí? Revisión geométrica rápida (para la vista previa al colocar a mano):
 // recinto, obstáculos y sus separaciones, despejes de puertas, pasillo principal y otros escritorios
 // con sus sillas. La revisión completa (acceso a cada puesto, recorridos) la hace el motor al colocarlo.
-import { chairClear, deskBody, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, regionInfo, ruleVal, wallDefault } from './clear';
+import { chairClear, deskBody, deskDims, doorInfo, isTwo, moduleInfo, obstacleInfo, pathZones, regionInfo, ruleVal, wallDefault } from './clear';
 import type { Config, DeskType, Layout, Plan, Pt } from './types';
 
 function pip(p: Pt, poly: Pt[]) {
@@ -59,6 +59,7 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
   const wallClear = plan.region.flatMap((_, i) => regionInfo(plan, i, wallDefault(config)).zones).map(shape);
   const doorZones = [...plan.doors.filter((d) => d.kind !== 'ignore').flatMap((d) => doorInfo(config, plan, d).zones), ...(layout?.keepouts ?? [])].map(shape);
   const corridor = (layout?.corridors ?? []).map(shape);
+  const paths = pathZones(config, plan).map(shape);
   const mods = layout?.modules ?? [];
   const bodies = mods.map((m) => shape(m.body));
   const otherClear = mods.flatMap((m) => { const tt = config.catalog.find((x) => x.id === m.typeId); return tt ? moduleInfo(config, m, tt).zones : []; }).map(shape);
@@ -67,7 +68,7 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
   const e2ss = ruleVal(config, 'E2', 'silla_silla') ?? 0, e2se = ruleVal(config, 'E2', 'silla_espalda') ?? 0;
   const chairD = ruleVal(config, 'E1', 'silla') ?? 500;
   const e2why: string[] = [];
-  const m2 = (mm: number) => (mm / 1000).toFixed(2).replace('.', ',');
+  const m2 = (mm: number) => (mm / 1000).toFixed(2);
   const others = layout?.seats ?? [];
   for (const sd of sides) {
     const f = { x: -v.x * sd, y: -v.y * sd }; // hacia el escritorio desde la silla
@@ -82,10 +83,10 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
         const e = { x: o.pos.x + o.facing.x * chairD * 0.5, y: o.pos.y + o.facing.y * chairD * 0.5 };
         return pip(e, z);
       });
-      if (bad) e2why.push(`Silla espalda con espalda con el puesto ${bad.number}: entre escritorios deben quedar ${m2(e2ss)} m (regla «silla con silla»)`);
+      if (bad) e2why.push(`Chair back to back with seat ${bad.number}: ${m2(e2ss)} m are needed between the desks (rule “chairs back to back”)`);
     }
     if (e2se > 0 && hits(samples({ c: center, u, v: { x: v.x * sd, y: v.y * sd }, a0: -hl + 60, a1: hl - 60, b0: hd, b1: hd + e2se - 25 }), bodies)) {
-      e2why.push(`Detrás de la silla quedan menos de ${m2(e2se)} m hasta otro escritorio (regla «silla con espalda»)`);
+      e2why.push(`Less than ${m2(e2se)} m behind the chair to another desk (rule “chair to the back of a desk”)`);
     }
   }
   // y al revés: el escritorio nuevo no puede quedar detrás de la silla de otro a menos de esa medida
@@ -99,7 +100,7 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
       ];
       return body.some((p) => pip(p, z));
     });
-    if (bad) e2why.push(`Queda a menos de ${m2(e2se)} m detrás de la silla del puesto ${bad.number} (regla «silla con espalda»)`);
+    if (bad) e2why.push(`It is less than ${m2(e2se)} m behind the chair of seat ${bad.number} (rule “chair to the back of a desk”)`);
   }
 
   // escritorios en L o del Studio: la silla tiene que tener por dónde salir (no encajonada contra los muros)
@@ -113,20 +114,21 @@ export function checkDesk(plan: Plan, config: Config, layout: Layout | null, t: 
         // un paso de ancho mínimo hacia afuera: tres puntos seguidos libres
         return [0.6, 1.0, 1.4].every((f) => freeAt({ x: c.x + Math.cos(r) * (sq * f + 250), y: c.y + Math.sin(r) * (sq * f + 250) }));
       });
-      if (!ok) e2why.push('La silla queda encajonada: no tiene por dónde salir');
+      if (!ok) e2why.push('The chair is boxed in: there is no way out');
     }
   }
 
   const why = new Set<string>();
   const all = [...body, ...chair, ...extra];
-  if (all.some((p) => !inRegion(p, plan.region))) why.add('Se sale del recinto o choca con un muro');
-  if (hits(body, obst)) why.add('Choca con una oficina, columna o zona');
-  if (hits([...chair, ...extra], obst)) why.add('La silla no tiene espacio: hay una oficina o columna detrás');
-  if (hits(body, obstClear) || hits(body, wallClear)) why.add('Invade la separación de una oficina, columna o muro');
-  if (hits([...body, ...chair], doorZones)) why.add('Invade el despeje de una puerta o de la entrada');
-  if (hits([...body, ...chair], corridor)) why.add('Invade el pasillo principal');
-  if (hits(body, bodies)) why.add('Se monta sobre otro escritorio');
-  else if (hits([...chair, ...extra], bodies) || hits(body, otherClear)) why.add('Queda sin espacio con otro escritorio (sillas o separación)');
+  if (all.some((p) => !inRegion(p, plan.region))) why.add('It goes out of the area or hits a wall');
+  if (hits(body, obst)) why.add('It hits an office, column or area');
+  if (hits([...chair, ...extra], obst)) why.add('No room for the chair: there is an office or column behind');
+  if (hits(body, obstClear) || hits(body, wallClear)) why.add('It is inside the clearance of an office, column or wall');
+  if (hits([...body, ...chair], doorZones)) why.add('It blocks the clearance of a door or the entrance');
+  if (hits([...body, ...chair], corridor)) why.add('It is on the main corridor');
+  if (hits([...body, ...chair], paths)) why.add('Blocks a circulation path');
+  if (hits(body, bodies)) why.add('It overlaps another desk');
+  else if (hits([...chair, ...extra], bodies) || hits(body, otherClear)) why.add('Not enough room next to another desk (chairs or clearance)');
   e2why.forEach((w) => why.add(w));
   return [...why];
 }

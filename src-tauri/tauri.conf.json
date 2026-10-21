@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Optimizador de Puestos",
+  "productName": "Seats",
   "version": "0.1.0",
   "identifier": "co.seatopt.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Optimizador de Puestos",
+        "title": "Seats — office layout optimizer",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,

@@ -326,7 +326,7 @@ impl Ctx {
         let plan = &problem.plan;
         let cfg = &problem.config;
         if plan.region.is_empty() {
-            return Err("El plano no tiene recinto.".into());
+            return Err("The plan has no area to furnish.".into());
         }
         let p = P::from_rules(&cfg.rules);
         let mut bb = BBox::empty();
@@ -341,7 +341,7 @@ impl Ctx {
         let f = Frame::covering(bb, res, 600.0);
         let n = f.len();
         if n > 6_000_000 {
-            return Err("El plano es demasiado grande para la resolución elegida. Aumenta el tamaño de celda.".into());
+            return Err("The plan is too large for the chosen resolution. Increase the cell size.".into());
         }
 
         // ------------------------------------------------ libre y obstáculos
@@ -526,7 +526,7 @@ impl Ctx {
         }
         let mut violations = Vec::new();
         if main_seeds.is_empty() {
-            violations.push(Violation { rule_id: "C7".into(), message: "No hay puerta principal marcada (o no toca el recinto).".into(), at: None, hard: true });
+            violations.push(Violation { rule_id: "C7".into(), message: "No main entrance is marked (or it does not touch the area).".into(), at: None, hard: true });
             // usar cualquier puerta como respaldo
             if let Some(d) = doors.first() {
                 main_seeds = d.seeds.clone();
@@ -570,7 +570,7 @@ impl Ctx {
                 if !di.reachable_empty && di.door.kind != DoorKind::Main {
                     violations.push(Violation {
                         rule_id: "C7".into(),
-                        message: format!("La puerta {} no se alcanza desde la entrada ni con el piso vacío (revisa el plano o márcala como «ignorar»).", if di.door.label.is_empty() { &di.door.id } else { &di.door.label }),
+                        message: format!("Door {} cannot be reached from the entrance even on the empty floor (check the plan or mark it as “ignore”).", if di.door.label.is_empty() { &di.door.id } else { &di.door.label }),
                         at: Some(di.door.mid()),
                         hard: false,
                     });
@@ -652,10 +652,10 @@ impl Ctx {
         let n = self.f.len();
         let (corridor, violations, corridor_lines) = if style == 255 { (vec![false; n], vec![], vec![]) } else { self.corridor(style) };
         let name = match style {
-            0 => "Pasillo más corto",
-            1 => "Pasillo por el centro",
-            2 => "Pasillo paralelo a los muros",
-            _ => "Sin pasillo principal",
+            0 => "Shortest corridor",
+            1 => "Corridor through the middle",
+            2 => "Corridor parallel to the walls",
+            _ => "No main corridor",
         }
         .to_string();
         let corridor_polys = if corridor.iter().any(|&b| b) {
@@ -829,7 +829,7 @@ impl Ctx {
                     Some(st) => {
                         viol.push(Violation {
                             rule_id: "C1".into(),
-                            message: format!("El pasillo principal no alcanza {:.0} mm hasta la puerta {}; se usa el ancho secundario.", p.c1_w, if t.door.label.is_empty() { &t.door.id } else { &t.door.label }),
+                            message: format!("The main corridor cannot keep {:.0} mm up to door {}; the secondary width is used.", p.c1_w, if t.door.label.is_empty() { &t.door.id } else { &t.door.label }),
                             at: Some(t.door.mid()),
                             hard: true,
                         });
@@ -838,7 +838,7 @@ impl Ctx {
                     None => {
                         viol.push(Violation {
                             rule_id: "C1".into(),
-                            message: format!("No hay paso desde la entrada hasta la puerta {}.", if t.door.label.is_empty() { &t.door.id } else { &t.door.label }),
+                            message: format!("There is no way from the entrance to door {}.", if t.door.label.is_empty() { &t.door.id } else { &t.door.label }),
                             at: Some(t.door.mid()),
                             hard: true,
                         });

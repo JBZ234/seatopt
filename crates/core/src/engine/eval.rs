@@ -320,7 +320,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
                 ev.hard += 1;
                 ev.violations.push(Violation {
                     rule_id: "C7".into(),
-                    message: format!("La puerta {} quedó bloqueada.", if d.door.label.is_empty() { &d.door.id } else { &d.door.label }),
+                    message: format!("Door {} is blocked.", if d.door.label.is_empty() { &d.door.id } else { &d.door.label }),
                     at: Some(d.door.mid()),
                     hard: true,
                 });
@@ -350,7 +350,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     for (si, s) in seats.iter().enumerate() {
         let mut bad = false;
         if p.c7_on && !seat_access_ok[si] {
-            ev.seat_flags[si].push(format!("Sin acceso: queda encerrado por escritorios (pasos de menos de {:.2} m)", p.squeeze / 1000.0).replace('.', ","));
+            ev.seat_flags[si].push(format!("No access: boxed in by desks (gaps under {:.2} m)", p.squeeze / 1000.0));
             bad = true;
         }
         if need_travel {
@@ -359,7 +359,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
             travel[si] = t;
             if let Some(c5) = p.c5 {
                 if t > c5 {
-                    ev.seat_flags[si].push(format!("Recorrido a salida {:.0} m > {:.0} m", t / 1000.0, c5 / 1000.0));
+                    ev.seat_flags[si].push(format!("Travel to an exit {:.0} m > {:.0} m", t / 1000.0, c5 / 1000.0));
                     bad = true;
                 }
             }
@@ -367,7 +367,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
         if let Some((d4, c6)) = &d4 {
             let t = dial::to_mm(near_min(f, d4, s.access), res);
             if t > *c6 {
-                ev.seat_flags[si].push(format!("Recorrido común {:.0} m > {:.0} m", t.min(99_000.0) / 1000.0, c6 / 1000.0));
+                ev.seat_flags[si].push(format!("Common travel {:.0} m > {:.0} m", t.min(99_000.0) / 1000.0, c6 / 1000.0));
                 bad = true;
             }
         }
@@ -442,7 +442,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
                     if dw <= a4 {
                         daylight += 1;
                     } else {
-                        ev.seat_flags[si].push("Lejos de ventanas".into());
+                        ev.seat_flags[si].push("Far from windows".into());
                     }
                 }
                 if let Some((a1d, tol)) = p.a1 {
@@ -459,7 +459,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
                         let along = s.facing.dot(best.1).abs();
                         if along < tol.to_radians().cos() {
                             window_bad += 1;
-                            ev.seat_flags[si].push("Ventana de frente o de espaldas".into());
+                            ev.seat_flags[si].push("Window in front or behind".into());
                         }
                     }
                 }
@@ -482,13 +482,13 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
             if let Some(lim) = p.a2_door {
                 if behind && dd <= lim {
                     back_issues += 1;
-                    ev.seat_flags[si].push("De espaldas a la entrada".into());
+                    ev.seat_flags[si].push("Back to the entrance".into());
                 }
             }
             if let Some(lim) = p.a3_entry {
                 if behind && dd <= lim && dd > p.a2_door.unwrap_or(0.0) {
                     vis_issues += 1;
-                    ev.seat_flags[si].push("Pantalla visible desde la entrada".into());
+                    ev.seat_flags[si].push("Screen visible from the entrance".into());
                 }
             }
         }
@@ -501,7 +501,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
                 if p.a3_corr {
                     vis_issues += 1;
                 }
-                ev.seat_flags[si].push("De espaldas al pasillo principal".into());
+                ev.seat_flags[si].push("Back to the main corridor".into());
             }
         }
     }
@@ -530,7 +530,7 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
         let need = (pct / 100.0 * vs).ceil() as usize;
         if cnt < need {
             let hard = crate::defaults::RuleView::new(&ctx.config.rules).hard("C8");
-            ev.violations.push(Violation { rule_id: "C8".into(), message: format!("Solo {cnt} puestos accesibles en silla de ruedas (se piden {need})."), at: None, hard });
+            ev.violations.push(Violation { rule_id: "C8".into(), message: format!("Only {cnt} wheelchair-accessible seats ({need} required)."), at: None, hard });
             if hard {
                 ev.hard += 1;
             }
@@ -567,11 +567,11 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
             let _ = mi;
             if outside * 10 > cells {
                 ev.hard += 1;
-                ev.violations.push(Violation { rule_id: "O1".into(), message: "Un escritorio quedó sobre un muro, columna u obstáculo.".into(), at: Some(m.center), hard: true });
+                ev.violations.push(Violation { rule_id: "O1".into(), message: "A desk is on a wall, column or obstacle.".into(), at: Some(m.center), hard: true });
             }
             if overlap * 20 > cells {
                 ev.hard += 1;
-                ev.violations.push(Violation { rule_id: "E2".into(), message: "Dos escritorios se superponen.".into(), at: Some(m.center), hard: true });
+                ev.violations.push(Violation { rule_id: "E2".into(), message: "Two desks overlap.".into(), at: Some(m.center), hard: true });
             }
         }
     }
@@ -591,14 +591,14 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     }
     if p.e7_hard && ev.orientations > 1 {
         ev.hard += ev.orientations - 1;
-        ev.violations.push(Violation { rule_id: "E7".into(), message: format!("Hay {} direcciones de bancadas distintas.", ev.orientations), at: None, hard: true });
+        ev.violations.push(Violation { rule_id: "E7".into(), message: format!("There are {} different row directions.", ev.orientations), at: None, hard: true });
     }
     let density_pen = match p.a5 {
         Some(m2) if ev.seats_placed > 0 => {
             let per = ctx.area_m2 / ev.seats_placed as f64;
             if per < m2 {
                 let a5_hard = crate::defaults::RuleView::new(&ctx.config.rules).hard("A5");
-                ev.violations.push(Violation { rule_id: "A5".into(), message: format!("Densidad {per:.1} m²/puesto, por debajo de {m2:.1}."), at: None, hard: a5_hard });
+                ev.violations.push(Violation { rule_id: "A5".into(), message: format!("Density {per:.1} m²/seat, below {m2:.1}."), at: None, hard: a5_hard });
                 if a5_hard {
                     ev.hard += 1;
                 }

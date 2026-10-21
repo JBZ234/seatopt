@@ -1,50 +1,52 @@
 import { useEffect, type CSSProperties } from 'react';
 import { applyPalette, PALETTES } from './palette';
-import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, saveProject, setScale } from './actions';
+import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, removePathNode, saveProject, setScale } from './actions';
 import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
 import { deleteSelection, evaluateSoon, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
-import { emptySel, requestedSeats, selCount, useApp, type Theme, type Tool } from './store';
+import { emptySel, requestedSeats, selCount, STEP, useApp, type Theme, type Tool } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
 import OrgStep from './steps/OrgStep';
+import PathsStep from './steps/PathsStep';
 import PlanStep from './steps/PlanStep';
 import RulesStep from './steps/RulesStep';
 import type { Pt } from './types';
 
-const STEPS = ['Plano', 'Escritorios', 'Espacios', 'Organización', 'Optimizar'];
+const STEPS = ['Plan', 'Circulation', 'Desks', 'Rules', 'Organization', 'Optimize'];
 
 /** Qué hacer con cada herramienta: se muestra sobre el plano. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
-  seed: 'Haz clic dentro del área que vas a amoblar',
-  outline: 'Clic en cada esquina del área · clic en el primer punto, doble clic o Enter para cerrar · Retroceso borra el último punto',
-  mainDoor: 'Haz clic sobre la puerta de acceso del personal (líneas de color en el borde)',
-  exitDoor: 'Haz clic sobre las salidas de emergencia',
-  door: 'Cada clic sobre una puerta cambia su tipo: oficina → salida → principal → ignorada',
-  drawDoor: 'Arrastra de un lado al otro del vano de la puerta',
-  calibrate: 'Haz clic en los dos extremos de una medida que conozcas (un muro, una puerta)',
-  column: 'Arrastra para dibujar la columna',
-  fixedOffice: 'Arrastra para dibujar la oficina o sala fija',
-  restricted: 'Arrastra sobre el tablero o gabinete',
-  reserved: 'Arrastra para reservar el área',
-  window: 'Arrastra a lo largo de la ventana',
-  erase: 'Haz clic sobre lo que quieras borrar',
-  pan: 'Arrastra para mover el plano',
-  placeDesk: 'Clic para colocar el escritorio · R gira 90° · F cambia el lado de la silla · Esc termina',
+  seed: 'Click inside the area you are going to furnish',
+  outline: 'Click each corner of the area · click the first point, double-click or Enter to close · Backspace removes the last point',
+  mainDoor: 'Click the staff entrance door (colored lines on the edge)',
+  exitDoor: 'Click the emergency exits',
+  door: 'Each click on a door changes its type: office → exit → main → ignored',
+  drawDoor: 'Drag from one side of the door opening to the other',
+  calibrate: 'Click both ends of a length you know (a wall, a door)',
+  column: 'Drag to draw the column',
+  fixedOffice: 'Drag to draw the office or fixed room',
+  restricted: 'Drag over the panel or cabinet',
+  reserved: 'Drag to reserve the area',
+  window: 'Drag along the window',
+  erase: 'Click what you want to delete',
+  pan: 'Drag to move the plan',
+  placeDesk: 'Click to place the desk · R rotates 90° · F flips the chair side · Esc finishes',
 };
 
 export default function App() {
   const st = useApp();
   useEffect(() => {
-    ensureConfig().catch((e) => st.say('No se pudo conectar con el motor: ' + e, 'error'));
+    ensureConfig().catch((e) => st.say('Could not connect to the engine: ' + e, 'error'));
     const esc = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
       const s = useApp.getState();
       const ctrl = e.ctrlKey || e.metaKey;
-      if (e.key === 'Escape') s.set({ tool: 'select', calib: [], selection: emptySel() });
+      if (e.key === 'Escape') s.set({ tool: 'select', calib: [], selection: emptySel(), pathSel: null });
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && s.pathSel?.node != null) { e.preventDefault(); removePathNode(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selCount(s.selection)) { e.preventDefault(); deleteSelection(); }
       else if (ctrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); s.redo(); evaluateSoon(); }
       else if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); s.undo(); evaluateSoon(); }
@@ -89,7 +91,7 @@ export default function App() {
   const onCalibrated = (a: Pt, b: Pt) => {
     st.set({ tool: 'select', scaleConfirmed: true });
     const measured = Math.hypot(a.x - b.x, a.y - b.y);
-    const ans = prompt(`Medida real entre los dos puntos, en metros (ahora mide ${(measured / 1000).toFixed(3)} m):`);
+    const ans = prompt(`Real length between the two points, in meters (it now measures ${(measured / 1000).toFixed(3)} m):`);
     const real = parseFloat((ans ?? '').replace(',', '.')) * 1000;
     if (!(real > 0) || measured <= 0) return;
     setScale(st.mmPerUnit * real / measured);
@@ -104,16 +106,16 @@ export default function App() {
     return (
       <div className="welcome">
         <div className="welcome-card">
-          <div className="brand big">Puestos<span>optimizador de distribución</span></div>
-          <h1>Selecciona el plano de la oficina</h1>
-          <p>DXF, DWG o PDF vectorial. Después te guío para marcar la escala, el área y la puerta principal.</p>
-          <button className="primary huge" onClick={importPlan}>Seleccionar archivo…</button>
-          <button className="ghost" onClick={openProject}>Abrir un proyecto guardado (.puestos.json)</button>
+          <div className="brand big">Seats<span>office layout optimizer</span></div>
+          <h1>Choose the office plan</h1>
+          <p>{isWeb ? 'DXF or vector PDF' : 'DXF, DWG or vector PDF'}. Then I will guide you to set the scale, the area and the main entrance.</p>
+          <button className="primary huge" onClick={importPlan}>Choose file…</button>
+          <button className="ghost" onClick={openProject}>Open a saved project (.json)</button>
           {isWeb ? (
-            <p className="hint">Versión web: DXF y PDF vectorial. Los DWG guárdalos como DXF desde AutoCAD (o usa la app de escritorio). El plano no sale de tu computador.</p>
+            <p className="hint">Web version: DXF and vector PDF. Save DWG files as DXF from AutoCAD (or use the desktop app). The plan never leaves your computer.</p>
           ) : <details className="welcome-cfg">
-            <summary>Archivos DWG</summary>
-            <p className="hint">Se convierten con ODA File Converter (gratuito) o LibreDWG. Si está en otra carpeta, indica la ruta:</p>
+            <summary>DWG files</summary>
+            <p className="hint">They are converted with ODA File Converter (free) or LibreDWG. If it is installed elsewhere, enter the path:</p>
             <input value={st.converter} placeholder="C:\Program Files\ODA\ODAFileConverter 25.x\ODAFileConverter.exe" onChange={(e) => st.set({ converter: e.target.value })} />
           </details>}
           <ThemeSwitch />
@@ -126,8 +128,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="top">
-        <div className="brand">Puestos<span>optimizador de distribución</span></div>
-        <nav className="steps" aria-label="Pasos">
+        <div className="brand">Seats<span>office layout optimizer</span></div>
+        <nav className="steps" aria-label="Steps">
           {STEPS.map((s, i) => (
             <button key={s} className={'step' + (st.step === i ? ' cur' : '')} disabled={!canGo(i)} aria-current={st.step === i ? 'step' : undefined}
               onClick={() => st.set({ step: i, tool: 'select' })}>
@@ -136,30 +138,31 @@ export default function App() {
           ))}
         </nav>
         <div className="file-actions">
-          <button className="ghost small" disabled={!st.plan} onClick={saveProject}>Guardar</button>
-          <button className="ghost small" onClick={closePlan}>Cerrar plano</button>
+          <button className="ghost small" disabled={!st.plan} onClick={saveProject}>Save</button>
+          <button className="ghost small" onClick={closePlan}>Close plan</button>
           <ThemeSwitch collapsible />
         </div>
       </header>
       <aside className="panel" key={'step' + st.step}>
-        {st.step === 0 && <PlanStep />}
-        {st.step === 1 && <DesksStep />}
-        {st.step === 2 && <RulesStep />}
-        {st.step === 3 && <OrgStep />}
-        {st.step === 4 && <OptimizeStep />}
+        {st.step === STEP.plan && <PlanStep />}
+        {st.step === STEP.paths && <PathsStep />}
+        {st.step === STEP.desks && <DesksStep />}
+        {st.step === STEP.rules && <RulesStep />}
+        {st.step === STEP.org && <OrgStep />}
+        {st.step === STEP.optimize && <OptimizeStep />}
       </aside>
       <main className="stage">
         {st.background || st.plan ? (
           <Canvas onSeed={onSeed} onCalibrated={onCalibrated} />
         ) : (
           <div className="stage-empty">
-            <p>El plano aparece aquí.</p>
+            <p>The plan appears here.</p>
           </div>
         )}
         {st.tool !== 'select' && TOOL_HELP[st.tool] && (st.background || st.plan) && (
           <div className="tool-banner" role="status">
             <span>{TOOL_HELP[st.tool]}</span>
-            <button className="banner-x" onClick={() => st.set({ tool: 'select', calib: [] })}>Cancelar (Esc)</button>
+            <button className="banner-x" onClick={() => st.set({ tool: 'select', calib: [] })}>Cancel (Esc)</button>
           </div>
         )}
       </main>
@@ -168,15 +171,15 @@ export default function App() {
           <div className="job">
             <span>{job.progress?.phase || job.kind}{job.progress?.message ? ` · ${job.progress.message}` : ''}</span>
             <Bar value={job.progress?.fraction ?? 0} />
-            {job.progress && job.progress.seatsPlaced > 0 && !job.progress.message && <span className="mono">{job.progress.seatsRequested > 0 ? `${job.progress.seatsPlaced} / ${job.progress.seatsRequested}` : `${job.progress.seatsPlaced} puestos`}</span>}
+            {job.progress && job.progress.seatsPlaced > 0 && !job.progress.message && <span className="mono">{job.progress.seatsRequested > 0 ? `${job.progress.seatsPlaced} / ${job.progress.seatsRequested}` : `${job.progress.seatsPlaced} seats`}</span>}
           </div>
         ) : (
-          <span className="muted">{st.plan ? `${st.areaM2.toFixed(0)} m² útiles` : 'Sin plano'}{req ? ` · ${req} puestos fijos` : ''}{st.config?.demand.some((d) => d.max) ? ' · + máximo posible' : ''}</span>
+          <span className="muted">{st.plan ? `${st.areaM2.toFixed(0)} m² usable` : 'No plan'}{req ? ` · ${req} fixed seats` : ''}{st.config?.demand.some((d) => d.max) ? ' · + as many as fit' : ''}</span>
         )}
         <span className="counter">
-          {k ? (k.maxMode ? <><b key={k.seatsPlaced}>{k.seatsPlaced}</b> puestos</> : <><b key={k.seatsPlaced}>{k.seatsPlaced}</b> / {k.seatsRequested} ubicados</>) : null}
+          {k ? (k.maxMode ? <><b key={k.seatsPlaced}>{k.seatsPlaced}</b> seats</> : <><b key={k.seatsPlaced}>{k.seatsPlaced}</b> / {k.seatsRequested} placed</>) : null}
         </span>
-        <span className="muted small">modo {backendName}</span>
+        <span className="muted small">{backendName} mode</span>
       </footer>
       {st.studio?.open && <DeskStudio key={st.studio.editId ?? 'new'} />}
       {st.toast && <div className={'toast ' + st.toast.tone} role="status" onClick={() => st.set({ toast: null })}>{st.toast.text}</div>}
@@ -194,15 +197,15 @@ function ThemeSwitch({ collapsible = false }: { collapsible?: boolean }) {
   const set = useApp((s) => s.set);
   const body = (live: boolean) => (
     <div className="theme-row">
-      <div className="palette-switch" role={live ? 'radiogroup' : undefined} aria-label={live ? 'Paleta de color' : undefined}>
+      <div className="palette-switch" role={live ? 'radiogroup' : undefined} aria-label={live ? 'Color palette' : undefined}>
         {PALETTES.map((p, i) => (
           <button key={p.id} role="radio" aria-checked={palette === p.id} aria-label={p.name} title={p.name} tabIndex={live ? 0 : -1}
             className={'swatch opt' + (palette === p.id ? ' on cur' : '')} style={{ '--sw': p.dark, '--sw2': p.light, '--i': i } as CSSProperties}
             onClick={() => set({ palette: p.id })} />
         ))}
       </div>
-      <div className="theme-switch" role={live ? 'radiogroup' : undefined} aria-label={live ? 'Tema' : undefined}>
-        {([['light', 'Claro'], ['dark', 'Oscuro'], ['system', 'Sistema']] as [Theme, string][]).map(([t, l], i) => (
+      <div className="theme-switch" role={live ? 'radiogroup' : undefined} aria-label={live ? 'Theme' : undefined}>
+        {([['light', 'Light'], ['dark', 'Dark'], ['system', 'System']] as [Theme, string][]).map(([t, l], i) => (
           <button key={t} role="radio" aria-checked={theme === t} tabIndex={live ? 0 : -1} style={{ '--i': i } as CSSProperties}
             className={'opt' + (theme === t ? ' on cur' : '')} onClick={() => set({ theme: t })}>{l}</button>
         ))}

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 pub fn read_dxf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     let mut cur = std::io::Cursor::new(bytes);
-    let dx = dxf::Drawing::load(&mut cur).map_err(|e| format!("No se pudo leer el DXF: {e}"))?;
+    let dx = dxf::Drawing::load(&mut cur).map_err(|e| format!("Could not read the DXF: {e}"))?;
     let mut d = Drawing::new(name, SourceKind::Dxf);
 
     let layer_colors: HashMap<String, String> = dx
@@ -19,13 +19,13 @@ pub fn read_dxf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     let blocks: HashMap<String, &dxf::Block> = dx.blocks().map(|b| (b.name.clone(), b)).collect();
 
     let (unit, note) = match dx.header.default_drawing_units {
-        Units::Millimeters => (Some(1.0), "Unidades del archivo: milímetros"),
-        Units::Centimeters => (Some(10.0), "Unidades del archivo: centímetros"),
-        Units::Meters => (Some(1000.0), "Unidades del archivo: metros"),
-        Units::Inches => (Some(25.4), "Unidades del archivo: pulgadas"),
-        Units::Feet => (Some(304.8), "Unidades del archivo: pies"),
-        Units::Decimeters => (Some(100.0), "Unidades del archivo: decímetros"),
-        _ => (None, "El archivo no declara unidades: se estiman"),
+        Units::Millimeters => (Some(1.0), "File units: millimeters"),
+        Units::Centimeters => (Some(10.0), "File units: centimeters"),
+        Units::Meters => (Some(1000.0), "File units: meters"),
+        Units::Inches => (Some(25.4), "File units: inches"),
+        Units::Feet => (Some(304.8), "File units: feet"),
+        Units::Decimeters => (Some(100.0), "File units: decimeters"),
+        _ => (None, "The file does not declare units: they are estimated"),
     };
     d.declared_unit_mm = unit;
     d.unit_note = note.into();
@@ -39,7 +39,7 @@ pub fn read_dxf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     }
     d.finalize();
     if d.paths.is_empty() {
-        return Err("El DXF no contiene geometría en el espacio modelo.".into());
+        return Err("The DXF has no geometry in model space.".into());
     }
     Ok(d)
 }

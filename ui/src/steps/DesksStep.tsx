@@ -1,7 +1,7 @@
 import { capacity } from '../actions';
 import { Num, Switch } from '../components/ui';
 import { ruleVal } from '../clear';
-import { requestedSeats, uid, useApp } from '../store';
+import { requestedSeats, STEP, uid, useApp } from '../store';
 import type { DeskType } from '../types';
 
 function CustomPreview({ t }: { t: DeskType }) {
@@ -81,7 +81,7 @@ export default function DesksStep() {
   const manual = (id: string) => c.pinned.filter((m) => m.typeId === id).length;
   const removeType = (id: string, name: string) => {
     const used = (st.layout?.modules.filter((m) => m.typeId === id).length ?? 0) + c.pinned.filter((m) => m.typeId === id).length;
-    if (used && !confirm(`«${name}» tiene ${used} escritorio${used > 1 ? 's' : ''} en el plano. ¿Borrar el tipo y esos escritorios?`)) return;
+    if (used && !confirm(`“${name}” has ${used} desk${used > 1 ? 's' : ''} on the plan. Delete the type and those desks?`)) return;
     st.snapshot();
     st.updateConfig((cc) => { cc.catalog = cc.catalog.filter((x) => x.id !== id); cc.demand = cc.demand.filter((d) => d.typeId !== id); cc.pinned = cc.pinned.filter((m) => m.typeId !== id); });
     if (st.layout) {
@@ -91,7 +91,7 @@ export default function DesksStep() {
     if (st.placeType === id && st.tool === 'placeDesk') st.set({ tool: 'select' });
   };
   const chairDefault = ruleVal(c, 'E1', 'muro') ?? 1000;
-  // fondo de la silla y paso mínimo detrás (último tramo de «Pasillos hacia los puestos»)
+  // fondo de la silla y paso mínimo detrás (último tramo de “Pasillos hacia los puestos”)
   const chairDepth = c.rules.find((r) => r.id === 'E1')?.items.find((i) => i.id === 'silla')?.value ?? 500;
   const squeeze = ruleVal(c, 'C2', 'paso_sillas') ?? ruleVal(c, 'C2', 'ancho') ?? 600;
   const upd = (id: string, f: (t: DeskType) => void) => st.updateConfig((cc) => { const t = cc.catalog.find((t) => t.id === id); if (t) f(t); });
@@ -100,100 +100,100 @@ export default function DesksStep() {
 
   return (
     <div className="step-body">
-      <h2>¿Cuántos escritorios ubicamos?</h2>
-      <p className="hint">Pon la cantidad de los que ya sabes que van (por ejemplo 5 en L). En los demás marca <b>Máximo posible</b>: el optimizador mete todos los que quepan. Si marcas un tipo flexible (islas, bench) y uno suelto (individual, pareja), el flexible llena las áreas grandes y el suelto rellena los huecos pequeños.</p>
+      <h2>How many desks?</h2>
+      <p className="hint">Enter the number of the ones you know must go in (for example 5 L-shaped desks). For the others turn on <b>As many as fit</b>: the optimizer places all that fit. If you turn it on for a flexible type (islands, benches) and a single one (individual, pair), the flexible one fills the large areas and the single one fills the small gaps.</p>
 
       <div className="totals">
-        <span className="big">{req}</span> puestos fijos
-        {maxNames.length > 0 && <span className="sub"> + el máximo posible de {maxNames.join(', ')}</span>}
-        {st.areaM2 > 0 && req > 0 && !maxNames.length && <span className="sub"> · {(st.areaM2 / req).toFixed(1)} m² por puesto</span>}
+        <span className="big">{req}</span> fixed seats
+        {maxNames.length > 0 && <span className="sub"> + as many {maxNames.join(', ')} as fit</span>}
+        {st.areaM2 > 0 && req > 0 && !maxNames.length && <span className="sub"> · {(st.areaM2 / req).toFixed(1)} m² per seat</span>}
       </div>
       <div className="row">
-        <button onClick={capacity} disabled={!!st.job || !st.plan}>Estimar capacidad por tipo</button>
+        <button onClick={capacity} disabled={!!st.job || !st.plan}>Estimate capacity per type</button>
       </div>
 
       <div className="catalog">
         {c.catalog.map((t) => {
           const q = qty(t.id);
           const mx = isMax(t.id);
-          const unit = t.flexible ? 'puestos' : t.shape === 'l' || t.shape === 'custom' || t.sides * t.perSide === 1 ? 'escritorios' : `módulos de ${t.sides * t.perSide}`;
+          const unit = t.flexible ? 'seats' : t.shape === 'l' || t.shape === 'custom' || t.sides * t.perSide === 1 ? 'desks' : `modules of ${t.sides * t.perSide}`;
           const cp = cap(t.id);
           return (
             <article key={t.id} className={'desk-card' + (q > 0 || mx ? ' used' : '') + (mx ? ' maxed' : '')}>
               <Preview t={t} />
               <div className="desk-main">
                 <div className="desk-head">
-                  <input className="desk-name" value={t.name} aria-label="Nombre del tipo" onChange={(e) => upd(t.id, (x) => { x.name = e.target.value; })} />
-                  <button className="ghost small danger icon-btn" title="Borrar este tipo de escritorio" aria-label={`Borrar el tipo ${t.name}`} onClick={() => removeType(t.id, t.name)}>
+                  <input className="desk-name" value={t.name} aria-label="Type name" onChange={(e) => upd(t.id, (x) => { x.name = e.target.value; })} />
+                  <button className="ghost small danger icon-btn" title="Delete this desk type" aria-label={`Delete type ${t.name}`} onClick={() => removeType(t.id, t.name)}>
                     <svg viewBox="0 0 16 16" aria-hidden><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" /></svg>
                   </button>
                 </div>
                 <div className="manual-row">
                   <button className={'small' + (st.tool === 'placeDesk' && st.placeType === t.id ? ' active-tool' : '')}
-                    title="Clic en el plano para colocarlo. Queda fijado: la optimización lo respeta y ubica el resto."
+                    title="Click on the plan to place it. It stays pinned: the optimization respects it and places the rest."
                     onClick={() => st.set(st.tool === 'placeDesk' && st.placeType === t.id ? { tool: 'select' } : { tool: 'placeDesk', placeType: t.id, selection: { modules: [], obstacles: [], doors: [], windows: [] } })}>
-                    {st.tool === 'placeDesk' && st.placeType === t.id ? 'Terminar de colocar' : 'Colocar a mano'}
+                    {st.tool === 'placeDesk' && st.placeType === t.id ? 'Done placing' : 'Place by hand'}
                   </button>
-                  {manual(t.id) > 0 && <span className="cap">{manual(t.id)} colocado{manual(t.id) > 1 ? 's' : ''} a mano</span>}
+                  {manual(t.id) > 0 && <span className="cap">{manual(t.id)} placed by hand</span>}
                 </div>
                 <div className="qty">
-                  {mx ? <span className="max-badge">{t.flexible || !c.catalog.some((o) => o.flexible && isMax(o.id)) ? 'máximo posible' : 'máximo · relleno'}</span> : <Num value={q} unit={unit} width={56} min={0} label={`Cantidad de ${t.name}`} onChange={(v) => setQty(t.id, v)} />}
-                  <label className="inline max-toggle">Máximo posible <Switch small on={mx} label={`Máximo posible de ${t.name}`} onChange={(v) => setMax(t.id, v)} /></label>
-                  {cp && <span className="cap" title="Capacidad estimada si se usara solo este tipo">caben ~{cp.maxUnits}{t.flexible ? '' : ` (${cp.maxSeats} puestos)`}</span>}
+                  {mx ? <span className="max-badge">{t.flexible || !c.catalog.some((o) => o.flexible && isMax(o.id)) ? 'as many as fit' : 'as many as fit · filler'}</span> : <Num value={q} unit={unit} width={56} min={0} label={`Number of ${t.name}`} onChange={(v) => setQty(t.id, v)} />}
+                  <label className="inline max-toggle">As many as fit <Switch small on={mx} label={`As many ${t.name} as fit`} onChange={(v) => setMax(t.id, v)} /></label>
+                  {cp && <span className="cap" title="Estimated capacity using only this type">~{cp.maxUnits} fit{t.flexible ? '' : ` (${cp.maxSeats} seats)`}</span>}
                 </div>
                 {t.shape === 'custom' ? (
                   <div className="row wrap">
-                    <button className="small" onClick={() => st.set({ studio: { open: true, editId: t.id } })}>Editar en el Studio</button>
-                    <span className="cap">{(t.seatWidth / 1000).toFixed(2)} × {(t.depth / 1000).toFixed(2)} m · {t.seats?.length ?? 0} puesto{(t.seats?.length ?? 0) === 1 ? '' : 's'}</span>
+                    <button className="small" onClick={() => st.set({ studio: { open: true, editId: t.id } })}>Edit in Studio</button>
+                    <span className="cap">{(t.seatWidth / 1000).toFixed(2)} × {(t.depth / 1000).toFixed(2)} m · {t.seats?.length ?? 0} seat{(t.seats?.length ?? 0) === 1 ? '' : 's'}</span>
                   </div>
                 ) : (
                 <details>
-                  <summary>Medidas</summary>
+                  <summary>Dimensions</summary>
                   <div className="dims">
-                    <label>{t.shape === 'l' ? 'Ancho' : 'Ancho por puesto'}<Num value={t.seatWidth} unit="mm" onChange={(v) => upd(t.id, (x) => { x.seatWidth = v; })} /></label>
-                    <label>Fondo<Num value={t.depth} unit="mm" onChange={(v) => upd(t.id, (x) => { x.depth = v; })} /></label>
+                    <label>{t.shape === 'l' ? 'Width' : 'Width per seat'}<Num value={t.seatWidth} unit="mm" onChange={(v) => upd(t.id, (x) => { x.seatWidth = v; })} /></label>
+                    <label>Depth<Num value={t.depth} unit="mm" onChange={(v) => upd(t.id, (x) => { x.depth = v; })} /></label>
                     {t.shape === 'l' ? (
                       <>
-                        <label>Largo del retorno<Num value={t.returnLength} unit="mm" onChange={(v) => upd(t.id, (x) => { x.returnLength = v; })} /></label>
-                        <label>Fondo del retorno<Num value={t.returnDepth} unit="mm" onChange={(v) => upd(t.id, (x) => { x.returnDepth = v; })} /></label>
+                        <label>Return length<Num value={t.returnLength} unit="mm" onChange={(v) => upd(t.id, (x) => { x.returnLength = v; })} /></label>
+                        <label>Return depth<Num value={t.returnDepth} unit="mm" onChange={(v) => upd(t.id, (x) => { x.returnDepth = v; })} /></label>
                       </>
                     ) : (
                       <>
-                        <label>Lados con puestos
+                        <label>Sides with seats
                           <select value={t.sides} onChange={(e) => upd(t.id, (x) => { x.sides = parseInt(e.target.value); })}>
-                            <option value={1}>uno</option><option value={2}>dos (cara a cara)</option>
+                            <option value={1}>one</option><option value={2}>two (face to face)</option>
                           </select>
                         </label>
-                        <label className="inline">Largo flexible <Switch small on={t.flexible} label="Largo flexible" onChange={(v) => upd(t.id, (x) => { x.flexible = v; })} /></label>
+                        <label className="inline">Flexible length <Switch small on={t.flexible} label="Flexible length" onChange={(v) => upd(t.id, (x) => { x.flexible = v; })} /></label>
                         {t.flexible ? (
                           <>
-                            <label>Mín. por lado<Num value={t.minPerSide} unit="" min={1} onChange={(v) => upd(t.id, (x) => { x.minPerSide = Math.max(1, Math.round(v)); })} /></label>
-                            <label>Máx. por lado<Num value={t.maxPerSide} unit="" min={1} onChange={(v) => upd(t.id, (x) => { x.maxPerSide = Math.max(x.minPerSide, Math.round(v)); })} /></label>
+                            <label>Min per side<Num value={t.minPerSide} unit="" min={1} onChange={(v) => upd(t.id, (x) => { x.minPerSide = Math.max(1, Math.round(v)); })} /></label>
+                            <label>Max per side<Num value={t.maxPerSide} unit="" min={1} onChange={(v) => upd(t.id, (x) => { x.maxPerSide = Math.max(x.minPerSide, Math.round(v)); })} /></label>
                           </>
                         ) : (
-                          <label>Puestos por lado<Num value={t.perSide} unit="" min={1} onChange={(v) => upd(t.id, (x) => { x.perSide = Math.max(1, Math.round(v)); })} /></label>
+                          <label>Seats per side<Num value={t.perSide} unit="" min={1} onChange={(v) => upd(t.id, (x) => { x.perSide = Math.max(1, Math.round(v)); })} /></label>
                         )}
                       </>
                     )}
                     <label>Color<input type="color" value={t.color} onChange={(e) => upd(t.id, (x) => { x.color = e.target.value; })} /></label>
                   </div>
                   <div className="dims clears">
-                    <span className="dims-title">Separación libre alrededor</span>
-                    <label title="Espacio para levantarse de la silla. Vacío = el de «Espacios».">Lado de la silla<Num value={t.clearChair ?? chairDefault} unit="mm" onChange={(v) => upd(t.id, (x) => { x.clearChair = v; })} /></label>
+                    <span className="dims-title">Free space around</span>
+                    <label title="Space to get up from the chair. Empty = the one in “Rules”.">Chair side<Num value={t.clearChair ?? chairDefault} unit="mm" onChange={(v) => upd(t.id, (x) => { x.clearChair = v; })} /></label>
                     {(() => {
                       const left = (t.clearChair ?? chairDefault) - chairDepth;
                       const ok = left >= squeeze - 1;
                       return (
                         <span className={'clear-note' + (ok ? ' ok' : '')}>
                           {ok
-                            ? `Detrás de la silla quedan ${(left / 1000).toFixed(2)} m: se puede pasar por detrás sin correrla.`
-                            : `Detrás de la silla quedan ${(Math.max(0, left) / 1000).toFixed(2)} m: para pasar por detrás hay que correr la silla (está permitido). Para pasar sin correrla usa ${((chairDepth + squeeze) / 1000).toFixed(2)} m.`}
+                            ? `${(left / 1000).toFixed(2)} m remain behind the chair: people can walk behind it without moving it.`
+                            : `${(Math.max(0, left) / 1000).toFixed(2)} m remain behind the chair: to walk behind it the chair has to move (allowed). To walk behind without moving it use ${((chairDepth + squeeze) / 1000).toFixed(2)} m.`}
                         </span>
                       );
                     })()}
-                    {!(t.shape === 'straight' && t.sides >= 2) && <label>Atrás<Num value={t.clearBack ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearBack = v; })} /></label>}
-                    <label>Izquierda<Num value={t.clearLeft ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearLeft = v; })} /></label>
-                    <label>Derecha<Num value={t.clearRight ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearRight = v; })} /></label>
+                    {!(t.shape === 'straight' && t.sides >= 2) && <label>Back<Num value={t.clearBack ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearBack = v; })} /></label>}
+                    <label>Left<Num value={t.clearLeft ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearLeft = v; })} /></label>
+                    <label>Right<Num value={t.clearRight ?? 0} unit="mm" min={0} onChange={(v) => upd(t.id, (x) => { x.clearRight = v; })} /></label>
                   </div>
                 </details>
                 )}
@@ -203,17 +203,17 @@ export default function DesksStep() {
         })}
       </div>
       <div className="row wrap">
-        <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio', color: '#5a7d8c', shape: 'straight', seatWidth: 1200, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 0, returnDepth: 0 }); })}>Agregar tipo recto</button>
-        <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'Nuevo escritorio en L', color: '#a0613f', shape: 'l', seatWidth: 1600, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 1200, returnDepth: 600 }); })}>Agregar tipo en L</button>
-        <button className="studio-btn" onClick={() => st.set({ studio: { open: true } })}>Diseñar en el Studio…</button>
+        <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'New desk', color: '#5a7d8c', shape: 'straight', seatWidth: 1200, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 0, returnDepth: 0 }); })}>Add straight type</button>
+        <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'New L desk', color: '#a0613f', shape: 'l', seatWidth: 1600, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 1200, returnDepth: 600 }); })}>Add L type</button>
+        <button className="studio-btn" onClick={() => st.set({ studio: { open: true } })}>Design in Studio…</button>
       </div>
       {c.pinned.length > 0 && (
-        <p className="hint">Hay {c.pinned.length} escritorio{c.pinned.length > 1 ? 's' : ''} fijado{c.pinned.length > 1 ? 's' : ''} en el plano: cuentan dentro de las cantidades y la optimización ubica el resto alrededor.
-          {' '}<button className="ghost small" onClick={() => { st.snapshot(); st.updateConfig((cc) => { cc.pinned = []; }); if (st.layout) st.set({ layout: { ...st.layout, modules: st.layout.modules.filter((m) => !m.pinned), seats: st.layout.seats.filter((s) => st.layout!.modules.some((m) => m.id === s.moduleId && !m.pinned)) } }); }}>Quitar los fijados</button>
+        <p className="hint">{c.pinned.length} desk{c.pinned.length > 1 ? 's are' : ' is'} pinned on the plan: they count toward the numbers and the optimization places the rest around them.
+          {' '}<button className="ghost small" onClick={() => { st.snapshot(); st.updateConfig((cc) => { cc.pinned = []; }); if (st.layout) st.set({ layout: { ...st.layout, modules: st.layout.modules.filter((m) => !m.pinned), seats: st.layout.seats.filter((s) => st.layout!.modules.some((m) => m.id === s.moduleId && !m.pinned)) } }); }}>Release the pinned ones</button>
         </p>
       )}
       <div className="next">
-        <button className="primary" onClick={() => st.set({ step: 2, tool: 'select' })}>Continuar: espacios</button>
+        <button className="primary" onClick={() => st.set({ step: STEP.rules, tool: 'select' })}>Continue: rules</button>
       </div>
     </div>
   );

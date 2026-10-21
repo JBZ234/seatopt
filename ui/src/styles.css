@@ -12,6 +12,8 @@
   --egress: #2f9e63;
   --exit: #e08a35;
   --office-door: #4f8fc4;
+  --path: #d9822b;
+  --path-sec: #8a6fd1;
   --column: #4d5866;
   --office: #d6dde8;
   --restricted: #e9b8c7;
@@ -47,6 +49,8 @@
   --egress: #4cc283;
   --exit: #f0a251;
   --office-door: #6ea8db;
+  --path: #f0a04b;
+  --path-sec: #a58bff;
   --column: #8b97a6;
   --office: #33404f;
   --restricted: #8e5568;
@@ -858,3 +862,42 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 14px color-mix(in srgb, 
 .ap:hover .swatch.opt:not(.cur), .ap:has(:focus-visible) .swatch.opt:not(.cur) { max-width: 16px; margin: 0 2.5px; }
 .ap:hover .theme-switch .opt:not(.cur), .ap:has(:focus-visible) .theme-switch .opt:not(.cur) { max-width: 80px; padding-left: 9px; padding-right: 9px; }
 @media (prefers-reduced-motion: reduce) { .ap .opt, .ap-live { transition: none; } }
+
+/* ---------------------------------------------------------------- circulation paths */
+.circs .circ-band { fill: none; stroke: var(--path); stroke-opacity: 0.2; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; transition: stroke-opacity 0.2s ease; }
+.circs .circ-line { fill: none; stroke: var(--path); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+.circs .circ.sec .circ-band, .circs .circ.sec .circ-line { stroke: var(--path-sec); }
+.circs .circ.off .circ-band { stroke-opacity: 0.07; }
+.circs .circ.off .circ-line { stroke-dasharray: 6 5; opacity: 0.75; }
+.circs.unused .circ-band { stroke-opacity: 0.08; }
+.circs.editable .circ-band { pointer-events: stroke; cursor: pointer; }
+.circs.editable .circ:hover .circ-band { stroke-opacity: 0.32; }
+.circs .circ.picked .circ-band { stroke-opacity: 0.36; }
+.circs .circ.picked .circ-line { stroke-width: 2.6; }
+.p-handles .p-node { fill: var(--paper); stroke: var(--path); stroke-width: 2; cursor: grab; transition: r 0.15s var(--ease-spring), fill 0.15s ease; }
+.p-handles .p-node:hover { r: 8; }
+.p-handles .p-node.end { fill: var(--path); cursor: ew-resize; }
+.p-handles .p-node.on { fill: var(--path); stroke: var(--graphite); r: 7.5; }
+.p-handles .p-seg { fill: var(--path); stroke: var(--paper); stroke-width: 1.5; opacity: 0.9; }
+.p-handles .p-seg:hover { opacity: 1; filter: brightness(1.1); }
+.path-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+.path-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; animation: rise 0.3s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 25ms); }
+.path-row.cur { background: color-mix(in srgb, var(--path) 16%, transparent); }
+.path-row.off .path-name { color: var(--muted); }
+.path-row input { accent-color: var(--path); }
+button.link { background: none; border: none; padding: 0; text-align: left; color: var(--graphite); cursor: pointer; font: inherit; }
+button.link:hover { text-decoration: underline; }
+.badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 11px; background: color-mix(in srgb, var(--path) 22%, transparent); color: var(--graphite-2); }
+.card { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; margin: 12px 0; display: grid; gap: 8px; }
+.card h3 { margin: 0; font-size: 14px; }
+.inline-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.dg-path { fill: none; stroke: var(--path); stroke-width: 9; stroke-opacity: 0.35; stroke-linejoin: round; }
+.prio-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; gap: 2px; width: max-content; }
+.prio-seg button { border: none; background: transparent; padding: 4px 12px; border-radius: 999px; font-size: 13px; color: var(--graphite-2); transition: background-color 0.25s ease, color 0.25s ease; }
+.prio-seg button.on { background: var(--mat); color: var(--mat-ink, #fff); }
+.prio .hint { animation: rise 0.3s var(--ease-out) both; }
+.more-group h4 { margin: 14px 0 4px; font-size: 13px; color: var(--graphite-2); }
+.more-rule { border-top: 1px solid var(--rule); padding: 8px 0; display: grid; gap: 6px; }
+.more-rule.off .hint { opacity: 0.6; }
+.space { animation: rise 0.35s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 30ms); }

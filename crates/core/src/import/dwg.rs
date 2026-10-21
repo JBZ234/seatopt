@@ -69,12 +69,12 @@ pub fn convert_dwg(dwg_path: &Path, converter: Option<&Path>) -> Result<Vec<u8>,
             Ok(_) if out_dxf.exists() => {
                 return std::fs::read(&out_dxf).map_err(|e| e.to_string());
             }
-            Ok(s) => tried.push(format!("{} (código {:?})", conv.display(), s.code())),
+            Ok(s) => tried.push(format!("{} (code {:?})", conv.display(), s.code())),
             Err(e) => tried.push(format!("{} ({e})", conv.display())),
         }
     }
     Err(format!(
-        "No se pudo convertir el DWG. Instala ODA File Converter (gratuito) o LibreDWG y, si hace falta, indica su ruta en Configuración. Intentos: {}",
+        "The DWG could not be converted. Install ODA File Converter (free) or LibreDWG and, if needed, enter its path in Settings. Attempts: {}",
         tried.join("; ")
     ))
 }

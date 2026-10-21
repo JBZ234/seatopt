@@ -7,6 +7,9 @@ export type Tool =
   | 'select' | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
   | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor' | 'placeDesk';
 
+/** Workflow steps (index in the top bar). */
+export const STEP = { plan: 0, paths: 1, desks: 2, rules: 3, org: 4, optimize: 5 } as const;
+
 export type ColorBy = 'type' | 'role' | 'client';
 export type Theme = 'system' | 'light' | 'dark';
 
@@ -88,6 +91,10 @@ export interface AppState {
   placeType: string;
   placeAngle: number;
   placeUp: boolean;
+  /** Circulation path being edited (and its selected node). */
+  pathSel: { id: string; node: number | null } | null;
+  /** Show office-to-office (secondary) paths. */
+  showSecondary: boolean;
   set: (p: Partial<AppState>) => void;
   updateConfig: (f: (c: Config) => void) => void;
   updatePlan: (f: (p: Plan) => void) => void;
@@ -162,6 +169,8 @@ export const useApp = create<AppState>((set, get) => ({
   placeType: '',
   placeAngle: 0,
   placeUp: false,
+  pathSel: null,
+  showSecondary: false,
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;

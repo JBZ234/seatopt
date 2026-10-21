@@ -1,5 +1,5 @@
 // Separaciones (despejes) de cada elemento, para verlas en dorado y editarlas en el plano.
-import type { Config, DeskType, Door, Module, Obstacle, Plan, Pt } from './types';
+import type { CircPath, Config, DeskType, Door, Module, Obstacle, Plan, Pt } from './types';
 
 export type ClearKey = 'chair' | 'back' | 'left' | 'right' | 'depth' | 'width' | number;
 export interface ClearLabel {
@@ -80,7 +80,7 @@ export function obstacleInfo(c: Config, o: Obstacle): ClearInfo {
     if (perSide || di > 0) edges.push({ a: add(a, mul(out, di)), b: add(b, mul(out, di)), key: perSide ? i : 0, dir: out, value: di });
     if (perSide || i === 0) {
       const mid = mul(add(a, b), 0.5);
-      labels.push({ pos: add(mid, mul(out, Math.max(di, 180) * 0.5 + (di > 0 ? 0 : 160))), value: di, dir: out, key: perSide ? i : 0, title: perSide ? 'Separación de este lado' : 'Separación alrededor' });
+      labels.push({ pos: add(mid, mul(out, Math.max(di, 180) * 0.5 + (di > 0 ? 0 : 160))), value: di, dir: out, key: perSide ? i : 0, title: perSide ? 'Clearance on this side' : 'Clearance around' });
     }
   }
   return { zones, labels, edges };
@@ -92,7 +92,7 @@ export function doorClear(c: Config, plan: Plan, d: Door) {
   const u = norm(sub(d.b, d.a));
   const nrm = { x: -u.y, y: u.x };
   const mid = mul(add(d.a, d.b), 0.5);
-  // lado libre: dentro del recinto y fuera de oficinas y columnas (igual que el motor); «flip» lo invierte
+  // lado libre: dentro del recinto y fuera de oficinas y columnas (igual que el motor); “flip” lo invierte
   const free = (q: Pt) => inRegion(q, plan.region) && !plan.obstacles.some((o) => (o.kind === 'column' || o.kind === 'fixedOffice') && pip(q, o.poly));
   const score = (s: number) => [1, 2, 3, 4, 5, 6].filter((k) => free(add(mid, mul(nrm, s * 150 * k)))).length;
   let inward = score(1) >= score(-1) ? nrm : mul(nrm, -1);
@@ -114,8 +114,8 @@ export function doorInfo(c: Config, plan: Plan, d: Door): ClearInfo {
     zones: depth > 0 ? [zone] : [],
     edges: [{ a: zone[3], b: zone[2], key: 'depth', dir: inward, value: depth }, { a: zone[1], b: zone[2], key: 'width', dir: u, mult: 2, value: width }],
     labels: [
-      { pos: add(mid, mul(inward, Math.max(depth, 400) * 0.5)), value: depth, dir: inward, key: 'depth', title: 'Fondo libre frente a la puerta', prefix: 'fondo' },
-      { pos: add(add(mid, mul(inward, Math.max(depth, 400) + 220)), mul(u, 0)), value: width, dir: u, mult: 2, key: 'width', title: 'Ancho libre frente a la puerta', prefix: 'ancho' },
+      { pos: add(mid, mul(inward, Math.max(depth, 400) * 0.5)), value: depth, dir: inward, key: 'depth', title: 'Free depth in front of the door', prefix: 'depth' },
+      { pos: add(add(mid, mul(inward, Math.max(depth, 400) + 220)), mul(u, 0)), value: width, dir: u, mult: 2, key: 'width', title: 'Free width in front of the door', prefix: 'width' },
     ],
   };
 }
@@ -144,20 +144,20 @@ export function moduleInfo(c: Config, m: Module, t: DeskType): ClearInfo {
     if (cc > 0) zones.push(s > 0 ? rect(-hl, hl, hd, hd + cc) : rect(-hl, hl, -hd - cc, -hd));
     edges.push({ a: L(-hl, s * (hd + cc)), b: L(hl, s * (hd + cc)), key: 'chair', dir: mul(v, s), value: chairClear(c, t) });
   }
-  labels.push({ pos: L(0, sgn * (hd + Math.max(cc, 300) / 2)), value: chairClear(c, t), dir: mul(v, sgn), key: 'chair', title: 'Espacio libre del lado de la silla', prefix: 'silla' });
+  labels.push({ pos: L(0, sgn * (hd + Math.max(cc, 300) / 2)), value: chairClear(c, t), dir: mul(v, sgn), key: 'chair', title: 'Free space on the chair side', prefix: 'chair' });
   if (!two) {
     const bk = Math.max(0, t.clearBack ?? 0);
     if (bk > 0) zones.push(sgn > 0 ? rect(-hl, hl, -hd - bk, -hd) : rect(-hl, hl, hd, hd + bk));
     edges.push({ a: L(-hl, -sgn * (hd + bk)), b: L(hl, -sgn * (hd + bk)), key: 'back', dir: mul(v, -sgn), value: bk });
-    labels.push({ pos: L(0, -sgn * (hd + Math.max(bk, 300) / 2)), value: bk, dir: mul(v, -sgn), key: 'back', title: 'Separación detrás del escritorio', prefix: 'atrás' });
+    labels.push({ pos: L(0, -sgn * (hd + Math.max(bk, 300) / 2)), value: bk, dir: mul(v, -sgn), key: 'back', title: 'Clearance behind the desk', prefix: 'back' });
   }
   const cl = Math.max(0, t.clearLeft ?? 0), cr = Math.max(0, t.clearRight ?? 0);
   if (cl > 0) zones.push(rect(-hl - cl, -hl, -hd, hd));
   if (cr > 0) zones.push(rect(hl, hl + cr, -hd, hd));
   edges.push({ a: L(-hl - cl, -hd), b: L(-hl - cl, hd), key: 'left', dir: mul(u, -1), value: cl });
   edges.push({ a: L(hl + cr, -hd), b: L(hl + cr, hd), key: 'right', dir: u, value: cr });
-  labels.push({ pos: L(-hl - Math.max(cl, 300) / 2, 0), value: cl, dir: mul(u, -1), key: 'left', title: 'Separación a la izquierda', prefix: 'izq.' });
-  labels.push({ pos: L(hl + Math.max(cr, 300) / 2, 0), value: cr, dir: u, key: 'right', title: 'Separación a la derecha', prefix: 'der.' });
+  labels.push({ pos: L(-hl - Math.max(cl, 300) / 2, 0), value: cl, dir: mul(u, -1), key: 'left', title: 'Clearance on the left', prefix: 'left' });
+  labels.push({ pos: L(hl + Math.max(cr, 300) / 2, 0), value: cr, dir: u, key: 'right', title: 'Clearance on the right', prefix: 'right' });
   return { zones, labels, edges };
 }
 
@@ -247,7 +247,32 @@ export function regionInfo(plan: Plan, ri: number, def = 0): ClearInfo {
     const a = ring[mid], b = ring[(mid + 1) % n];
     const p = g.length > 1 && g.length % 2 === 0 ? a : mul(add(a, b), 0.5);
     const d = val(g[0]);
-    labels.push({ pos: add(p, mul(inward(mid), Math.max(d, 300) * 0.5 + (d > 0 ? 0 : 120))), value: d, dir: inward(mid), key: gi, title: g.length > 1 ? `Separación en este tramo curvo (${g.length} aristas)` : 'Separación hacia adentro desde esta arista' });
+    labels.push({ pos: add(p, mul(inward(mid), Math.max(d, 300) * 0.5 + (d > 0 ? 0 : 120))), value: d, dir: inward(mid), key: gi, title: g.length > 1 ? `Clearance along this curved stretch (${g.length} edges)` : 'Clearance inward from this edge' });
   });
   return { zones, labels, edges, groups };
+}
+
+/** Width of a circulation path: its own, or the general one for its kind (rule P1). */
+export function circWidth(c: Config, p: CircPath): number {
+  if (p.width) return p.width;
+  return ruleVal(c, 'P1', p.kind === 'primary' ? 'primary' : 'secondary') ?? (p.kind === 'primary' ? 1200 : 900);
+}
+
+/** Clear bands of the kept circulation paths (one rectangle per run, with square ends). */
+export function pathZones(c: Config, plan: Plan): Pt[][] {
+  if (!ruleOn(c, 'P1')) return [];
+  const out: Pt[][] = [];
+  for (const p of plan.paths ?? []) {
+    if (!p.keep || p.pts.length < 2) continue;
+    const h = circWidth(c, p) / 2;
+    for (let i = 0; i + 1 < p.pts.length; i++) {
+      const a = p.pts[i], b = p.pts[i + 1];
+      const l = Math.hypot(b.x - a.x, b.y - a.y);
+      if (l < 1) continue;
+      const u = { x: (b.x - a.x) / l, y: (b.y - a.y) / l }, n = { x: -u.y, y: u.x };
+      const a2 = { x: a.x - u.x * h, y: a.y - u.y * h }, b2 = { x: b.x + u.x * h, y: b.y + u.y * h };
+      out.push([add(a2, mul(n, h)), add(b2, mul(n, h)), add(b2, mul(n, -h)), add(a2, mul(n, -h))]);
+    }
+  }
+  return out;
 }

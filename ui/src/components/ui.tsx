@@ -39,9 +39,9 @@ export function Num({ value, unit, onChange, min, max, step, width = 72, disable
     onChange(v);
     setTxt(fmt(isMm ? v / 1000 : v));
   };
-  const range = isMm && min !== undefined ? `Recomendado: ${fmt(min / 1000)}${max ? `–${fmt(max / 1000)}` : ' o más'} m` : undefined;
+  const range = isMm && min !== undefined ? `Recommended: ${fmt(min / 1000)}${max ? `–${fmt(max / 1000)}` : ' or more'} m` : undefined;
   return (
-    <span className={'num' + (out ? ' warn' : '')} title={out ? `Fuera de lo recomendado. ${range}` : range}>
+    <span className={'num' + (out ? ' warn' : '')} title={out ? `Outside the recommended range. ${range}` : range}>
       <input aria-label={label} disabled={disabled} style={{ width }} value={txt} inputMode="decimal"
         onFocus={(e) => e.target.select()}
         onChange={(e) => setTxt(e.target.value.replace(/^(-?)0+(?=\d)/, '$1'))} onBlur={commit} onKeyDown={(e) => {

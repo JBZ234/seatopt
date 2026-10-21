@@ -332,7 +332,7 @@ pub fn search_budget(ctx: &Ctx, weights: &Weights, budget: Budget, seed: u64, in
                         let el = start.elapsed().as_secs_f64();
                         let since = el - last_imp.load(Ordering::Relaxed) as f64 / 1000.0;
                         let (fraction, message) = match budget.patience {
-                            Some(p) => ((since / p).clamp(0.0, 1.0), format!("{} puestos · última mejora hace {:.0} s", e.seats_placed, since.max(0.0))),
+                            Some(p) => ((since / p).clamp(0.0, 1.0), format!("{} seats · last improvement {:.0} s ago", e.seats_placed, since.max(0.0))),
                             None => (frac, String::new()),
                         };
                         progress(Progress {
@@ -349,8 +349,8 @@ pub fn search_budget(ctx: &Ctx, weights: &Weights, budget: Budget, seed: u64, in
             }
         }
     });
-    let (genome, eval) = best.into_inner().unwrap().expect("sin resultado");
-    if std::env::var("SEAT_DEBUG").is_ok() { eprintln!("search: {} iteraciones en {:.1}s ({} cadenas)", iters.load(Ordering::Relaxed), start.elapsed().as_secs_f64(), chains); }
+    let (genome, eval) = best.into_inner().unwrap().expect("no result");
+    if std::env::var("SEAT_DEBUG").is_ok() { eprintln!("search: {} iterations in {:.1}s ({} chains)", iters.load(Ordering::Relaxed), start.elapsed().as_secs_f64(), chains); }
     let mut pool: Vec<(f64, Genome)> = pool.into_inner().unwrap().items.into_iter().map(|x| (x.0, x.2)).collect();
     pool.insert(0, (eval.score, genome.clone()));
     SearchOut { genome, eval, iterations: iters.load(Ordering::Relaxed), pool }
@@ -439,7 +439,7 @@ pub fn to_layout_from(ctx: &Ctx, d: &super::decode::Decoded, variant: usize, gen
     if invalid > 0 {
         violations.push(Violation {
             rule_id: "C7".into(),
-            message: format!("{invalid} módulos se descartaron por no tener acceso o recorrido válido."),
+            message: format!("{invalid} desks were discarded for lacking access or a valid route."),
             at: None,
             hard: false,
         });
@@ -1025,7 +1025,7 @@ pub fn finish(ctx: &Ctx, pool: &[(f64, Genome)], weights: &Weights, n: usize, fi
 // ============================================================================ alto nivel
 
 pub fn optimize(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> Result<Layout, String> {
-    progress(Progress { phase: "Preparando el plano".into(), ..Default::default() });
+    progress(Progress { phase: "Preparing the plan".into(), ..Default::default() });
     let ctx = Ctx::build(problem)?;
     let st = &problem.config.settings;
     // tiempo 0 = automático: busca hasta que deja de mejorar
@@ -1035,13 +1035,13 @@ pub fn optimize(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) ->
         g.vars.len() == ctx.variants.len() && g.vars.iter().zip(&ctx.variants).all(|(gv, cv)| gv.zones.len() == cv.zones.len() && gv.order.len() + 1 == cv.zones.len().max(1))
     });
     let t0 = Instant::now();
-    let out = search_budget(&ctx, &problem.config.weights, budget, st.seed.max(1), init, cancel, progress, "Optimizando distribución");
+    let out = search_budget(&ctx, &problem.config.weights, budget, st.seed.max(1), init, cancel, progress, "Optimizing the layout");
     let spent = t0.elapsed().as_secs_f64();
-    progress(Progress { phase: "Rellenando huecos y comparando soluciones".into(), fraction: 0.85, seats_placed: out.eval.seats_placed, ..Default::default() });
+    progress(Progress { phase: "Filling gaps and comparing layouts".into(), fraction: 0.85, seats_placed: out.eval.seats_placed, ..Default::default() });
     let fill = if st.time_limit > 0.0 { (st.time_limit * 0.2).max(1.0) } else { (spent * 0.25).clamp(1.5, 10.0) };
     let mut alts = finish(&ctx, &out.pool, &problem.config.weights, st.alternatives.clamp(1, 30) as usize, fill, cancel);
     if crate::assign::has_people(&problem.config.org) {
-        progress(Progress { phase: "Asignando roles y clientes".into(), fraction: 1.0, ..Default::default() });
+        progress(Progress { phase: "Assigning roles and clients".into(), fraction: 1.0, ..Default::default() });
         for l in alts.iter_mut() {
             crate::assign::assign(&ctx, &problem.config, l);
         }
@@ -1055,7 +1055,7 @@ pub fn optimize(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) ->
 
 /// Exploración de pesos: varias corridas con pesos alrededor de los del usuario y frente de Pareto.
 pub fn explore(problem: &Problem, n: usize, cancel: &AtomicBool, progress: ProgressFn) -> Result<Vec<crate::model::Variant>, String> {
-    progress(Progress { phase: "Preparando el plano".into(), ..Default::default() });
+    progress(Progress { phase: "Preparing the plan".into(), ..Default::default() });
     let ctx = Ctx::build(problem)?;
     let base = problem.config.weights.as_vec();
     let mut rng = Rng(problem.config.settings.seed.max(7) * 2654435761 | 1);
@@ -1095,13 +1095,13 @@ pub fn explore(problem: &Problem, n: usize, cancel: &AtomicBool, progress: Progr
         }
         let d = done.fetch_add(1, Ordering::Relaxed) + 1;
         progress(Progress {
-            phase: "Explorando pesos".into(),
+            phase: "Exploring weights".into(),
             fraction: d as f64 / total as f64,
             best_score: l.kpis.score,
             seats_placed: l.kpis.seats_placed,
             seats_requested: l.kpis.seats_requested,
             iterations: d,
-            message: format!("Variante {d} de {total}"),
+            message: format!("Variant {d} of {total}"),
         });
         layouts.push(l);
     }
@@ -1168,7 +1168,7 @@ pub fn capacity(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) ->
             let seats = out.eval.seats_placed;
             let units = if t.flexible { seats } else { seats / t.seats_per_module(t.per_side).max(1) };
             let d = done.fetch_add(1, Ordering::Relaxed) + 1;
-            progress(Progress { phase: "Calculando capacidad".into(), fraction: d as f64 / total as f64, message: t.name.clone(), ..Default::default() });
+            progress(Progress { phase: "Calculating capacity".into(), fraction: d as f64 / total as f64, message: t.name.clone(), ..Default::default() });
             Capacity { type_id: t.id.clone(), max_seats: seats, max_units: units }
         })
         .collect();
@@ -1213,12 +1213,12 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
         let fmt = |x: f64| if it.unit == "mm" { format!("{:.2} m", x / 1000.0) } else { format!("{x} {}", it.unit) };
         let mut p = problem.clone();
         p.config.rules[ri].items[ii].value = Some(to);
-        cands.push((sug(rid, iid, format!("{} · {}: de {} a {}", r.name, it.label, fmt(v), fmt(to)), Some(to), false), p));
+        cands.push((sug(rid, iid, format!("{} · {}: from {} to {}", r.name, it.label, fmt(v), fmt(to)), Some(to), false), p));
     }
     if let Some(ri) = problem.config.rules.iter().position(|r| r.id == "C3" && r.enabled && !r.locked) {
         let mut p = problem.clone();
         p.config.rules[ri].enabled = false;
-        cands.push((sug("C3", "", "Sin zona libre frente a la entrada".into(), None, true), p));
+        cands.push((sug("C3", "", "No free area in front of the entrance".into(), None, true), p));
     }
     // cambio de tipo: probar los tipos con menos área por puesto
     let area_per_seat = |t: &DeskType| t.module_length(t.per_side_range().1) * t.module_depth() / t.seats_per_module(t.per_side_range().1).max(1) as f64;
@@ -1239,12 +1239,12 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
             } else {
                 p.config.demand.push(Demand { type_id: alt.id.clone(), quantity: qty_alt, max: false });
             }
-            cands.push((sug("TIPO", &format!("{}>{}", t.id, alt.id), format!("Usar «{}» en lugar de «{}»", alt.name, t.name), None, false), p));
+            cands.push((sug("TIPO", &format!("{}>{}", t.id, alt.id), format!("Use “{}” instead of “{}”", alt.name, t.name), None, false), p));
         }
     }
     let total = cands.len() + 1;
-    progress(Progress { phase: "Midiendo la distribución actual".into(), fraction: 0.0, message: format!("1 de {total}"), ..Default::default() });
-    let base = quick_run(problem, secs, cancel).ok_or("No se pudo optimizar el plano.")?;
+    progress(Progress { phase: "Measuring the current layout".into(), fraction: 0.0, message: format!("1 of {total}"), ..Default::default() });
+    let base = quick_run(problem, secs, cancel).ok_or("The plan could not be optimized.")?;
     let base_seats = base.kpis.seats_placed as i32;
     let base_unplaced: u32 = base.kpis.unplaced_by_type.iter().map(|x| x.1).sum();
     let mut results = Vec::new();
@@ -1252,7 +1252,7 @@ pub fn suggest(problem: &Problem, cancel: &AtomicBool, progress: ProgressFn) -> 
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        progress(Progress { phase: "Buscando mejores valores".into(), fraction: (i + 1) as f64 / total as f64, seats_placed: base.kpis.seats_placed, message: s.description.clone(), ..Default::default() });
+        progress(Progress { phase: "Looking for better values".into(), fraction: (i + 1) as f64 / total as f64, seats_placed: base.kpis.seats_placed, message: s.description.clone(), ..Default::default() });
         let Some(l) = quick_run(&p, secs, cancel) else { continue };
         s.seats_placed = l.kpis.seats_placed;
         s.gain_seats = if s.rule_id == "TIPO" {

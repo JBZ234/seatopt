@@ -107,13 +107,13 @@ fn register(d: Drawing) -> ImportOut {
 }
 
 fn drawing(id: &str) -> Result<Arc<Drawing>, String> {
-    store().lock().unwrap().drawings.get(id).cloned().ok_or_else(|| "El dibujo ya no está en memoria; vuelve a importarlo.".into())
+    store().lock().unwrap().drawings.get(id).cloned().ok_or_else(|| "The drawing is no longer in memory; import it again.".into())
 }
 
 /// Borra del dibujo en memoria todas las líneas, curvas y textos de una capa.
 pub fn delete_layer(id: &str, layer: &str) -> Result<usize, String> {
     let d = drawing(id)?;
-    let Some(li) = d.layers.iter().position(|l| l.name == layer) else { return Err(format!("No existe la capa «{layer}».")) };
+    let Some(li) = d.layers.iter().position(|l| l.name == layer) else { return Err(format!("Layer “{layer}” does not exist.")) };
     let mut n = (*d).clone();
     let li = li as u32;
     let before = n.paths.len() + n.curves.len() + n.texts.len();
@@ -239,7 +239,7 @@ pub fn reassign(problem: &Problem, layout: &Layout) -> Result<Layout, String> {
             s.role_id.clear();
             s.client_id.clear();
         }
-        s.flags.retain(|f| !f.contains("equipo") && !f.contains("tipo de escritorio") && !f.contains("referencia"));
+        s.flags.retain(|f| !f.contains("team") && !f.contains("desk type") && !f.contains("reference"));
     }
     if crate::assign::has_people(&problem.config.org) {
         crate::assign::assign(&ctx, &problem.config, &mut l);
@@ -296,7 +296,7 @@ pub fn evaluate(problem: &Problem, layout: &Layout) -> Result<Layout, String> {
     let mut rng = decode::Rng(7);
     let g = decode::random_genome(&ctx, &mut rng);
     let mut l = search::to_layout(&ctx, &g, &problem.config.weights);
-    // la demanda real (no la de la evaluación) para "sin ubicar"
+    // la demanda real (no la de la evaluación) para "not placed"
     let mut req_seats = 0u32;
     let mut placed = vec![0u32; ctx.catalog.len()];
     for m in &l.modules {
@@ -388,7 +388,7 @@ pub fn unb64(s: &str) -> Result<Vec<u8>, String> {
             if c == b'=' {
                 break;
             }
-            n = (n << 6) | val(c).ok_or("base64 inválido")?;
+            n = (n << 6) | val(c).ok_or("invalid base64")?;
             cnt += 1;
         }
         n <<= 6 * (4 - cnt);
@@ -450,7 +450,7 @@ pub fn export_simple(id: &str, opts: &AnalyzeOptions, plan: &Plan, format: &str,
 pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
     let get = |k: &str| args.get(k).cloned().unwrap_or(Value::Null);
     let parse = |k: &str| -> Result<Value, String> { Ok(get(k)) };
-    let de = |v: Value| -> Result<Problem, String> { serde_json::from_value(v).map_err(|e| format!("Datos inválidos: {e}")) };
+    let de = |v: Value| -> Result<Problem, String> { serde_json::from_value(v).map_err(|e| format!("Invalid data: {e}")) };
     match cmd {
         "defaults" => Ok(serde_json::to_value(defaults()).unwrap()),
         "background" => {
@@ -489,11 +489,11 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
             evaluate(&p, &l).map(|v| serde_json::to_value(v).unwrap())
         }
         "export_pdf" => {
-            let r: PdfReq = serde_json::from_value(args).map_err(|e| format!("Datos inválidos: {e}"))?;
+            let r: PdfReq = serde_json::from_value(args).map_err(|e| format!("Invalid data: {e}"))?;
             export_pdf(&r).map(Value::String)
         }
         "export_plan_dxf" => {
-            let plan: Plan = serde_json::from_value(get("plan")).map_err(|e| format!("Datos inválidos: {e}"))?;
+            let plan: Plan = serde_json::from_value(get("plan")).map_err(|e| format!("Invalid data: {e}"))?;
             let out_mm = get("outMm").as_f64().unwrap_or(1.0);
             Ok(Value::String(crate::export::plan_dxf(&plan, out_mm)))
         }
@@ -511,10 +511,10 @@ pub fn dispatch(cmd: &str, args: Value) -> Result<Value, String> {
         "export_simple" => {
             let id = get("drawingId").as_str().unwrap_or("").to_string();
             let opts: AnalyzeOptions = serde_json::from_value(get("options")).map_err(|e| e.to_string())?;
-            let plan: Plan = serde_json::from_value(get("plan")).map_err(|e| format!("Datos inválidos: {e}"))?;
+            let plan: Plan = serde_json::from_value(get("plan")).map_err(|e| format!("Invalid data: {e}"))?;
             let fmt = get("format").as_str().unwrap_or("dxf").to_string();
             let paper = get("paper").as_str().unwrap_or("A3").to_string();
-            let title = get("title").as_str().unwrap_or("Plano").to_string();
+            let title = get("title").as_str().unwrap_or("Plan").to_string();
             export_simple(&id, &opts, &plan, &fmt, &paper, &title).map(Value::String)
         }
         "export_dxf" | "export_csv" => {

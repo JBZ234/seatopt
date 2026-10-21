@@ -218,7 +218,7 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
         }
     }
     if !bb.is_valid() {
-        return Err("No hay nada que dibujar.".into());
+        return Err("There is nothing to draw.".into());
     }
     let bb = bb.expand(800.0);
     let pt_per_mm = 72.0 / 25.4;
@@ -274,7 +274,7 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
 
     if let Some(plan) = plan {
         // plano mínimo: edificio, recintos, área amoblable, obstáculos y puertas
-        draw_minimal_plan(&mut c, plan, layout);
+        draw_minimal_plan(&mut c, plan, layout, cfg);
     }
     if !opts.clean {
         if let Some(l) = layout {
@@ -330,38 +330,38 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     let date = today();
     if opts.clean {
         c.fill_rgb((0.1, 0.1, 0.1));
-        c.text(margin, margin + 22.0, 13.0, true, if opts.title.is_empty() { "Plano" } else { &opts.title });
+        c.text(margin, margin + 22.0, 13.0, true, if opts.title.is_empty() { "Plan" } else { &opts.title });
         if plan.is_none() {
-            c.text(margin, margin + 8.0, 8.0, false, &format!("Dibujo original · Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
+            c.text(margin, margin + 8.0, 8.0, false, &format!("Original drawing · Scale 1:{n:.0} on {} · {date}", opts.paper.to_uppercase()));
         } else {
         let area_m2: f64 = plan.map(|p| p.region.iter().map(|r| polygon_area(r).abs()).sum::<f64>() / 1e6 - p.obstacles.iter().filter(|o| point_in_region(centroid(&o.poly), &p.region)).map(|o| polygon_area(&o.poly).abs() / 1e6).sum::<f64>()).unwrap_or(0.0);
-        c.text(margin, margin + 8.0, 8.0, false, &format!("Planta para optimización · área amoblable {area_m2:.0} m² · Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
+        c.text(margin, margin + 8.0, 8.0, false, &format!("Plan for optimization · usable area {area_m2:.0} m² · Scale 1:{n:.0} on {} · {date}", opts.paper.to_uppercase()));
         }
         // convenciones (solo lo que hay en el plano), en filas
         let has = |f: &dyn Fn(&Plan) -> bool| plan.map(f).unwrap_or(false);
-        let mut items: Vec<(&str, &str, u8)> = if plan.is_some() { vec![("#f6f9f6", "Área amoblable", 0)] } else { vec![] };
+        let mut items: Vec<(&str, &str, u8)> = if plan.is_some() { vec![("#f6f9f6", "Usable area", 0)] } else { vec![] };
         if has(&|p| !p.rooms.is_empty() || p.obstacles.iter().any(|o| o.kind == ObstacleKind::FixedOffice)) {
-            items.push(("#e0e6ed", "Oficinas y recintos", 0));
+            items.push(("#e0e6ed", "Offices and rooms", 0));
         }
         if has(&|p| p.obstacles.iter().any(|o| o.kind == ObstacleKind::Column)) {
-            items.push(("#5c615e", "Columnas", 0));
+            items.push(("#5c615e", "Columns", 0));
         }
         if has(&|p| p.obstacles.iter().any(|o| o.kind == ObstacleKind::Restricted)) {
-            items.push(("#e3b3da", "Tablero / zona con despeje", 0));
+            items.push(("#e3b3da", "Panel / area with clearance", 0));
         }
         if has(&|p| p.building.len() >= 3) {
-            items.push(("#1f2422", "Contorno del edificio", 1));
+            items.push(("#1f2422", "Building outline", 1));
         }
         if plan.is_some() {
-            items.push(("#1a9c3b", "Puerta principal", 1));
+            items.push(("#1a9c3b", "Main entrance", 1));
         }
         if has(&|p| p.doors.iter().any(|d| d.kind == DoorKind::Exit)) {
-            items.push(("#e07b12", "Salida", 1));
+            items.push(("#e07b12", "Exit", 1));
         }
         if has(&|p| p.doors.iter().any(|d| d.kind == DoorKind::Office)) {
-            items.push(("#2a8fb0", "Puerta de oficina", 1));
+            items.push(("#2a8fb0", "Office door", 1));
         }
-        let x0 = margin + text_w(if opts.title.is_empty() { "Plano" } else { &opts.title }, 13.0).max(300.0) + 30.0;
+        let x0 = margin + text_w(if opts.title.is_empty() { "Plan" } else { &opts.title }, 13.0).max(300.0) + 30.0;
         let x_max = pw - margin - 190.0;
         // filas de arriba hacia abajo
         let mut rows = 1;
@@ -400,24 +400,24 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
         let x0 = pw - margin - side;
         let mut y = ph - margin - 8.0;
         c.fill_rgb((0.1, 0.1, 0.1));
-        let title = if opts.title.is_empty() { "Distribución de puestos" } else { &opts.title };
+        let title = if opts.title.is_empty() { "Seating layout" } else { &opts.title };
         for line in wrap(title, side, 14.0) {
             c.text(x0, y - 12.0, 14.0, true, &line);
             y -= 17.0;
         }
-        c.text(x0, y - 10.0, 7.5, false, &format!("Escala 1:{n:.0} en {} · {date}", opts.paper.to_uppercase()));
+        c.text(x0, y - 10.0, 7.5, false, &format!("Scale 1:{n:.0} on {} · {date}", opts.paper.to_uppercase()));
         y -= 26.0;
         if let Some(l) = layout {
             let kp = &l.kpis;
             c.text(x0, y - 22.0, 26.0, true, &format!("{}", kp.seats_placed));
-            c.text(x0 + text_w(&format!("{}", kp.seats_placed), 26.0) + 4.0, y - 22.0, 12.0, false, &format!("/ {} puestos", kp.seats_requested));
+            c.text(x0 + text_w(&format!("{}", kp.seats_placed), 26.0) + 4.0, y - 22.0, 12.0, false, &format!("/ {} seats", kp.seats_requested));
             y -= 38.0;
             let rows: Vec<(String, String)> = vec![
-                ("Área útil".into(), format!("{:.0} m²", kp.area_m2)),
-                ("Área por puesto".into(), format!("{:.1} m²", kp.m2_per_seat)),
-                ("Recorrido a salida".into(), format!("{:.1} m prom. · {:.1} máx.", kp.avg_travel_exit_m, kp.max_travel_exit_m)),
-                ("Cerca de ventana".into(), format!("{:.0} %", kp.daylight_pct)),
-                ("Accesibles PMR".into(), format!("{}", kp.accessible_pmr)),
+                ("Usable area".into(), format!("{:.0} m²", kp.area_m2)),
+                ("Area per seat".into(), format!("{:.1} m²", kp.m2_per_seat)),
+                ("Walk to an exit".into(), format!("{:.1} m avg · {:.1} max", kp.avg_travel_exit_m, kp.max_travel_exit_m)),
+                ("Near a window".into(), format!("{:.0} %", kp.daylight_pct)),
+                ("Wheelchair accessible".into(), format!("{}", kp.accessible_pmr)),
             ];
             for (a, b) in rows {
                 c.fill_rgb((0.33, 0.38, 0.36));
@@ -446,17 +446,17 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
                     for t in &catalog {
                         let cnt = l.seats.iter().filter(|s| s.type_id == t.id).count();
                         if cnt > 0 {
-                            legend.push((hex_rgb(&t.color), format!("{} ({cnt} puestos)", t.name)));
+                            legend.push((hex_rgb(&t.color), format!("{} ({cnt} seats)", t.name)));
                         }
                     }
                 }
             }
             let free = l.seats.iter().filter(|s| s.role_id.is_empty()).count();
             if opts.color_by != "type" && free > 0 {
-                legend.push(((1.0, 1.0, 1.0), format!("Libres ({free})")));
+                legend.push(((1.0, 1.0, 1.0), format!("Free ({free})")));
             }
             c.fill_rgb((0.1, 0.1, 0.1));
-            c.text(x0, y, 9.0, true, "Convenciones");
+            c.text(x0, y, 9.0, true, "Legend");
             y -= 13.0;
             for (col, name) in legend {
                 if y < margin + 60.0 {
@@ -471,12 +471,15 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
                 y -= 11.0;
             }
             let has_exit = plan.map(|p| p.doors.iter().any(|d| d.kind == DoorKind::Exit)).unwrap_or(false);
-            let mut marks: Vec<(&str, &str)> = vec![("#1a9c3b", "Puerta principal")];
+            let mut marks: Vec<(&str, &str)> = vec![("#1a9c3b", "Main entrance")];
             if has_exit {
-                marks.push(("#e07b12", "Salida"));
+                marks.push(("#e07b12", "Exit"));
             }
             if !l.corridors.is_empty() {
-                marks.push(("#6fa8c4", "Pasillo principal"));
+                marks.push(("#6fa8c4", "Main corridor"));
+            }
+            if plan.map(|p| p.paths.iter().any(|x| x.keep)).unwrap_or(false) {
+                marks.push(("#d9822b", "Circulation path"));
             }
             for (col, name) in marks {
                 if y < margin + 60.0 {
@@ -492,7 +495,7 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
             if !hard.is_empty() && y > margin + 80.0 {
                 y -= 6.0;
                 c.fill_rgb(hex_rgb("#c4472b"));
-                c.text(x0, y, 8.0, true, &format!("Reglas incumplidas: {}", hard.len()));
+                c.text(x0, y, 8.0, true, &format!("Broken rules: {}", hard.len()));
                 y -= 11.0;
                 for v in hard.iter().take(4) {
                     for line in wrap(&v.message, side, 6.5) {
@@ -542,7 +545,7 @@ pub fn render_pdf(plan: Option<&Plan>, layout: Option<&Layout>, cfg: Option<&Con
     // escala guardada: al reimportar, la app la usa sin pedir calibración
     let info = doc.add_object(dictionary! {
         "Title" => Object::string_literal(opts.title.clone()),
-        "Producer" => "Optimizador de Puestos",
+        "Producer" => "Seats — office layout optimizer",
         "SeatoptMmPerPt" => Object::Real((1.0 / k) as f32),
         "SeatoptScale" => Object::Real(n as f32),
     });
@@ -557,7 +560,7 @@ fn door_inward(plan: &Plan, d: &Door) -> Pt {
     d.inward(plan)
 }
 
-fn draw_minimal_plan(c: &mut Canvas, plan: &Plan, layout: Option<&Layout>) {
+fn draw_minimal_plan(c: &mut Canvas, plan: &Plan, layout: Option<&Layout>, cfg: Option<&Config>) {
     let ink = (0.12, 0.14, 0.13);
     // área amoblable
     c.layer("A-MURO-EXT");
@@ -577,6 +580,31 @@ fn draw_minimal_plan(c: &mut Canvas, plan: &Plan, layout: Option<&Layout>) {
             c.raw("f");
         }
         c.raw("Q");
+        c.end_layer();
+    }
+    // circulation paths that are kept: a translucent band of their width + the centerline
+    let kept: Vec<&CircPath> = plan.paths.iter().filter(|p| p.keep && p.pts.len() >= 2).collect();
+    if !kept.is_empty() {
+        let rv = cfg.map(|c| crate::defaults::RuleView::new(&c.rules));
+        let general = |k: PathKind| match (&rv, k) {
+            (Some(r), PathKind::Primary) => r.val_or("P1", "primary", 1200.0),
+            (Some(r), PathKind::Secondary) => r.val_or("P1", "secondary", 900.0),
+            (None, PathKind::Primary) => 1200.0,
+            (None, PathKind::Secondary) => 900.0,
+        };
+        c.layer("SO-CIRCULATION");
+        for p in &kept {
+            let col = hex_rgb(if p.kind == PathKind::Primary { "#d9822b" } else { "#8a6fd1" });
+            c.raw("q /GS1 gs 1 J 1 j");
+            c.stroke_rgb(col);
+            c.lw(p.width.unwrap_or(general(p.kind)) * c.k);
+            c.path(&p.pts, false);
+            c.raw("S Q");
+            c.stroke_rgb(col);
+            c.lw(0.6);
+            c.path(&p.pts, false);
+            c.raw("S");
+        }
         c.end_layer();
     }
     // oficinas y recintos cerrados

@@ -7,7 +7,7 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 /** Versión web: el motor corre dentro del navegador. */
 export const isWeb = !isTauri && import.meta.env.VITE_WEB === '1';
 
-export const backendName = isTauri ? 'escritorio' : isWeb ? 'web' : 'navegador';
+export const backendName = isTauri ? 'desktop' : isWeb ? 'web' : 'browser';
 
 // ---- motor WebAssembly en un Web Worker (solo versión web)
 let worker: Worker | null = null;
@@ -16,7 +16,7 @@ const pending = new Map<number, (out: string) => void>();
 function engine(): Worker {
   if (!worker) {
     // la condición es constante al compilar: en escritorio el worker ni se empaqueta
-    if (import.meta.env.VITE_WEB !== '1') throw new Error('Motor web no disponible en esta compilación');
+    if (import.meta.env.VITE_WEB !== '1') throw new Error('Web engine not included in this build');
     worker = new Worker(new URL('./engine.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (ev: MessageEvent<{ id: number; out: string }>) => {
       const f = pending.get(ev.data.id);
@@ -61,7 +61,7 @@ export async function call<T>(cmd: string, args: Record<string, unknown> = {}): 
 export async function openPlan(converter?: string): Promise<ImportOut | null> {
   if (isTauri) {
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const path = await open({ multiple: false, filters: [{ name: 'Planos', extensions: ['dxf', 'dwg', 'pdf'] }] });
+    const path = await open({ multiple: false, filters: [{ name: 'Plans', extensions: ['dxf', 'dwg', 'pdf'] }] });
     if (!path || Array.isArray(path)) return null;
     return tauriInvoke<ImportOut>('import_path', { path, converter: converter || null });
   }

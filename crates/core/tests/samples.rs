@@ -99,7 +99,7 @@ fn plano_simplificado_ida_y_vuelta() {
     let d3 = import::import_bytes("base.pdf", &pdf).unwrap();
     let ro3 = suggest_roles(&d3);
     let sg3 = guess_scale(&d3, &ro3);
-    assert!(sg3.reason.contains("guardada"));
+    assert!(sg3.reason.contains("saved"));
     let r3 = analyze(&d3, &AnalyzeOptions { mm_per_unit: sg3.mm_per_unit, roles: ro3, seed: None, gap_close: 1200.0 }).unwrap();
     assert!((r3.area_m2 - r.area_m2).abs() < r.area_m2 * 0.03, "área {} vs {}", r3.area_m2, r.area_m2);
     assert_eq!(count(&r3.plan, DoorKind::Main), 1);
@@ -235,4 +235,18 @@ fn circulation_paths_are_kept_clear() {
             }
         }
     }
+}
+
+#[test]
+fn pdf_draws_circulation_paths() {
+    let path = format!("{}/../../samples/03_planta_L_oficinas.dxf", env!("CARGO_MANIFEST_DIR"));
+    let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
+    let roles = suggest_roles(&d);
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let cfg = default_config();
+    let mut plan = r.plan.clone();
+    plan.paths = seat_core::engine::circulation::compute(&Problem { plan: plan.clone(), config: cfg.clone() }).unwrap();
+    let opts = seat_core::pdf_out::PdfOpts { paper: "A3".into(), scale: None, title: "t".into(), color_by: "type".into(), background: false, hidden_layers: vec![], clean: true, numbers: false };
+    let pdf = seat_core::pdf_out::render_pdf(Some(&plan), None, Some(&cfg), None, &opts).unwrap();
+    assert!(String::from_utf8_lossy(&pdf).contains("SO-CIRCULATION"));
 }

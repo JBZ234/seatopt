@@ -7,11 +7,11 @@ use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 pub fn read_pdf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
-    let doc = Document::load_mem(bytes).map_err(|e| format!("No se pudo abrir el PDF: {e}"))?;
+    let doc = Document::load_mem(bytes).map_err(|e| format!("Could not open the PDF: {e}"))?;
     let pages = doc.get_pages();
-    let (&_num, &page_id) = pages.iter().next().ok_or("El PDF no tiene páginas")?;
+    let (&_num, &page_id) = pages.iter().next().ok_or("The PDF has no pages")?;
     let mut d = Drawing::new(name, SourceKind::Pdf);
-    d.unit_note = "PDF: las unidades son puntos de papel; hay que fijar la escala (calibrar).".into();
+    d.unit_note = "PDF: units are paper points; the scale must be set (calibrate).".into();
     // escala guardada por esta app al exportar
     if let Ok(info) = doc.trailer.get(b"Info").and_then(|i| doc.dereference(i).map(|(_, o)| o)).and_then(|o| o.as_dict()) {
         if let Ok(v) = info.get(b"SeatoptMmPerPt") {
@@ -19,7 +19,7 @@ pub fn read_pdf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
             if mm > 0.0 {
                 d.declared_unit_mm = Some(mm);
                 let sc = info.get(b"SeatoptScale").map(num).unwrap_or(mm / (25.4 / 72.0));
-                d.unit_note = format!("Escala guardada en el PDF: 1:{sc:.0}");
+                d.unit_note = format!("Scale saved in the PDF: 1:{sc:.0}");
             }
         }
     }
@@ -36,11 +36,11 @@ pub fn read_pdf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
         }
     }
     let mut st = Interp { doc: &doc, d: &mut d, depth: 0 };
-    let default_layer = st.d.layer_id("(sin capa)", "#555555");
+    let default_layer = st.d.layer_id("(no layer)", "#555555");
     st.run(&content, &res, Affine::IDENTITY, default_layer);
     d.finalize();
     if d.paths.is_empty() {
-        return Err("El PDF no contiene trazos vectoriales (¿es un escaneo?). Exporta el PDF desde AutoCAD o usa el DXF.".into());
+        return Err("The PDF has no vector strokes (is it a scan?). Export the PDF from AutoCAD or use the DXF.".into());
     }
     // quitar la capa vacía por defecto si no se usó
     Ok(d)

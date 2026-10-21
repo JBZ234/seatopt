@@ -227,7 +227,7 @@ export function pinSelection(pin: boolean, lockPeople = true) {
     for (const s of l.seats) if (sel.modules.includes(s.moduleId)) s.locked = pin && lockPeople && !!s.roleId;
   });
   const n = sel.modules.length;
-  S().say(pin ? `${n} escritorio${n > 1 ? 's' : ''} fijado${n > 1 ? 's' : ''}: la próxima optimización los conserva${lockPeople ? ' con sus personas' : ''}.` : `${n} escritorio${n > 1 ? 's' : ''} liberado${n > 1 ? 's' : ''}.`);
+  S().say(pin ? `${n} desk${n > 1 ? 's' : ''} pinned: the next optimization keeps ${n > 1 ? 'them' : 'it'}${lockPeople ? ' with their people' : ''}.` : `${n} desk${n > 1 ? 's' : ''} released.`);
 }
 
 export function selectAll() {
@@ -241,12 +241,12 @@ export function describeSel(sel: Selection): string {
   const parts: string[] = [];
   if (sel.modules.length) {
     const seats = layout?.seats.filter((s) => sel.modules.includes(s.moduleId)).length ?? 0;
-    parts.push(`${sel.modules.length} escritorio${sel.modules.length > 1 ? 's' : ''} (${seats} puestos)`);
+    parts.push(`${sel.modules.length} desk${sel.modules.length > 1 ? 's' : ''} (${seats} seats)`);
   }
-  if (sel.obstacles.length) parts.push(`${sel.obstacles.length} obstáculo${sel.obstacles.length > 1 ? 's' : ''}`);
-  if (sel.doors.length) parts.push(`${sel.doors.length} puerta${sel.doors.length > 1 ? 's' : ''}`);
-  if (sel.windows.length) parts.push(`${sel.windows.length} ventana${sel.windows.length > 1 ? 's' : ''}`);
-  if (sel.region?.length) parts.push('contorno del recinto');
+  if (sel.obstacles.length) parts.push(`${sel.obstacles.length} obstacle${sel.obstacles.length > 1 ? 's' : ''}`);
+  if (sel.doors.length) parts.push(`${sel.doors.length} door${sel.doors.length > 1 ? 's' : ''}`);
+  if (sel.windows.length) parts.push(`${sel.windows.length} window${sel.windows.length > 1 ? 's' : ''}`);
+  if (sel.region?.length) parts.push('area outline');
   return parts.join(', ');
 }
 
