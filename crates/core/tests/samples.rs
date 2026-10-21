@@ -45,6 +45,11 @@ fn angosto_reporta_faltantes() {
 #[test]
 fn pdf_real_con_capas() {
     let path = format!("{}/../../samples/real_oficina401.pdf", env!("CARGO_MANIFEST_DIR"));
+    // plano real privado: no está en el repositorio público; la prueba corre solo si existe
+    if !std::path::Path::new(&path).exists() {
+        eprintln!("(se omite: falta {path})");
+        return;
+    }
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     assert!(d.layers.iter().any(|l| l.name == "4-WALL"));
     let roles = suggest_roles(&d);
@@ -126,6 +131,11 @@ fn maximo_posible_supera_lo_fijo() {
 #[test]
 fn lineas_simples_misma_area() {
     let path = format!("{}/../../samples/real_oficina401.pdf", env!("CARGO_MANIFEST_DIR"));
+    // plano real privado: no está en el repositorio público; la prueba corre solo si existe
+    if !std::path::Path::new(&path).exists() {
+        eprintln!("(se omite: falta {path})");
+        return;
+    }
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);

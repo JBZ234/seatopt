@@ -12,3 +12,8 @@ src-tauri/gen/
 /*.dwg
 /*.puestos.json
 /planos_prueba/
+
+# planos reales y herramientas de entrega de clientes: solo en el PC, nunca en el repositorio
+samples/real_*
+crates/core/examples/deliver.rs
+crates/core/examples/original.rs
