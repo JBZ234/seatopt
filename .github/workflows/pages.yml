@@ -38,7 +38,7 @@ jobs:
           tool: wasm-bindgen-cli@0.2.129
 
       - name: Motor a WebAssembly
-        run: ./scripts/build-wasm.sh
+        run: bash ./scripts/build-wasm.sh
 
       - uses: actions/setup-node@v4
         with:

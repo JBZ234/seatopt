@@ -1,0 +1,3 @@
+# scripts de compilación con finales de línea Unix (los usa GitHub Actions)
+*.sh text eol=lf
+*.yml text eol=lf

@@ -58,7 +58,7 @@ El enlace queda en `https://<usuario>.github.io/<repositorio>/`.
 `rustup target add wasm32-unknown-unknown` y `cargo install wasm-bindgen-cli --version 0.2.129 --locked`):
 
 ```bash
-./scripts/build-wasm.sh          # motor → ui/src/wasm (una vez, o cuando cambie el motor)
+bash scripts/build-wasm.sh       # motor → ui/src/wasm (una vez, o cuando cambie el motor)
 npm --prefix ui run dev:web      # http://localhost:1420, con hilos
 npm --prefix ui run build:web    # sitio estático en ui/dist-web
 ```
