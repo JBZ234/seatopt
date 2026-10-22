@@ -68,11 +68,15 @@ npm --prefix ui run build:web    # static site in ui/dist-web
 
 The app opens on a simple screen to **choose the plan** (or a saved project). **Close plan**, top right, goes back to it.
 
-1. **Plan** — three guided tasks, each with its status. The pending task turns on its tool and shows the instruction over the plan.
-   - **Scale:** read from the file (DXF units, or the scale saved in PDFs exported by the app) or estimated from the size of the doors. **Calibrate with a known length:** two clicks on something you know.
-   - **Area to furnish:** detected automatically (the sheet frame is ignored). If it is wrong, **click inside the area**, or **Draw outline** with snapping to the drawing.
-   - **Main entrance:** if the app picked the widest door it asks you to confirm. **Mark it on the plan** or **Draw door** if none was found.
-   - Optional settings: exits, obstacles and areas, layer roles and **Export base plan**.
+1. **Plan** — two ways, chosen at the top (**Draw by hand** / **Detect automatically**); the welcome screen remembers which one new plans start with. **Draw without a plan** starts on a blank grid.
+   - **Scale:** read from the file (DXF units, or the scale saved in PDFs exported by the app) or estimated from the size of the doors. **Calibrate with a known length:** two clicks on something you know. Changing it keeps what you drew on the same lines.
+   - **Draw by hand (like AutoCAD):**
+     - **Areas to furnish:** *Draw area* (click the corners) or *Rectangle*. Points snap to corners (square) and edges (×) of the drawing; **Ortho** keeps lines horizontal or vertical (F8 toggles it, Shift does the opposite while held). Type a length in meters and Enter (`3.5`, `3,5`), a length and angle (`3.5<90`), an offset (`2x1.5`) or, for a rectangle, width x height (`4x3`). Enter, right-click, double-click, `C` or a click on the first point closes it; Backspace removes the last point; Esc cancels. Outlines that overlap are joined; areas that only touch stay separate. *Edit* selects an area: drag its corners, double-click an edge to add a corner, click a corner and Delete to remove it.
+     - **Doors:** *Main entrance*, *Door*, *Exit*: click both ends of the opening (or one end and type the width). They snap onto the edge of the areas and stay along that wall.
+     - **Obstacles (optional):** column, fixed office or room, panel or cabinet, reserved area; as a rectangle or an outline.
+   - **Detect automatically:** the area is found from the walls (sheet frames are ignored). Click inside it, add or remove rooms, and confirm the main entrance the app picked. *Fix it by hand* switches to drawing with what was detected.
+   - **Check:** a live list of problems (the outline crosses itself, areas overlap, no main entrance or it is not on an area, an area nobody can get into, doors off the areas, obstacles outside…). *Show* zooms to each one. **Continue** (and the other steps) unlock when there are no errors; warnings do not block.
+   - Optional settings: layer roles and **Export base plan**.
 2. **Circulation** — walking routes, drawn before the desks.
    - The app calculates a path from the main entrance to **every office door and exit**. They run along walls and obstacles like a real corridor, with straight horizontal and vertical runs, and paths that run almost side by side are merged into one band.
    - **Office-to-office paths** (toggle) are secondary: each office door is linked to its two nearest ones. They start unchecked; check the ones the optimizer must keep.

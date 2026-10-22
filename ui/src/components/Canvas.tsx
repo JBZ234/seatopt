@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { placeDesk } from '../actions';
+import { addDrawnArea, addDrawnDoor, addDrawnObstacle, deleteArea, placeDesk, setAreaRing } from '../actions';
+import { areaAt, projLine, projSeg } from '../draw';
 import { circWidth, deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
 import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
-import { emptySel, selCount, STEP, useApp, uid, type Tool } from '../store';
+import { DRAFT_TOOLS, emptySel, selCount, STEP, useApp, uid, type Tool } from '../store';
 import type { CircPath, Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
 const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
@@ -137,10 +138,14 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   }, []);
 
   // encuadre al cambiar de dibujo / recinto
-  const fitKey = `${st.drawing?.drawingId}|${plan ? plan.region.length + ':' + (plan.region[0]?.length ?? 0) : 'np'}|${st.mmPerUnit}`;
+  const fitKey = `${st.drawing?.drawingId}|${!plan ? 'np' : st.planMode === 'draw' ? 'draw' : plan.region.length + ':' + (plan.region[0]?.length ?? 0)}|${st.mmPerUnit}`;
   const fit = () => {
     const b = boundsOf(plan, background);
-    if (!b) return;
+    if (!b) {
+      // nothing drawn yet: 30 m across, origin in the middle
+      setView({ k: size.w / 30000, tx: size.w / 2, ty: size.h / 2 });
+      return;
+    }
     const [x0, y0, x1, y1] = b;
     const m = 40;
     const k = Math.min((size.w - 2 * m) / Math.max(1, x1 - x0), (size.h - 2 * m) / Math.max(1, y1 - y0));
@@ -193,7 +198,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     plan?.doors.forEach((d) => ring([d.a, d.b], false));
     return { idx, seg, cell };
   }, [background, hiddenLayers, plan]);
-  const SNAP_TOOLS: string[] = ['outline', 'drawDoor', 'window', 'column', 'fixedOffice', 'restricted', 'reserved', 'calibrate', 'placeDesk'];
+  const SNAP_TOOLS: string[] = ['outline', 'drawDoor', 'window', 'column', 'fixedOffice', 'restricted', 'reserved', 'calibrate', 'placeDesk', ...DRAFT_TOOLS];
   const snapPt = (w: Pt): Pt | null => {
     const r = 10 / view.k;
     const { idx, cell } = snapIndex;
@@ -395,28 +400,181 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     return { c: raw, mark: null };
   };
   const worldAt = (sx: number, sy: number): Pt => snapAll(toWorld(sx, sy), objectSnapNow()).p;
-  // contorno dibujado a mano
-  const [outline, setOutline] = useState<Pt[]>([]);
   const [snapMark, setSnapMark] = useState<{ p: Pt; kind: SnapKind } | null>(null);
-  useEffect(() => { if (tool !== 'outline') setOutline([]); }, [tool]);
-  const finishOutline = (pts: Pt[]) => {
-    if (pts.length < 3) return;
-    const area = Math.abs(pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + p.x * q.y - q.x * p.y; }, 0)) / 2e6;
-    const cur = st.plan;
-    if (cur) st.snapshot();
-    st.set({ plan: { region: [pts], obstacles: cur?.obstacles ?? [], doors: cur?.doors ?? [], windows: cur?.windows ?? [] }, areaM2: area, tool: 'select' });
-    setOutline([]);
-    st.say((cur?.doors.some((d) => d.kind === 'main') ? 'Outline ready.' : 'Outline ready. Now mark the main entrance with “Door”.'));
+
+  // ------------------------------------------------ drawing point by point (like AutoCAD)
+  const isDraft = DRAFT_TOOLS.includes(tool);
+  const draftKind: 'area' | 'obs' | 'door' = tool === 'drawArea' || tool === 'outline' ? 'area' : tool === 'drawObs' ? 'obs' : 'door';
+  const rectMode = isDraft && draftKind !== 'door' && st.drawShape === 'rect' && tool !== 'outline';
+  const doorKind: DoorKind = tool === 'drawMain' ? 'main' : tool === 'drawExit' ? 'exit' : 'office';
+  const [draft, setDraft] = useState<Pt[]>([]);
+  const [typed, setTyped] = useState('');
+  const [downAt, setDownAt] = useState<{ sx: number; sy: number } | null>(null);
+  // the wall a door is being drawn on: its second end stays on that line
+  const [draftEdge, setDraftEdge] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [shiftOn, setShiftOn] = useState(false);
+  useEffect(() => { setDraft([]); setTyped(''); setDraftEdge(null); setDownAt(null); }, [tool, st.drawShape]);
+  /** Nearest edge of an area or an obstacle (doors go on them). */
+  const nearEdge = (p: Pt, tol: number): { a: Pt; b: Pt } | null => {
+    if (!plan) return null;
+    let best: { a: Pt; b: Pt } | null = null, bd = tol;
+    const scan = (r: Pt[]) => {
+      for (let i = 0; i < r.length; i++) {
+        const a = r[i], b = r[(i + 1) % r.length];
+        const d = distSeg(p, a, b);
+        if (d < bd) { bd = d; best = { a, b }; }
+      }
+    };
+    plan.region.forEach(scan);
+    plan.obstacles.forEach((o) => scan(o.poly));
+    return best;
+  };
+  const orthoNow = (shift: boolean) => st.ortho !== shift;
+  /** The point the next click would place, with snapping and ortho. */
+  const draftPt = (raw: Pt, shift: boolean): { p: Pt; kind: SnapKind } => {
+    const sn = snapAll(raw, true);
+    if (draftKind === 'door') {
+      if (noSnap) return sn;
+      if (draft.length && draftEdge) return { p: projLine(sn.p, draftEdge.a, draftEdge.b), kind: 'edge' };
+      const e = nearEdge(sn.p, 14 / view.k);
+      return e ? { p: projSeg(sn.p, e.a, e.b), kind: sn.kind === 'vertex' ? 'vertex' : 'edge' } : sn;
+    }
+    const last = draft[draft.length - 1];
+    if (last && !rectMode && orthoNow(shift) && sn.kind !== 'vertex') {
+      const dx = sn.p.x - last.x, dy = sn.p.y - last.y;
+      return { p: Math.abs(dx) >= Math.abs(dy) ? { x: sn.p.x, y: last.y } : { x: last.x, y: sn.p.y }, kind: null };
+    }
+    return sn;
+  };
+  const rectPts = (a: Pt, b: Pt): Pt[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }];
+  const commitPoly = (pts: Pt[]): boolean => (draftKind === 'area' ? addDrawnArea(pts) : addDrawnObstacle(pts, st.obsKind));
+  const finishDraft = (pts = draft) => {
+    if (draftKind === 'door' || rectMode) return;
+    if (pts.length < 3) { if (pts.length) st.say('Click at least 3 corners, then Enter.'); return; }
+    if (commitPoly(pts)) { setDraft([]); setTyped(''); }
+  };
+  const commitTwo = (a: Pt, b: Pt) => {
+    if (draftKind === 'door') {
+      if (addDrawnDoor(doorKind, a, b)) {
+        setDraft([]); setDraftEdge(null); setTyped('');
+        if (doorKind === 'main') st.set({ tool: 'drawDoor' });
+      }
+      return;
+    }
+    if (Math.abs(b.x - a.x) < 50 || Math.abs(b.y - a.y) < 50) { st.say('Drag or click the opposite corner of the rectangle.'); return; }
+    if (commitPoly(rectPts(a, b))) { setDraft([]); setTyped(''); }
+  };
+  const addPoint = (p: Pt) => {
+    if (!draft.length) {
+      setDraft([p]);
+      if (draftKind === 'door') setDraftEdge(nearEdge(p, Math.max(2, 3 / view.k)));
+      return;
+    }
+    if (draftKind === 'door' || rectMode) { commitTwo(draft[0], p); return; }
+    const last = draft[draft.length - 1];
+    if (Math.hypot((p.x - last.x) * view.k, (p.y - last.y) * view.k) < 3) return; // a double click
+    if (draft.length >= 3 && Math.hypot((p.x - draft[0].x) * view.k, (p.y - draft[0].y) * view.k) < 12) { finishDraft(); return; }
+    setDraft([...draft, p]);
+  };
+  /** Typed in meters: “3.5” (that length toward the cursor), “3.5<90” (length and angle), “2x1.5”
+   *  (offset x and y; for a rectangle, its width and height). Comma or point for decimals. */
+  const applyTyped = () => {
+    const t = typed.trim().replace(/,/g, '.');
+    setTyped('');
+    const last = draft[draft.length - 1];
+    if (!t || !last) return;
+    const num = (v: string) => parseFloat(v) * 1000;
+    const c = cursor ?? { x: last.x + 1000, y: last.y };
+    let p: Pt | null = null;
+    if (t.includes('<')) {
+      const [l, a] = t.split('<').map(num);
+      if (isFinite(l) && isFinite(a)) { const r = (a / 1000) * Math.PI / 180; p = { x: last.x + Math.cos(r) * l, y: last.y + Math.sin(r) * l }; }
+    } else if (/[x*;]/i.test(t)) {
+      const [a, b] = t.split(/[x*;]/i).map(num);
+      if (isFinite(a) && isFinite(b)) {
+        if (rectMode) {
+          const sx = c.x >= last.x ? 1 : -1, sy = c.y >= last.y ? 1 : -1;
+          p = { x: last.x + Math.abs(a) * (a < 0 ? -1 : sx), y: last.y + Math.abs(b) * (b < 0 ? -1 : sy) };
+        } else p = { x: last.x + a, y: last.y + b };
+      }
+    } else {
+      const l = num(t);
+      if (isFinite(l)) {
+        if (rectMode) {
+          const sx = c.x >= last.x ? 1 : -1, sy = c.y >= last.y ? 1 : -1;
+          p = { x: last.x + l * sx, y: last.y + l * sy };
+        } else {
+          let dx = c.x - last.x, dy = c.y - last.y;
+          const L = Math.hypot(dx, dy);
+          if (draftKind === 'door' && draftEdge) {
+            // a door runs along its wall, toward the cursor
+            const ex = draftEdge.b.x - draftEdge.a.x, ey = draftEdge.b.y - draftEdge.a.y, el = Math.hypot(ex, ey) || 1;
+            const sg = dx * ex + dy * ey < -1 ? -1 : 1;
+            dx = (ex / el) * sg; dy = (ey / el) * sg;
+          } else if (L < 1) { dx = 1; dy = 0; } else { dx /= L; dy /= L; }
+          p = { x: last.x + dx * l, y: last.y + dy * l };
+        }
+      }
+    }
+    if (!p) { st.say('Type a length in meters (3.5), a length and angle (3.5<90) or an offset (2x1.5).', 'error'); return; }
+    if (draftKind === 'door' || rectMode) commitTwo(draft[0], p);
+    else setDraft([...draft, p]);
+  };
+  // corner of an area or obstacle picked to delete (Delete key)
+  const [vSel, setVSel] = useState<{ id: string; idx: number } | null>(null);
+  useEffect(() => { setVSel(null); }, [st.selection, tool]);
+  const ringOf = (id: string): Pt[] | null => (id.startsWith('@r') ? plan?.region[+id.slice(2)] ?? null : plan?.obstacles.find((o) => o.id === id)?.poly ?? null);
+  const setRing = (id: string, poly: Pt[]) => {
+    if (id.startsWith('@r')) return setAreaRing(+id.slice(2), poly);
+    st.updatePlan((pl) => { const o = pl.obstacles.find((x) => x.id === id); if (o) o.poly = poly; pl.paths = []; });
+    st.set({ layout: null });
+    return true;
   };
   useEffect(() => {
+    const isField = (e: KeyboardEvent) => { const t = e.target as HTMLElement; return !!t && ['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName); };
+    const stop = (e: KeyboardEvent) => { e.preventDefault(); e.stopImmediatePropagation(); };
     const k = (e: KeyboardEvent) => {
-      if (tool !== 'outline') return;
-      if (e.key === 'Enter') finishOutline(outline);
-      if (e.key === 'Backspace') setOutline((o) => o.slice(0, -1));
+      if (e.key === 'Shift') setShiftOn(true);
+      if (isField(e)) return;
+      if (isDraft) {
+        if (e.key === 'F8') { stop(e); const on = !st.ortho; st.set({ ortho: on }); st.say(on ? 'Ortho on: lines go horizontal or vertical (Shift for any angle).' : 'Ortho off (hold Shift for straight lines).'); return; }
+        if (draft.length) {
+          if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.,<x*;-]$/i.test(e.key)) { stop(e); setTyped((t) => t + e.key); return; }
+          if (e.key === 'Backspace') { stop(e); if (typed) setTyped(typed.slice(0, -1)); else { const d = draft.slice(0, -1); setDraft(d); if (!d.length) setDraftEdge(null); } return; }
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { stop(e); const d = draft.slice(0, -1); setDraft(d); if (!d.length) setDraftEdge(null); return; }
+          if (e.key === 'Enter') { stop(e); if (typed) applyTyped(); else finishDraft(); return; }
+          if (e.key === 'Escape') { stop(e); if (typed) setTyped(''); else { setDraft([]); setDraftEdge(null); } return; }
+          if ((e.key === 'c' || e.key === 'C') && !typed && draftKind !== 'door' && !rectMode && draft.length >= 3) { stop(e); finishDraft(); return; }
+        }
+      }
+      if (vSel && (e.key === 'Delete' || e.key === 'Backspace')) {
+        stop(e);
+        const r = ringOf(vSel.id);
+        if (!r) return;
+        if (r.length <= 3) { st.say('It needs at least 3 corners. To remove it, select it and press Delete.'); return; }
+        if (setRing(vSel.id, r.filter((_, i) => i !== vSel.idx))) setVSel(null);
+      }
     };
-    window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') setShiftOn(false); };
+    window.addEventListener('keydown', k, true);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', k, true); window.removeEventListener('keyup', up); };
   });
+
+  // ------------------------------------------------ show a point (from the check list)
+  const [flash, setFlash] = useState<Pt | null>(null);
+  useEffect(() => {
+    const f = st.focus;
+    if (!f) return;
+    setView((v) => {
+      const k = Math.max(v.k, Math.min(size.w, size.h) / 12000);
+      return { k, tx: size.w / 2 - f.p.x * k, ty: size.h / 2 + f.p.y * k };
+    });
+    setFlash(f.p);
+    const t = setTimeout(() => setFlash(null), 2200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.focus]);
   const evPt = (e: React.MouseEvent | React.WheelEvent) => {
     const r = svgRef.current!.getBoundingClientRect();
     return { sx: e.clientX - r.left, sy: e.clientY - r.top };
@@ -816,6 +974,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       return;
     }
     if (editPaths && e.button === 0 && st.pathSel && !e.shiftKey) st.set({ pathSel: null });
+    if (isDraft && e.button === 0) {
+      if (!draft.length) { addPoint(draftPt(toWorld(x, y), e.shiftKey).p); setDownAt({ sx: x, sy: y }); }
+      return;
+    }
     if (tool === 'select' && e.button === 0) {
       // ¿clic sobre algo ya seleccionado? → mover
       const hit = pickPoint(toWorld(x, y), 8 / view.k);
@@ -825,7 +987,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
-    if (['column', 'fixedOffice', 'restricted', 'reserved', 'window', 'drawDoor'].includes(tool)) {
+    if (['column', 'fixedOffice', 'restricted', 'reserved', 'window'].includes(tool)) {
       setDrag({ a: w, b: w });
     }
   };
@@ -863,7 +1025,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       }
       return;
     }
-    const sn = snapAll(toWorld(x, y), objectSnapNow());
+    if (e.shiftKey !== shiftOn) setShiftOn(e.shiftKey);
+    const sn = isDraft ? draftPt(toWorld(x, y), e.shiftKey) : snapAll(toWorld(x, y), objectSnapNow());
     const w = sn.p;
     setCursor(w);
     if (sn.kind) {
@@ -911,8 +1074,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       setVEdit(null);
       setSnapMark(null);
       if (v.poly.some((q, i) => Math.hypot(q.x - v.orig[i].x, q.y - v.orig[i].y) > 1)) {
-        st.updatePlan((pl) => { const o = pl.obstacles.find((x) => x.id === v.id); if (o) o.poly = v.poly; });
-      }
+        if (v.id.startsWith('@r')) setRing(v.id, v.poly);
+        else st.updatePlan((pl) => { const o = pl.obstacles.find((x) => x.id === v.id); if (o) o.poly = v.poly; });
+      } else setVSel({ id: v.id, idx: v.idx }); // a click on the corner: picked (Delete removes it)
       return;
     }
     if (cdrag) {
@@ -930,6 +1094,23 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const moved = Math.hypot(x - panRef.current.sx, y - panRef.current.sy) > 4;
       panRef.current = null;
       if (moved || tool === 'pan') return;
+      // right click without moving = Enter (like AutoCAD)
+      if (isDraft && e.button === 2) { if (typed) applyTyped(); else finishDraft(); return; }
+    }
+    if (isDraft) {
+      if (e.button !== 0) return;
+      const p = draftPt(toWorld(x, y), e.shiftKey).p;
+      if (downAt) {
+        const moved = Math.hypot(x - downAt.sx, y - downAt.sy) > 6;
+        setDownAt(null);
+        if (!moved) return; // the first point went in on mouse down
+        // dragged from the first point: a rectangle or door from corner to corner
+        if (draftKind === 'door' || rectMode) commitTwo(draft[0], p);
+        else setDraft([...draft, p]);
+        return;
+      }
+      addPoint(p);
+      return;
     }
     if (box) {
       const b = box;
@@ -970,13 +1151,6 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       if (Math.hypot(a.x - b.x, a.y - b.y) < 100) return;
       if (tool === 'window') {
         st.updatePlan((p) => { p.windows.push({ a, b }); });
-      } else if (tool === 'drawDoor') {
-        const kind: DoorKind = st.plan?.doors.some((d) => d.kind === 'main') ? 'office' : 'main';
-        st.updatePlan((p) => {
-          p.doors.push({ id: uid('d'), kind, a, b, label: '' });
-        });
-        if (kind === 'main') st.set({ mainConfirmed: true, tool: 'select' });
-        st.say(kind === 'main' ? 'Main entrance added. The next doors you draw will be office doors; change them with “Change type”.' : 'Door added.');
       } else {
         const kind = tool as ObstacleKind;
         const label = kind === 'reserved' ? (prompt('Name of the reserved area (e.g. Printers):') ?? '') : '';
@@ -991,14 +1165,6 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     }
     if (e.button !== 0) return;
     switch (tool) {
-      case 'outline': {
-        if (outline.length >= 3 && Math.hypot((outline[0].x - w.x) * view.k, (outline[0].y - w.y) * view.k) < 12) {
-          finishOutline(outline);
-        } else {
-          setOutline([...outline, w]);
-        }
-        break;
-      }
       case 'seed':
         onSeed(w, e.shiftKey ? 'add' : 'set');
         break;
@@ -1048,7 +1214,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         const wi = plan.windows.findIndex((q) => distSeg(r, q.a, q.b) < 400);
         if (wi >= 0) { st.updatePlan((p) => { p.windows.splice(wi, 1); }); return; }
         const d = nearestDoor(r);
-        if (d) st.updatePlan((p) => { p.doors = p.doors.filter((x) => x.id !== d.id); });
+        if (d) { st.updatePlan((p) => { p.doors = p.doors.filter((x) => x.id !== d.id); }); return; }
+        const ai = areaAt(plan, r);
+        if (ai >= 0) deleteArea(ai);
         break;
       }
       case 'pan':
@@ -1080,10 +1248,28 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const flagged = (s: Seat) => s.flags.some((f) => f.startsWith('No access') || f.startsWith('Travel') || f.startsWith('Common travel') || f.startsWith('Rule'));
 
   return (
-    <div className={'canvas ' + cursorCls}>
+    <div className={'canvas ' + cursorCls + (st.step === STEP.plan ? ' on-plan' : '')}>
       <svg ref={svgRef} width={size.w} height={size.h} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
         onMouseLeave={() => { panRef.current = null; setHover(null); setCursor(null); }} onWheel={onWheel}
-        onContextMenu={(e) => e.preventDefault()} onDoubleClick={() => { if (tool === 'outline') finishOutline(outline); }} role="img" aria-label="Office plan">
+        onContextMenu={(e) => e.preventDefault()} onDoubleClick={(e) => {
+          if (isDraft) { finishDraft(); return; }
+          // double click on the edge of the selected area or obstacle: a new corner there
+          if (tool !== 'select' || !plan) return;
+          const id = sel.region?.length === 1 && !sel.obstacles.length ? '@r' + sel.region[0] : sel.obstacles.length === 1 && !sel.region?.length ? sel.obstacles[0] : null;
+          const r = id ? ringOf(id) : null;
+          if (!id || !r) return;
+          const { sx: x, sy: y } = evPt(e);
+          const q = toWorld(x, y);
+          let bi = -1, bd = 10 / view.k;
+          for (let i = 0; i < r.length; i++) { const dd = distSeg(q, r[i], r[(i + 1) % r.length]); if (dd < bd) { bd = dd; bi = i; } }
+          if (bi < 0) return;
+          const np = projSeg(q, r[bi], r[(bi + 1) % r.length]);
+          const out = [...r.slice(0, bi + 1), np, ...r.slice(bi + 1)];
+          // keep it: a corner on a straight run is removed by the tidy-up, so store it raw
+          if (id.startsWith('@r')) st.updatePlan((pl) => { pl.region[+id.slice(2)] = out; if (pl.regionClear?.[+id.slice(2)]) pl.regionClear[+id.slice(2)] = []; });
+          else st.updatePlan((pl) => { const o = pl.obstacles.find((x) => x.id === id); if (o) o.poly = out; });
+          setVSel({ id, idx: bi + 1 });
+        }} role="img" aria-label="Office plan">
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k} ${-view.k})`}>
           {showBackground && <g className="bg">{bgEls}</g>}
           {planEls}
@@ -1122,15 +1308,23 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             : tool === 'drawDoor' ? <line className="draft door-draft" x1={drag.a.x} y1={drag.a.y} x2={drag.b.x} y2={drag.b.y} />
             : <rect className="draft" x={Math.min(drag.a.x, drag.b.x)} y={Math.min(drag.a.y, drag.b.y)} width={Math.abs(drag.b.x - drag.a.x)} height={Math.abs(drag.b.y - drag.a.y)} />)}
           {st.calib.length === 1 && cursor && <line className="draft" x1={st.calib[0].x} y1={st.calib[0].y} x2={cursor.x} y2={cursor.y} />}
-          {outline.length > 0 && (
-            <polyline className="draft outline-draft" points={[...outline, ...(cursor ? [cursor] : [])].map((p) => `${p.x},${p.y}`).join(' ')} />
-          )}
+          {isDraft && draft.length > 0 && cursor && (draftKind === 'door'
+            ? <line className={'draft door-draft ' + doorKind} x1={draft[0].x} y1={draft[0].y} x2={cursor.x} y2={cursor.y} />
+            : rectMode
+              ? <path className={'draft shape-draft ' + draftKind} d={ringD(rectPts(draft[0], cursor))} />
+              : <>
+                  <path className={'draft shape-fill ' + draftKind} d={ringD([...draft, cursor])} />
+                  <polyline className={'draft outline-draft ' + draftKind} points={[...draft, cursor].map((p) => `${p.x},${p.y}`).join(' ')} />
+                  {draft.length >= 2 && <line className="draft closing" x1={cursor.x} y1={cursor.y} x2={draft[0].x} y2={draft[0].y} />}
+                </>)}
         </g>
         <g className="labels">
           {snapMark?.kind === 'vertex' && <rect className="snap" x={sx(snapMark.p) - 5} y={sy(snapMark.p) - 5} width={10} height={10} />}
           {snapMark?.kind === 'edge' && <path className="snap" d={`M${sx(snapMark.p) - 5} ${sy(snapMark.p) - 5}L${sx(snapMark.p) + 5} ${sy(snapMark.p) + 5}M${sx(snapMark.p) + 5} ${sy(snapMark.p) - 5}L${sx(snapMark.p) - 5} ${sy(snapMark.p) + 5}`} />}
           {snapMark?.kind === 'grid' && <circle className="snap grid-snap" cx={sx(snapMark.p)} cy={sy(snapMark.p)} r={3.5} />}
-          {outline.length > 0 && <circle className="snap-start" cx={sx(outline[0])} cy={sy(outline[0])} r={6} />}
+          {isDraft && draft.length > 0 && draftKind !== 'door' && !rectMode && <circle className="snap-start" cx={sx(draft[0])} cy={sy(draft[0])} r={6} />}
+          {isDraft && draft.map((q, i) => <circle key={'dp' + i} className="draft-pt" cx={sx(q)} cy={sy(q)} r={2.5} />)}
+          {flash && <circle className="focus-ring" cx={sx(flash)} cy={sy(flash)} r={16} />}
           {plan?.rooms?.filter((r) => r.label).map((r, i) => {
             const c = r.poly.reduce((a, p) => ({ x: a.x + p.x / r.poly.length, y: a.y + p.y / r.poly.length }), { x: 0, y: 0 });
             return <text key={'rl' + i} x={sx(c)} y={sy(c)} className="ob-label">{r.label}</text>;
@@ -1197,9 +1391,22 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             if (!o) return null;
             const poly = vEdit?.id === o.id ? vEdit.poly : o.poly;
             return poly.map((q, i) => (
-              <rect key={'vh' + i} className={'v-handle' + (vEdit?.idx === i ? ' on' : '')} x={sx(q) - 5} y={sy(q) - 5} width={10} height={10} rx={2}
+              <rect key={'vh' + i} className={'v-handle' + (vEdit?.idx === i ? ' on' : '') + (vSel?.id === o.id && vSel.idx === i ? ' picked' : '')} x={sx(q) - 5} y={sy(q) - 5} width={10} height={10} rx={2}
                 onMouseDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); setVEdit({ id: o.id, idx: i, orig: o.poly, poly: o.poly }); }}>
                 <title>Drag the corner to enlarge or shrink</title>
+              </rect>
+            ));
+          })()}
+          {one && tool === 'select' && !moving && sel.region?.length === 1 && st.step === STEP.plan && (() => {
+            const ri = sel.region[0];
+            const id = '@r' + ri;
+            const r = plan?.region[ri];
+            if (!r || r.length > 400) return null;
+            const poly = vEdit?.id === id ? vEdit.poly : r;
+            return poly.map((q, i) => (
+              <rect key={'ah' + i} className={'v-handle area' + (vEdit?.id === id && vEdit.idx === i ? ' on' : '') + (vSel?.id === id && vSel.idx === i ? ' picked' : '')} x={sx(q) - 5} y={sy(q) - 5} width={10} height={10} rx={2}
+                onMouseDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); setVEdit({ id, idx: i, orig: r, poly: r }); }}>
+                <title>Drag the corner · click it and press Delete to remove it · double-click an edge to add a corner</title>
               </rect>
             ));
           })()}
@@ -1221,8 +1428,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
               onClick={() => st.updatePlan((p) => { p.doors.forEach((d) => { if (sel.doors.includes(d.id)) d.flip = !d.flip; }); })}>Flip swing</button>
           )}
           {(sel.modules.length > 0 || sel.obstacles.length > 0) && <button className="small" title="Rotate the selected desks or obstacles 90° about their center (R)" onClick={() => rotateSelection(90)}>Rotate 90°</button>}
-          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small danger" title="Delete" onClick={deleteSelection}>Delete</button>}
-          {sel.region?.length ? <span className="hint-inline">Click a gold number to set that edge's clearance</span> : null}
+          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length + (st.step === STEP.plan ? sel.region?.length ?? 0 : 0)) > 0 && <button className="small danger" title="Delete" onClick={deleteSelection}>Delete</button>}
+          {sel.region?.length ? <span className="hint-inline">{st.step === STEP.plan ? 'Drag a corner · double-click an edge adds one · gold numbers set the clearance' : "Click a gold number to set that edge's clearance"}</span> : null}
           <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Clear selection</button>
         </div>
       )}
@@ -1296,6 +1503,29 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       {tool === 'placeDesk' && cursor && placeType && (
         <div className={'fit-tip' + (fitWhy.length ? ' bad' : ' ok')} style={{ left: sx(cursor) + 18, top: sy(cursor) + 18 }}>
           {fitWhy.length ? <><b>It does not fit here</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul><small>Shift+click to place it anyway</small></> : <b>It fits · click to place it</b>}
+        </div>
+      )}
+      {isDraft && cursor && draft.length > 0 && (() => {
+        const last = draftKind === 'door' || rectMode ? draft[0] : draft[draft.length - 1];
+        const dx = cursor.x - last.x, dy = cursor.y - last.y;
+        const txt = rectMode ? `${(Math.abs(dx) / 1000).toFixed(2)} × ${(Math.abs(dy) / 1000).toFixed(2)} m`
+          : `${(Math.hypot(dx, dy) / 1000).toFixed(2)} m` + (draftKind === 'door' ? '' : ` · ${Math.round(((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360)}°`);
+        return (
+          <div className={'dim-tip' + (typed ? ' typing' : '')} style={{ left: sx(cursor) + 16, top: sy(cursor) - 34 }}>
+            {typed ? <><span className="dim-in">{typed}</span><span className="caret" /> m</> : txt}
+          </div>
+        );
+      })()}
+      {isDraft && (
+        <div className="draw-hint" role="status">
+          <b>{draftKind === 'area' ? (rectMode ? 'Area · rectangle' : 'Area') : draftKind === 'obs' ? (rectMode ? 'Obstacle · rectangle' : 'Obstacle') : doorKind === 'main' ? 'Main entrance' : doorKind === 'exit' ? 'Emergency exit' : 'Door'}</b>
+          <span>{draftKind === 'door'
+            ? (draft.length ? 'Click the other end of the opening, or type its width (0.9) + Enter' : 'Click one end of the opening, on the edge of an area')
+            : rectMode
+              ? (draft.length ? 'Click the opposite corner, or type width x height (4x3) + Enter' : 'Click a corner (or drag)')
+              : (draft.length ? (draft.length >= 3 ? 'Next corner · Enter, right-click or the first point closes it' : 'Next corner · type a length (3.5) + Enter') : 'Click the first corner')}</span>
+          {draftKind !== 'door' && !rectMode && <span className={'chip-k' + (orthoNow(shiftOn) ? ' on' : '')} title="F8 turns it on or off; Shift does the opposite while held">Ortho {orthoNow(shiftOn) ? 'on' : 'off'} · F8</span>}
+          {draft.length > 0 && <span className="keys">Backspace undo point · Esc cancel</span>}
         </div>
       )}
       {hover && <SeatTip layout={layout} seat={hover.seat} x={hover.sx} y={hover.sy} />}

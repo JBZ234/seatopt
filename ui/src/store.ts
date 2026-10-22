@@ -1,12 +1,25 @@
 import { create } from 'zustand';
+import { regionArea } from './draw';
 import type {
-  BgLayer, Capacity, Config, DeskType, ImportOut, LayerRole, Layout, Module, Plan, Progress, Pt, Suggestion, Variant,
+  BgLayer, Capacity, Config, DeskType, ImportOut, LayerRole, Layout, Module, ObstacleKind, Plan, Progress, Pt, Suggestion, Variant,
 } from './types';
 
 export type Tool =
   | 'select' | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
   | 'seedAdd' | 'seedRemove'
-  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor' | 'placeDesk';
+  | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor' | 'placeDesk'
+  | 'drawArea' | 'drawObs' | 'drawMain' | 'drawExit';
+
+/** Tools that draw point by point (like AutoCAD): click the points, Enter or right-click finishes. */
+export const DRAFT_TOOLS: Tool[] = ['drawArea', 'drawObs', 'drawMain', 'drawDoor', 'drawExit', 'outline'];
+export type PlanMode = 'draw' | 'detect';
+
+function loadPlanMode(): PlanMode {
+  try { return localStorage.getItem('seatopt-planmode') === 'detect' ? 'detect' : 'draw'; } catch { return 'draw'; }
+}
+export function savePlanMode(m: PlanMode) {
+  try { localStorage.setItem('seatopt-planmode', m); } catch { /* no storage */ }
+}
 
 /** Workflow steps (index in the top bar). */
 export const STEP = { plan: 0, paths: 1, desks: 2, rules: 3, org: 4, optimize: 5 } as const;
@@ -98,6 +111,16 @@ export interface AppState {
   pathSel: { id: string; node: number | null } | null;
   /** Show office-to-office (secondary) paths. */
   showSecondary: boolean;
+  /** How the plan is made: drawn by hand or detected from the drawing. */
+  planMode: PlanMode;
+  /** What opening a plan does (remembered): start empty to draw, or detect. */
+  planModePref: PlanMode;
+  /** Drawing tools: outline by points or rectangle; kind of obstacle; orthogonal lines (F8). */
+  drawShape: 'poly' | 'rect';
+  obsKind: ObstacleKind;
+  ortho: boolean;
+  /** Point to show on the plan (from the check list). */
+  focus: { p: Pt; n: number } | null;
   set: (p: Partial<AppState>) => void;
   updateConfig: (f: (c: Config) => void) => void;
   updatePlan: (f: (p: Plan) => void) => void;
@@ -142,7 +165,7 @@ export const useApp = create<AppState>((set, get) => ({
     const last = h[h.length - 1];
     const { plan, layout, config, future } = get();
     const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] });
-    set({ history: h.slice(0, -1), future: [...future.slice(-49), now], plan: last.plan, layout: last.layout, config: config ? { ...config, pinned: last.pinned, catalog: last.catalog.length ? last.catalog : config.catalog } : config, selection: emptySel() });
+    set({ history: h.slice(0, -1), future: [...future.slice(-49), now], plan: last.plan, areaM2: last.plan ? regionArea(last.plan.region) / 1e6 : 0, layout: last.layout, config: config ? { ...config, pinned: last.pinned, catalog: last.catalog.length ? last.catalog : config.catalog } : config, selection: emptySel() });
   },
   redo: () => {
     const f = get().future;
@@ -150,7 +173,7 @@ export const useApp = create<AppState>((set, get) => ({
     const next = f[f.length - 1];
     const { plan, layout, config, history } = get();
     const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] });
-    set({ future: f.slice(0, -1), history: [...history.slice(-49), now], plan: next.plan, layout: next.layout, config: config ? { ...config, pinned: next.pinned, catalog: next.catalog.length ? next.catalog : config.catalog } : config, selection: emptySel() });
+    set({ future: f.slice(0, -1), history: [...history.slice(-49), now], plan: next.plan, areaM2: next.plan ? regionArea(next.plan.region) / 1e6 : 0, layout: next.layout, config: config ? { ...config, pinned: next.pinned, catalog: next.catalog.length ? next.catalog : config.catalog } : config, selection: emptySel() });
   },
   toast: null,
   calib: [],
@@ -175,6 +198,12 @@ export const useApp = create<AppState>((set, get) => ({
   pathSel: null,
   showSecondary: false,
   areaSeeds: [],
+  planMode: loadPlanMode(),
+  planModePref: loadPlanMode(),
+  drawShape: 'poly',
+  obsKind: 'column',
+  ortho: true,
+  focus: null,
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;

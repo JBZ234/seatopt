@@ -1,12 +1,13 @@
 import { useEffect, type CSSProperties } from 'react';
 import { applyPalette, PALETTES } from './palette';
-import { addArea, analyzePlan, closePlan, ensureConfig, importPlan, openProject, removeArea, removePathNode, saveProject, setScale } from './actions';
+import { addArea, analyzePlan, closePlan, ensureConfig, importPlan, openProject, removeArea, removePathNode, saveProject, setScale, startBlank } from './actions';
+import { planReady } from './draw';
 import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
 import { deleteSelection, evaluateSoon, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
-import { emptySel, requestedSeats, selCount, STEP, useApp, type Theme, type Tool } from './store';
+import { emptySel, requestedSeats, savePlanMode, selCount, STEP, useApp, type Theme, type Tool } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
 import OrgStep from './steps/OrgStep';
@@ -22,11 +23,9 @@ const TOOL_HELP: Partial<Record<Tool, string>> = {
   seed: 'Click inside the area you are going to furnish (Shift+click adds another area)',
   seedAdd: 'Click inside each area you want to add · Esc finishes',
   seedRemove: 'Click inside a shaded area to leave it out · Esc finishes',
-  outline: 'Click each corner of the area · click the first point, double-click or Enter to close · Backspace removes the last point',
   mainDoor: 'Click the staff entrance door (colored lines on the edge)',
   exitDoor: 'Click the emergency exits',
   door: 'Each click on a door changes its type: office → exit → main → ignored',
-  drawDoor: 'Drag from one side of the door opening to the other',
   calibrate: 'Click both ends of a length you know (a wall, a door)',
   column: 'Drag to draw the column',
   fixedOffice: 'Drag to draw the office or fixed room',
@@ -101,7 +100,8 @@ export default function App() {
     setScale(st.mmPerUnit * real / measured);
   };
 
-  const canGo = (i: number) => i === 0 || !!st.plan;
+  const ready = planReady(st.plan);
+  const canGo = (i: number) => i === 0 || ready;
   const job = st.job;
   const req = st.config ? requestedSeats(st.config) : 0;
   const k = st.layout?.kpis;
@@ -115,6 +115,12 @@ export default function App() {
           <p>{isWeb ? 'DXF or vector PDF' : 'DXF, DWG or vector PDF'}. Then I will guide you to set the scale, the area and the main entrance.</p>
           <button className="primary huge" onClick={importPlan}>Choose file…</button>
           <button className="ghost" onClick={openProject}>Open a saved project (.json)</button>
+          <button className="ghost" onClick={startBlank}>Draw without a plan (blank grid)</button>
+          <fieldset className="welcome-mode">
+            <legend>After opening a plan</legend>
+            <label><input type="radio" name="pm" checked={st.planModePref === 'draw'} onChange={() => { savePlanMode('draw'); st.set({ planModePref: 'draw' }); }} /> I draw the areas and doors on it <span className="muted">(best for real plans)</span></label>
+            <label><input type="radio" name="pm" checked={st.planModePref === 'detect'} onChange={() => { savePlanMode('detect'); st.set({ planModePref: 'detect' }); }} /> Detect them automatically</label>
+          </fieldset>
           {isWeb ? (
             <p className="hint">Web version: DXF and vector PDF. Save DWG files as DXF from AutoCAD (or use the desktop app). The plan never leaves your computer.</p>
           ) : <details className="welcome-cfg">

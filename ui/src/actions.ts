@@ -1,8 +1,9 @@
 import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
-import { hasDemand, STEP, uid, useApp, type ProjectFile } from './store';
+import { hasDemand, savePlanMode, STEP, uid, useApp, type PlanMode, type ProjectFile } from './store';
+import { addAreaRing, areaGroups, emptyPlan, regionArea, removeAreaGroup, ringArea, scalePlan, selfCross, tidyRing } from './draw';
 import type {
-  AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, Layout, Module, Plan, Problem, Pt, Suggestion, Variant,
+  AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, DoorKind, Layout, Module, ObstacleKind, Plan, Problem, Pt, Suggestion, Variant,
 } from './types';
 
 const S = () => useApp.getState();
@@ -32,10 +33,123 @@ export async function importPlan() {
     const extra = prev ? prev.catalog.filter((t) => !def.catalog.some((d) => d.id === t.id)) : [];
     S().set({ config: { ...def, catalog: [...def.catalog, ...extra] } });
     await loadBackground();
-    await analyzePlan(null);
+    if (S().planModePref === 'draw') {
+      S().set({ plan: emptyPlan(), planMode: 'draw', areaM2: 0, mainConfirmed: true, tool: 'drawArea', drawShape: 'poly' });
+    } else {
+      await analyzePlan(null);
+    }
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
+}
+
+/** Start drawing on an empty grid, with no plan file. */
+export async function startBlank() {
+  const def = await loadDefaults();
+  const prev = S().config;
+  const extra = prev ? prev.catalog.filter((t) => !def.catalog.some((d) => d.id === t.id)) : [];
+  S().set({
+    drawing: null, background: null, hiddenLayers: [], roles: {}, mmPerUnit: 1, notes: [], step: 0, areaSeeds: [],
+    plan: emptyPlan(), planMode: 'draw', areaM2: 0, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null,
+    scaleConfirmed: true, mainConfirmed: true, tool: 'drawArea', drawShape: 'poly', history: [], future: [], snapGrid: true,
+    config: { ...def, catalog: [...def.catalog, ...extra] },
+  });
+}
+
+/** Switch between drawing the plan by hand and detecting it from the drawing (remembered for the
+ *  next plans). Drawing keeps what is there, to fix it by hand; `clear` starts empty. */
+export async function setPlanMode(m: PlanMode, clear = false) {
+  const s = S();
+  savePlanMode(m);
+  s.set({ planModePref: m });
+  if (m === 'draw') {
+    if (clear) {
+      const p = s.plan;
+      const has = !!p && (p.region.length > 0 || p.doors.length > 0 || p.obstacles.length > 0);
+      if (has && !confirm('Delete the areas, doors and obstacles and start drawing from scratch? (Undo brings them back.)')) return;
+      if (has) s.snapshot();
+      s.set({ plan: emptyPlan(), areaM2: 0, layout: null, mainConfirmed: true, areaSeeds: [] });
+    }
+    s.set({ planMode: 'draw', tool: 'drawArea', mainConfirmed: true });
+    return;
+  }
+  if (s.planMode === 'draw' && s.plan && (s.plan.region.length || s.plan.doors.length) &&
+      !confirm('Detect the area from the drawing? What you drew will be replaced. (Undo brings it back.)')) return;
+  s.snapshot();
+  s.set({ planMode: 'detect', tool: 'select' });
+  await analyzePlan(null);
+}
+
+/** After a change to the outlines: area, paths and layout out of date. */
+function regionChanged(p: Plan) {
+  p.paths = [];
+  useApp.setState({ areaM2: regionArea(p.region) / 1e6, layout: null, alternatives: [], planMode: 'draw' });
+}
+
+/** Adds a closed outline drawn by hand to the areas to furnish. */
+export function addDrawnArea(pts: Pt[]): boolean {
+  const ring = tidyRing(pts);
+  if (ring.length < 3) { S().say('An area needs at least 3 corners.', 'error'); return false; }
+  if (selfCross(ring)) { S().say('The lines of the outline cross: move the last points (Backspace removes them).', 'error'); return false; }
+  if (ringArea(ring) < 1e6) { S().say('That area is smaller than 1 m²: check the scale of the drawing or draw it bigger.', 'error'); return false; }
+  let joined = 0, count = 0;
+  S().updatePlan((p) => {
+    const r = addAreaRing(p, ring);
+    p.region = r.region;
+    p.regionClear = r.regionClear;
+    joined = r.joined;
+    count = areaGroups(p.region).length;
+    regionChanged(p);
+  });
+  S().say(joined ? `Joined with the area it overlaps · ${S().areaM2.toFixed(1)} m² in total.` : `Area ${count} added · ${(ringArea(ring) / 1e6).toFixed(1)} m². Draw another one, or the doors.`);
+  return true;
+}
+
+/** Removes the area whose outline is `outer` (an index into plan.region). */
+export function deleteArea(outer: number) {
+  S().updatePlan((p) => {
+    const r = removeAreaGroup(p, outer);
+    p.region = r.region;
+    p.regionClear = r.regionClear;
+    regionChanged(p);
+  });
+}
+
+/** New shape of one outline of the area (dragging a corner, adding or removing one). */
+export function setAreaRing(i: number, pts: Pt[]): boolean {
+  const ring = tidyRing(pts);
+  if (ring.length < 3) { S().say('An area needs at least 3 corners.', 'error'); return false; }
+  if (selfCross(ring)) { S().say('The outline would cross itself: the corner was not moved.', 'error'); return false; }
+  S().updatePlan((p) => {
+    p.region[i] = ring;
+    if (p.regionClear?.[i]) p.regionClear[i] = [];
+    regionChanged(p);
+  });
+  return true;
+}
+
+export function addDrawnObstacle(pts: Pt[], kind: ObstacleKind): boolean {
+  const ring = tidyRing(pts);
+  if (ring.length < 3) { S().say('An obstacle needs at least 3 corners.', 'error'); return false; }
+  if (selfCross(ring)) { S().say('The lines cross: move the last points (Backspace removes them).', 'error'); return false; }
+  if (ringArea(ring) < 1e4) { S().say('That obstacle is smaller than 10 × 10 cm.', 'error'); return false; }
+  const label = kind === 'reserved' ? (prompt('Name of the reserved area (e.g. Printers):') ?? '') : '';
+  S().updatePlan((p) => { p.obstacles.push({ id: uid('ob'), kind, label, poly: ring }); p.paths = []; });
+  S().set({ layout: null });
+  return true;
+}
+
+export function addDrawnDoor(kind: DoorKind, a: Pt, b: Pt): boolean {
+  if (Math.hypot(b.x - a.x, b.y - a.y) < 200) { S().say('That door is shorter than 20 cm: click both ends of the opening.', 'error'); return false; }
+  S().updatePlan((p) => {
+    if (kind === 'main') p.doors.forEach((d) => { if (d.kind === 'main') d.kind = 'office'; });
+    p.doors.push({ id: uid('d'), kind, a, b, label: '' });
+    p.paths = [];
+  });
+  S().set({ layout: null, ...(kind === 'main' ? { mainConfirmed: true } : {}) });
+  const w = (Math.hypot(b.x - a.x, b.y - a.y) / 1000).toFixed(2);
+  S().say(kind === 'main' ? `Main entrance drawn (${w} m). Now the other doors: offices and exits.` : kind === 'exit' ? `Emergency exit drawn (${w} m).` : `Door drawn (${w} m).`);
+  return true;
 }
 
 /** Cierra el plano actual y vuelve a la pantalla de inicio (conserva el catálogo y las medidas). */
@@ -65,7 +179,7 @@ export async function deleteLayer(name: string) {
     S().set({ drawing: { ...d, layers: d.layers.filter((x) => x.name !== name) }, roles, hiddenLayers: s.hiddenLayers.filter((h) => h !== name) });
     await loadBackground();
     // si la capa influía en el área (muros, puertas, columnas…), volver a detectar
-    if (!['ignore', 'furniture', 'room', 'building'].includes(role)) await analyzePlan(null);
+    if (S().planMode === 'detect' && !['ignore', 'furniture', 'room', 'building'].includes(role)) await analyzePlan(null);
     S().say(`Layer “${name}” deleted (${n} items).`);
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
@@ -105,7 +219,7 @@ async function runAnalyze(seed: Pt | null, more?: Pt[] | null) {
     const auto = r.notes.some((n) => n.includes('widest'));
     // automatic: remember a point inside it, so more areas can be added to it
     const kept = seeds.length ? seeds : [interiorPoint(r.plan)].filter((p): p is Pt => !!p);
-    S().set({ plan: r.plan, areaSeeds: kept, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, alternatives: [], capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
+    S().set({ planMode: 'detect', plan: r.plan, areaSeeds: kept, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, alternatives: [], capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
     S().set({ notes: [drawing.scale.reason, String(e instanceof Error ? e.message : e)] });
@@ -178,8 +292,19 @@ function seedsWithout(p: Pt): Pt[] | null {
 
 export async function setScale(mm: number) {
   if (!(mm > 0)) return;
-  S().set({ mmPerUnit: mm });
+  const s = S();
+  const old = s.mmPerUnit;
+  s.set({ mmPerUnit: mm });
   await loadBackground();
+  if (s.planMode === 'draw') {
+    // what was drawn stays on the same lines of the drawing
+    const p = S().plan;
+    if (p && old > 0 && Math.abs(mm / old - 1) > 1e-9) {
+      const np = scalePlan(p, mm / old);
+      S().set({ plan: np, areaM2: regionArea(np.region) / 1e6, layout: null });
+    }
+    return;
+  }
   await analyzePlan(null);
 }
 
@@ -435,6 +560,7 @@ export async function openProject() {
       mmPerUnit: pf.mmPerUnit, roles: pf.roles ?? {}, plan: pf.plan, config, layout: pf.layout, background: pf.background, hiddenLayers: [],
       step: pf.layout ? 4 : pf.plan ? 1 : 0, variants: [], suggestions: null, capacity: null,
       notes: ['Project opened. To detect the area again or change layers, import the plan again.'],
+      planMode: 'draw', areaM2: pf.plan ? regionArea(pf.plan.region) / 1e6 : 0,
     });
   } catch (e) {
     S().say('Could not open the project: ' + String(e instanceof Error ? e.message : e), 'error');

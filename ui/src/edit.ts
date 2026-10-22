@@ -1,5 +1,6 @@
 // Edición manual estilo AutoCAD: selección por ventana / captura, mover, girar, borrar, fijar.
 import { call } from './api';
+import { areaGroups, regionArea } from './draw';
 import { emptySel, useApp, type Selection } from './store';
 import type { Layout, Module, Pt } from './types';
 
@@ -211,6 +212,19 @@ export function deleteSelection() {
       n.doors = n.doors.filter((d) => !sel.doors.includes(d.id));
       n.windows = n.windows.filter((_, i) => !sel.windows.includes(i));
       S().set({ plan: n });
+    }
+  }
+  if (sel.region?.length && S().step === 0) {
+    const plan = S().plan;
+    if (plan) {
+      // an area goes with its holes
+      const groups = areaGroups(plan.region);
+      const drop = new Set<number>();
+      for (const i of sel.region) { drop.add(i); groups.find((g) => g.outer === i)?.holes.forEach((h) => drop.add(h)); }
+      const rc = plan.regionClear ?? [];
+      const keep = plan.region.map((_, i) => i).filter((i) => !drop.has(i));
+      const n = { ...structuredClone(plan), region: keep.map((i) => plan.region[i]), regionClear: keep.map((i) => rc[i] ?? []), paths: [] };
+      S().set({ plan: n, areaM2: regionArea(n.region) / 1e6, layout: null, planMode: 'draw' });
     }
   }
   S().set({ selection: emptySel() });
