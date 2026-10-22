@@ -11,7 +11,7 @@ fn main() {
     for l in &d.layers { println!("  {:<22} {:>6}  -> {:?}", l.name, l.paths, roles[&l.name]); }
     let sg = guess_scale(&d, &roles);
     println!("scale: {} mm/u  {:?}  {}", sg.mm_per_unit, sg.paper_scale, sg.reason);
-    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 };
+    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 };
     let t = std::time::Instant::now();
     let r = analyze(&d, &opts).unwrap();
     println!("analyze {:?}: area {:.1} m2, {:?}", t.elapsed(), r.area_m2, r.notes);

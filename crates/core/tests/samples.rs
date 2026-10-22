@@ -7,7 +7,7 @@ fn run(file: &str, demand: &[(&str, u32)], secs: f64) -> Layout {
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
     cfg.demand = demand.iter().map(|(t, q)| Demand { type_id: t.to_string(), quantity: *q, max: false }).collect();
     cfg.settings.time_limit = secs;
@@ -55,7 +55,7 @@ fn pdf_real_con_capas() {
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
     assert_eq!(sg.paper_scale, Some(75.0));
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     assert!(r.area_m2 > 600.0 && r.area_m2 < 900.0, "area {}", r.area_m2);
     assert!(r.plan.doors.len() >= 10);
 }
@@ -65,7 +65,7 @@ fn e5_apagada_mezcla_tipos_en_la_fila() {
     let path = format!("{}/../../samples/01_rectangular_simple.dxf", env!("CARGO_MANIFEST_DIR"));
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
     cfg.demand = vec![Demand { type_id: "isla_8".into(), quantity: 2, max: false }, Demand { type_id: "pareja".into(), quantity: 6, max: false }];
     cfg.rules.iter_mut().find(|r| r.id == "E5").unwrap().enabled = false;
@@ -80,7 +80,7 @@ fn plano_simplificado_ida_y_vuelta() {
     let path = format!("{}/../../samples/03_planta_L_oficinas.dxf", env!("CARGO_MANIFEST_DIR"));
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let count = |p: &Plan, k: DoorKind| p.doors.iter().filter(|x| x.kind == k).count();
     // DXF
     let dxf = export::plan_dxf(&r.plan, 1.0);
@@ -88,7 +88,7 @@ fn plano_simplificado_ida_y_vuelta() {
     let ro2 = suggest_roles(&d2);
     let sg2 = guess_scale(&d2, &ro2);
     assert_eq!(sg2.mm_per_unit, 1.0);
-    let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: 1.0, roles: ro2, seed: None, gap_close: 1200.0 }).unwrap();
+    let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: 1.0, roles: ro2, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     assert!((r2.area_m2 - r.area_m2).abs() < r.area_m2 * 0.03, "área {} vs {}", r2.area_m2, r.area_m2);
     assert_eq!(count(&r2.plan, DoorKind::Main), 1);
     assert_eq!(count(&r2.plan, DoorKind::Exit), count(&r.plan, DoorKind::Exit));
@@ -100,7 +100,7 @@ fn plano_simplificado_ida_y_vuelta() {
     let ro3 = suggest_roles(&d3);
     let sg3 = guess_scale(&d3, &ro3);
     assert!(sg3.reason.contains("saved"));
-    let r3 = analyze(&d3, &AnalyzeOptions { mm_per_unit: sg3.mm_per_unit, roles: ro3, seed: None, gap_close: 1200.0 }).unwrap();
+    let r3 = analyze(&d3, &AnalyzeOptions { mm_per_unit: sg3.mm_per_unit, roles: ro3, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     assert!((r3.area_m2 - r.area_m2).abs() < r.area_m2 * 0.03, "área {} vs {}", r3.area_m2, r.area_m2);
     assert_eq!(count(&r3.plan, DoorKind::Main), 1);
     assert_eq!(r3.plan.doors.len(), r.plan.doors.len());
@@ -112,7 +112,7 @@ fn maximo_posible_supera_lo_fijo() {
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut cfg = seat_core::defaults::default_config();
     cfg.demand = vec![
         Demand { type_id: "l_150".into(), quantity: 2, max: false },
@@ -139,13 +139,13 @@ fn lineas_simples_misma_area() {
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 };
+    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 };
     let r = analyze(&d, &opts).unwrap();
     let sp = seat_core::simple::simple_plan(&d, &opts, &r.plan, &Default::default());
     let dxf = seat_core::simple::simple_dxf(&sp, 1.0);
     let d2 = import::import_bytes("x.dxf", dxf.as_bytes()).unwrap();
     let ro = suggest_roles(&d2);
-    let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: 1.0, roles: ro, seed: None, gap_close: 1200.0 }).unwrap();
+    let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: 1.0, roles: ro, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     assert!((r2.area_m2 - r.area_m2).abs() / r.area_m2 < 0.05, "{} vs {}", r2.area_m2, r.area_m2);
     assert!(sp.walls.len() < 400);
 }
@@ -156,7 +156,7 @@ fn separacion_propia_de_obstaculo_y_puerta() {
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let cfg = default_config();
     let keep = |plan: &Plan| {
         let ctx = seat_core::engine::ctx::Ctx::build(&Problem { plan: plan.clone(), config: cfg.clone() }).unwrap();
@@ -184,7 +184,7 @@ fn relleno_de_huecos_y_alternativas() {
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
     cfg.demand = vec![
         Demand { type_id: "isla_flex".into(), quantity: 0, max: true },
@@ -206,7 +206,7 @@ fn circulation_paths_are_kept_clear() {
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
     cfg.settings.time_limit = 3.0;
     let mut plan = r.plan.clone();
@@ -242,7 +242,7 @@ fn pdf_draws_circulation_paths() {
     let path = format!("{}/../../samples/03_planta_L_oficinas.dxf", env!("CARGO_MANIFEST_DIR"));
     let d = import::import_bytes(&path, &std::fs::read(&path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: 1.0, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let cfg = default_config();
     let mut plan = r.plan.clone();
     plan.paths = seat_core::engine::circulation::compute(&Problem { plan: plan.clone(), config: cfg.clone() }).unwrap();

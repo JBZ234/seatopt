@@ -329,6 +329,9 @@ pub struct AnalyzeOptions {
     /// Punto (mm) dentro del área a amoblar. None = automático (el recinto interior más grande).
     #[serde(default)]
     pub seed: Option<Pt>,
+    /// Several areas to furnish at once: a point inside each one (added to `seed`).
+    #[serde(default)]
+    pub seeds: Vec<Pt>,
     /// Vanos de hasta este ancho se cierran al detectar el recinto (mm).
     #[serde(default = "default_gap")]
     pub gap_close: f64,
@@ -529,11 +532,44 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
             touches_border[lab[f.idx(0, y)] as usize] = true;
             touches_border[lab[f.idx(f.w - 1, y)] as usize] = true;
         }
-        let seed_label = match opts.seed.and_then(|s| f.cell_idx(s)) {
-            Some(i) if lab[i] != 0 => lab[i],
-            Some(_) => {
-                return Err("The chosen point is on a wall or in a space narrower than the opening-closing width. Click further inside the area.".into());
+        let all_seeds: Vec<Pt> = opts.seed.iter().chain(opts.seeds.iter()).copied().collect();
+        let mut seed_labels: Vec<u32> = Vec::new();
+        // a click near a wall or a door counts for the closest area within 1 m
+        let near_label = |s: Pt| -> Option<u32> {
+            let i = f.cell_idx(s)?;
+            if lab[i] != 0 {
+                return Some(lab[i]);
             }
+            let k = (1000.0 / res).ceil() as i64;
+            let (cx, cy) = ((i % f.w) as i64, (i / f.w) as i64);
+            let mut best: Option<(i64, u32)> = None;
+            for dy in -k..=k {
+                for dx in -k..=k {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if x < 0 || y < 0 || x >= f.w as i64 || y >= f.h as i64 {
+                        continue;
+                    }
+                    let l = lab[y as usize * f.w + x as usize];
+                    let d = dx * dx + dy * dy;
+                    if l != 0 && d <= k * k && best.map(|b| d < b.0).unwrap_or(true) {
+                        best = Some((d, l));
+                    }
+                }
+            }
+            best.map(|b| b.1)
+        };
+        for s in &all_seeds {
+            match near_label(*s) {
+                Some(l) => {
+                    if !seed_labels.contains(&l) {
+                        seed_labels.push(l);
+                    }
+                }
+                None => return Err("The chosen point is on a wall or in a space narrower than the opening-closing width. Click further inside the area.".into()),
+            }
+        }
+        let seed_label = match seed_labels.first() {
+            Some(&l) => l,
             None => {
                 // the largest closed area that has doors on it: a sheet frame or the outside of a
                 // building is a big closed area too, but nobody draws doors on it
@@ -614,12 +650,16 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
                 }
             }
         };
-        let core: Vec<bool> = lab.iter().map(|&l| l == seed_label).collect();
+        if seed_labels.is_empty() {
+            seed_labels.push(seed_label);
+        }
+        let core: Vec<bool> = lab.iter().map(|&l| l != 0 && seed_labels.contains(&l)).collect();
         // recuperar el borde perdido por la dilatación, sin cruzar muros
         let grown = raster::dilate(&f, &core, r + res);
         let cand: Vec<bool> = grown.iter().zip(&blocked).map(|(g, b)| *g && !*b).collect();
-        let seed_idx = core.iter().position(|&b| b).unwrap();
-        let mut m = raster::flood(&f, &cand, &[seed_idx]);
+        // one start cell per chosen area (adjacent areas join through the door between them)
+        let starts: Vec<usize> = seed_labels.iter().filter_map(|&l| lab.iter().position(|&x| x == l)).collect();
+        let mut m = raster::flood(&f, &cand, &starts);
         // limpieza: quitar islas delgadas (< 300 mm)
         let er = raster::erode(&f, &m, 150.0);
         let op = raster::dilate(&f, &er, 150.0);
@@ -689,10 +729,24 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
         if rings.is_empty() {
             return Err("The outline of the area could not be traced.".into());
         }
+        // outer rings (one per separate area) and holes (inside another ring)
         let outer = rings.remove(0);
-        plan.region = vec![outer];
+        let mut outers = vec![outer];
+        let mut holes = Vec::new();
+        for r in rings {
+            let inside_other = outers.iter().any(|o| point_in_polygon(r[0], o)) || {
+                let mid = Pt { x: (r[0].x + r[r.len() / 2].x) / 2.0, y: (r[0].y + r[r.len() / 2].y) / 2.0 };
+                outers.iter().any(|o| point_in_polygon(mid, o))
+            };
+            if inside_other {
+                holes.push(r);
+            } else {
+                outers.push(r);
+            }
+        }
+        plan.region = outers;
         // huecos → columnas u oficinas fijas
-        for h in rings {
+        for h in holes {
             let a = polygon_area(&h).abs();
             if a < 0.2e6 {
                 continue;

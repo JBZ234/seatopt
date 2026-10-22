@@ -5,7 +5,7 @@ fn main() {
     let d = import::import_bytes(&a[1], &std::fs::read(&a[1]).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut cfg = default_config();
     cfg.demand = a[2].split(',').map(|s| { let (t, q) = s.split_once('=').unwrap(); Demand { type_id: t.into(), quantity: q.parse().unwrap(), max: false } }).collect();
     let pr = Problem { plan: r.plan, config: cfg.clone() };

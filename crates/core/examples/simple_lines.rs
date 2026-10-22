@@ -7,7 +7,7 @@ fn main() {
     let d = import::import_bytes(src, &std::fs::read(src).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 };
+    let opts = AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 };
     let mut r = analyze(&d, &opts).unwrap();
     if let Some(s) = a.get(4) {
         let (x, y) = s.split_once(',').unwrap();
@@ -46,7 +46,7 @@ fn main() {
         let d2 = import::import_bytes(&f, &std::fs::read(&f).unwrap()).unwrap();
         let ro = suggest_roles(&d2);
         let sg2 = guess_scale(&d2, &ro);
-        let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: sg2.mm_per_unit, roles: ro, seed: None, gap_close: 1200.0 }).unwrap();
+        let r2 = analyze(&d2, &AnalyzeOptions { mm_per_unit: sg2.mm_per_unit, roles: ro, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
         let m = r2.plan.doors.iter().filter(|x| x.kind == DoorKind::Main).count();
         println!("{f}: {:.3} mm/u · {:.0} m² · {} puertas ({} ppal) · {} obstáculos", sg2.mm_per_unit, r2.area_m2, r2.plan.doors.len(), m, r2.plan.obstacles.len());
     }

@@ -1,6 +1,6 @@
 import { useEffect, type CSSProperties } from 'react';
 import { applyPalette, PALETTES } from './palette';
-import { analyzePlan, closePlan, ensureConfig, importPlan, openProject, removePathNode, saveProject, setScale } from './actions';
+import { addArea, analyzePlan, closePlan, ensureConfig, importPlan, openProject, removeArea, removePathNode, saveProject, setScale } from './actions';
 import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
@@ -19,7 +19,9 @@ const STEPS = ['Plan', 'Circulation', 'Desks', 'Rules', 'Organization', 'Optimiz
 
 /** Qué hacer con cada herramienta: se muestra sobre el plano. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
-  seed: 'Click inside the area you are going to furnish',
+  seed: 'Click inside the area you are going to furnish (Shift+click adds another area)',
+  seedAdd: 'Click inside each area you want to add · Esc finishes',
+  seedRemove: 'Click inside a shaded area to leave it out · Esc finishes',
   outline: 'Click each corner of the area · click the first point, double-click or Enter to close · Backspace removes the last point',
   mainDoor: 'Click the staff entrance door (colored lines on the edge)',
   exitDoor: 'Click the emergency exits',
@@ -87,7 +89,9 @@ export default function App() {
     return () => mq.removeEventListener('change', apply);
   }, [st.theme, st.palette]);
 
-  const onSeed = (p: Pt) => { st.set({ tool: 'select' }); analyzePlan(p); };
+  const onSeed = (p: Pt, mode: 'set' | 'add' | 'remove' = 'set') => {
+    if (mode === 'set') { st.set({ tool: 'select' }); analyzePlan(p); } else if (mode === 'add') addArea(p); else removeArea(p);
+  };
   const onCalibrated = (a: Pt, b: Pt) => {
     st.set({ tool: 'select', scaleConfirmed: true });
     const measured = Math.hypot(a.x - b.x, a.y - b.y);

@@ -303,7 +303,14 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
     }
 
     // ------------------------------------------------ accesibilidad (C7 / C2 / E4)
-    let seeds: Vec<usize> = if p.c7_from_main || !p.c7_on { ctx.main_seeds.clone() } else { ctx.doors.iter().flat_map(|d| d.seeds.iter().copied()).collect() };
+    let seeds: Vec<usize> = if p.c7_from_main || !p.c7_on {
+        // separate areas (not connected to the entrance) are reached through their own doors
+        let mut s = ctx.main_seeds.clone();
+        s.extend(ctx.doors.iter().filter(|d| !d.reachable_empty).flat_map(|d| d.seeds.iter().copied()));
+        s
+    } else {
+        ctx.doors.iter().flat_map(|d| d.seeds.iter().copied()).collect()
+    };
     let d_any = dial::dial(f, &pass_d, &seeds, u32::MAX - 1);
     let d_doors = if p.c7_on && p.c7_doors { dial::dial(f, &pass_dw, &seeds, u32::MAX - 1) } else { vec![] };
     let d1 = dial::dial(f, &pass_c2, &seeds, u32::MAX - 1);

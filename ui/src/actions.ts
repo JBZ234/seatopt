@@ -2,7 +2,7 @@ import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { hasDemand, STEP, uid, useApp, type ProjectFile } from './store';
 import type {
-  AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, Layout, Module, Problem, Pt, Suggestion, Variant,
+  AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, Layout, Module, Plan, Problem, Pt, Suggestion, Variant,
 } from './types';
 
 const S = () => useApp.getState();
@@ -24,7 +24,7 @@ export async function importPlan() {
     if (!out) return;
     const roles: Record<string, typeof out.layers[number]['role']> = {};
     out.layers.forEach((l) => (roles[l.name] = l.role));
-    S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, notes: [out.scale.reason] });
+    S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, areaSeeds: [], notes: [out.scale.reason] });
     // plano nuevo: reglas y ajustes por defecto (los que dan más puestos); se conservan los
     // escritorios propios del catálogo (los del Studio y los editados)
     const def = await loadDefaults();
@@ -45,7 +45,7 @@ export function closePlan() {
   s.set({
     drawing: null, plan: null, layout: null, background: null, hiddenLayers: [], notes: [], areaM2: 0, roles: {},
     variants: [], suggestions: null, capacity: null, selection: { modules: [], obstacles: [], doors: [], windows: [] },
-    history: [], future: [], step: 0, tool: 'select', calib: [], scaleConfirmed: false, mainConfirmed: true, alternatives: [],
+    history: [], future: [], step: 0, tool: 'select', calib: [], scaleConfirmed: false, mainConfirmed: true, alternatives: [], areaSeeds: [],
   });
   s.updateConfig((c) => { c.pinned = []; });
 }
@@ -83,17 +83,97 @@ export async function loadBackground() {
   S().set({ background: bg, hiddenLayers: hidden });
 }
 
-export async function analyzePlan(seed: Pt | null) {
+/** Detects the area to furnish: automatically (no point), from one point, or from several
+ *  points (one inside each area to use; areas that touch through a door are joined). */
+// detections run one after another (on a large drawing each takes a few seconds): a click made
+// while one runs is applied on top of its result, never on a stale one
+let analyzeChain: Promise<unknown> = Promise.resolve();
+function queued<T>(f: () => Promise<T>): Promise<T> {
+  const next = analyzeChain.then(f, f);
+  analyzeChain = next.catch(() => undefined);
+  return next;
+}
+export function analyzePlan(seed: Pt | null, more?: Pt[] | (() => Pt[] | null)) {
+  return queued(() => runAnalyze(seed, typeof more === 'function' ? more() : more));
+}
+async function runAnalyze(seed: Pt | null, more?: Pt[] | null) {
   const { drawing, mmPerUnit, roles, gapClose } = S();
-  if (!drawing) return;
+  if (!drawing || more === null) return;
+  const seeds = more ?? (seed ? [seed] : []);
   try {
-    const r = await call<AnalyzeResult>('analyze', { drawingId: drawing.drawingId, options: { mmPerUnit, roles, seed, gapClose } });
+    const r = await call<AnalyzeResult>('analyze', { drawingId: drawing.drawingId, options: { mmPerUnit, roles, seed: null, seeds, gapClose } });
     const auto = r.notes.some((n) => n.includes('widest'));
-    S().set({ plan: r.plan, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, alternatives: [], capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
+    // automatic: remember a point inside it, so more areas can be added to it
+    const kept = seeds.length ? seeds : [interiorPoint(r.plan)].filter((p): p is Pt => !!p);
+    S().set({ plan: r.plan, areaSeeds: kept, notes: [drawing.scale.reason, ...r.notes], areaM2: r.areaM2, layout: null, alternatives: [], capacity: null, suggestions: null, variants: [], mainConfirmed: !auto });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
     S().set({ notes: [drawing.scale.reason, String(e instanceof Error ? e.message : e)] });
   }
+}
+
+const pipA = (p: Pt, poly: Pt[]) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+};
+/** Which outline of the area contains the point (-1 = none). */
+export function areaRingAt(plan: Plan, p: Pt): number {
+  const inObst = plan.obstacles.some((o) => pipA(p, o.poly));
+  if (inObst) return -1;
+  return plan.region.findIndex((r) => pipA(p, r));
+}
+function interiorPoint(plan: Plan): Pt | null {
+  const r = plan.region[0];
+  if (!r) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of r) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+  // the point deepest inside (farthest from the outline), on a 24×24 grid
+  const segD = (p: Pt, a: Pt, b: Pt) => {
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+    return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t);
+  };
+  let best: Pt | null = null, bd = -1;
+  for (let i = 1; i < 24; i++) for (let j = 1; j < 24; j++) {
+    const p = { x: x0 + ((x1 - x0) * i) / 24, y: y0 + ((y1 - y0) * j) / 24 };
+    if (areaRingAt(plan, p) !== 0) continue;
+    const d = Math.min(...r.map((q, k) => segD(p, q, r[(k + 1) % r.length])));
+    if (d > bd) { bd = d; best = p; }
+  }
+  return best;
+}
+
+/** Adds the area under the point to the areas to furnish. */
+export function addArea(p: Pt) {
+  return analyzePlan(null, () => {
+    const s = S();
+    if (s.plan && areaRingAt(s.plan, p) >= 0) { s.say('That area is already included.'); return null; }
+    return [...s.areaSeeds, p];
+  });
+}
+
+/** Leaves out the area under the point. */
+export function removeArea(p: Pt) {
+  return analyzePlan(null, () => seedsWithout(p));
+}
+function seedsWithout(p: Pt): Pt[] | null {
+  const s = S();
+  if (!s.plan) return null;
+  const ri = areaRingAt(s.plan, p);
+  if (ri < 0) { s.say('Click inside one of the chosen areas (shaded) to leave it out.'); return null; }
+  const ring = s.plan.region[ri];
+  // the chosen point closest to the click, among those inside that outline (two rooms joined by a
+  // door share one outline: only the clicked one goes)
+  const inRing = s.areaSeeds.filter((q) => pipA(q, ring));
+  if (!inRing.length) { s.say('Choose the areas one by one with “Click inside the area” and “Add area” to be able to leave some out.'); return null; }
+  const gone = inRing.reduce((b, q) => (Math.hypot(q.x - p.x, q.y - p.y) < Math.hypot(b.x - p.x, b.y - p.y) ? q : b));
+  const left = s.areaSeeds.filter((q) => q !== gone);
+  if (!left.length) { s.say('At least one area must stay. Add another one first.', 'error'); return null; }
+  return left;
 }
 
 export async function setScale(mm: number) {

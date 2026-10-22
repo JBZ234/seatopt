@@ -5,6 +5,7 @@ import type {
 
 export type Tool =
   | 'select' | 'pan' | 'seed' | 'door' | 'mainDoor' | 'exitDoor'
+  | 'seedAdd' | 'seedRemove'
   | 'column' | 'fixedOffice' | 'restricted' | 'reserved' | 'window' | 'calibrate' | 'erase' | 'outline' | 'drawDoor' | 'placeDesk';
 
 /** Workflow steps (index in the top bar). */
@@ -91,6 +92,8 @@ export interface AppState {
   placeType: string;
   placeAngle: number;
   placeUp: boolean;
+  /** Points inside each chosen area to furnish (empty = detected automatically). */
+  areaSeeds: Pt[];
   /** Circulation path being edited (and its selected node). */
   pathSel: { id: string; node: number | null } | null;
   /** Show office-to-office (secondary) paths. */
@@ -171,6 +174,7 @@ export const useApp = create<AppState>((set, get) => ({
   placeUp: false,
   pathSel: null,
   showSecondary: false,
+  areaSeeds: [],
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;

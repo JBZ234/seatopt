@@ -112,12 +112,15 @@ export default function PlanStep() {
 
         <Task id="area" n={2} title="Area to furnish" done={areaOk}>
           {areaOk ? (
-            <p className="stat-line"><span className="big">{st.areaM2.toFixed(0)}</span> m² · {plan!.obstacles.length} obstacles · {plan!.rooms?.length ?? 0} rooms</p>
+            <p className="stat-line"><span className="big">{st.areaM2.toFixed(0)}</span> m²{plan!.region.length > 1 ? ` in ${plan!.region.length} areas` : ''} · {plan!.obstacles.length} obstacles · {plan!.doors.length} doors</p>
           ) : (
             <p className="hint">Click inside the part of the office to furnish. If it is not closed properly, draw its outline.</p>
           )}
+          {areaOk && <p className="hint small">Only some rooms? Click inside one with “Choose another area”, then “+ Add area” for each of the others. Rooms that touch through a door are joined.</p>}
           <div className="row wrap">
             <ToolBtn t="seed" label={areaOk ? 'Choose another area' : 'Click inside the area'} primary={!areaOk} />
+            {areaOk && drawing?.drawingId && <ToolBtn t="seedAdd" label="+ Add area" />}
+            {areaOk && drawing?.drawingId && (st.areaSeeds.length > 1 || plan!.region.length > 1) && <ToolBtn t="seedRemove" label="− Remove area" />}
             <ToolBtn t="outline" label="Draw outline" />
             {drawing?.drawingId && <button className="ghost" onClick={() => analyzePlan(null)}>Detect automatically</button>}
           </div>

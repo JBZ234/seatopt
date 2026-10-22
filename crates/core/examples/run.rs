@@ -9,7 +9,7 @@ fn main() {
     let d = import::import_bytes(path, &std::fs::read(path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let mut plan = r.plan;
     if std::env::var("DOORS").is_ok() { for (i, d) in plan.doors.iter().enumerate() { eprintln!("door {i}: {:?} mid=({:.0},{:.0}) w={:.0}", d.kind, d.mid().x, d.mid().y, d.width()); } }
     if let Some(m) = a.get(5) { // índice de puerta principal

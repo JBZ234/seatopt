@@ -567,7 +567,8 @@ impl Ctx {
             let d = super::dial::dial(&f, &pass, &main_seeds, u32::MAX - 1);
             for di in doors.iter_mut() {
                 di.reachable_empty = di.seeds.iter().any(|&s| d[s] != super::dial::UNREACH);
-                if !di.reachable_empty && di.door.kind != DoorKind::Main {
+                // with several separate areas, doors of the other areas are reached from inside them
+                if !di.reachable_empty && di.door.kind != DoorKind::Main && plan.region.len() == 1 {
                     violations.push(Violation {
                         rule_id: "C7".into(),
                         message: format!("Door {} cannot be reached from the entrance even on the empty floor (check the plan or mark it as “ignore”).", if di.door.label.is_empty() { &di.door.id } else { &di.door.label }),

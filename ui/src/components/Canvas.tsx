@@ -92,7 +92,7 @@ export function boundsOf(plan: Plan | null, bg: { paths: number[][] }[] | null):
 }
 
 interface Props {
-  onSeed: (p: Pt) => void;
+  onSeed: (p: Pt, mode?: 'set' | 'add' | 'remove') => void;
   onCalibrated: (a: Pt, b: Pt) => void;
 }
 
@@ -1000,7 +1000,13 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         break;
       }
       case 'seed':
-        onSeed(w);
+        onSeed(w, e.shiftKey ? 'add' : 'set');
+        break;
+      case 'seedAdd':
+        onSeed(w, 'add');
+        break;
+      case 'seedRemove':
+        onSeed(w, 'remove');
         break;
       case 'placeDesk':
         if (fitWhy.length && !e.shiftKey) { st.say('It does not fit there: ' + fitWhy.join('; ') + '. Shift+click places it anyway; hold Space to move it without snapping.', 'error'); break; }

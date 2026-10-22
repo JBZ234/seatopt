@@ -20,7 +20,7 @@ fn main() {
     let d = import::import_bytes(path, &std::fs::read(path).unwrap()).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles: roles.clone(), seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles: roles.clone(), seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     let plan = r.plan;
     // (nombre, E2 silla-silla, E2 silla-espalda, E1, E3 max, orden)
     let combos: &[(&str, f64, f64, f64, f64, f64)] = &[

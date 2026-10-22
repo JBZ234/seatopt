@@ -6,7 +6,7 @@ fn load(path: &str, bytes: &[u8]) -> (import::Drawing, std::collections::HashMap
     let d = import::import_bytes(path, bytes).unwrap();
     let roles = suggest_roles(&d);
     let sg = guess_scale(&d, &roles);
-    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles: roles.clone(), seed: None, gap_close: 1200.0 }).unwrap();
+    let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles: roles.clone(), seed: None, seeds: vec![], gap_close: 1200.0 }).unwrap();
     (d, roles, sg, r)
 }
 
