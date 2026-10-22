@@ -10,7 +10,8 @@ export function doorName(plan: Plan, id: string): string {
   if (!id) return 'Entrance';
   const d = plan.doors.find((x) => x.id === id);
   if (!d) return 'Door';
-  if (d.label) return d.label;
+  // labels picked up from nearby text are only used if they read like a name
+  if (d.label && /[A-Za-zÀ-ÿ]{3,}/.test(d.label)) return d.label;
   const same = plan.doors.filter((x) => x.kind === d.kind);
   const n = same.findIndex((x) => x.id === id) + 1;
   return `${d.kind === 'exit' ? 'Exit' : d.kind === 'main' ? 'Entrance' : 'Office'} ${n}`;

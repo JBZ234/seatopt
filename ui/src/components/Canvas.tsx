@@ -79,8 +79,12 @@ export function boundsOf(plan: Plan | null, bg: { paths: number[][] }[] | null):
   const add = (x: number, y: number) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
   if (plan && plan.region.length) {
     for (const r of plan.region) for (const p of r) add(p.x, p.y);
-    for (const p of plan.building ?? []) add(p.x, p.y);
-    for (const r of plan.rooms ?? []) for (const p of r.poly) add(p.x, p.y);
+    // building and rooms only near the area (a file may hold several sheets side by side)
+    const [a0, b0, a1, b1] = [x0, y0, x1, y1];
+    const m = Math.max(a1 - a0, b1 - b0) * 0.25;
+    const near = (pts: Pt[]) => pts.some((p) => p.x >= a0 - m && p.x <= a1 + m && p.y >= b0 - m && p.y <= b1 + m);
+    if (plan.building && near(plan.building)) for (const p of plan.building) if (p.x >= a0 - m && p.x <= a1 + m && p.y >= b0 - m && p.y <= b1 + m) add(p.x, p.y);
+    for (const r of plan.rooms ?? []) if (near(r.poly)) for (const p of r.poly) if (p.x >= a0 - m && p.x <= a1 + m && p.y >= b0 - m && p.y <= b1 + m) add(p.x, p.y);
   } else if (bg) {
     for (const l of bg) for (const p of l.paths) for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]);
   }

@@ -275,10 +275,39 @@ pub fn guess_scale(d: &Drawing, roles: &HashMap<String, LayerRole>) -> ScaleGues
             }
         }
         _ => {
+            let cands = [1.0, 10.0, 1000.0, 25.4, 304.8];
+            let unit_name = |u: f64| match u as i64 {
+                1 => "millimeters",
+                10 => "centimeters",
+                1000 => "meters",
+                25 => "inches",
+                304 => "feet",
+                _ => "other units",
+            };
             if let Some(u) = d.declared_unit_mm {
+                // many files declare the wrong units (e.g. "millimeters" for a drawing in meters):
+                // check against the size of the doors (or of the whole drawing) before trusting them
+                let plausible = |mm: f64| match med {
+                    Some(r) => (450.0..=1600.0).contains(&(mm * r)),
+                    None => (3000.0..=400_000.0).contains(&(mm * d.bounds.w().max(d.bounds.h()))),
+                };
+                if plausible(u) {
+                    return ScaleGuess { mm_per_unit: u, paper_scale: None, reason: d.unit_note.clone() };
+                }
+                let fit = |a: f64| match med {
+                    Some(r) => ((a * r) / 900.0).ln().abs(),
+                    None => ((a * d.bounds.w().max(d.bounds.h())) / 30000.0).ln().abs(),
+                };
+                let best = cands.iter().copied().min_by(|a, b| fit(*a).partial_cmp(&fit(*b)).unwrap()).unwrap();
+                if plausible(best) {
+                    let why = match med {
+                        Some(r) => format!("The file says {}, but then the doors would measure {:.0} mm: the drawing is in {}. Check it.", unit_name(u), u * r, unit_name(best)),
+                        None => format!("The file says {}, but then the plan would measure {:.1} m: the drawing is in {}. Check it.", unit_name(u), u * d.bounds.w().max(d.bounds.h()) / 1000.0, unit_name(best)),
+                    };
+                    return ScaleGuess { mm_per_unit: best, paper_scale: None, reason: why };
+                }
                 return ScaleGuess { mm_per_unit: u, paper_scale: None, reason: d.unit_note.clone() };
             }
-            let cands = [1.0, 10.0, 1000.0, 25.4, 304.8];
             if let Some(r) = med {
                 let best = cands.iter().copied().min_by(|a, b| ((a * r) / 900.0).ln().abs().partial_cmp(&((b * r) / 900.0).ln().abs()).unwrap()).unwrap();
                 ScaleGuess { mm_per_unit: best, paper_scale: None, reason: format!("Units estimated from the size of {} doors.", radii.len()) }
@@ -506,7 +535,40 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
                 return Err("The chosen point is on a wall or in a space narrower than the opening-closing width. Click further inside the area.".into());
             }
             None => {
-                let best = (1..sizes.len()).filter(|&i| !touches_border[i]).max_by_key(|&i| sizes[i]);
+                // the largest closed area that has doors on it: a sheet frame or the outside of a
+                // building is a big closed area too, but nobody draws doors on it
+                let mut doors_on = vec![0u32; sizes.len()];
+                let near = [(0.0, 0.0), (700.0, 0.0), (-700.0, 0.0), (0.0, 700.0), (0.0, -700.0)];
+                for (role, p, _) in &g.paths {
+                    if !role.is_door() || p.is_empty() {
+                        continue;
+                    }
+                    let c = p.iter().fold(Pt { x: 0.0, y: 0.0 }, |a, q| Pt { x: a.x + q.x, y: a.y + q.y });
+                    let c = Pt { x: c.x / p.len() as f64, y: c.y / p.len() as f64 };
+                    let mut seen: Vec<u32> = Vec::new();
+                    for (dx, dy) in near {
+                        if let Some(i) = f.cell_idx(Pt { x: c.x + dx, y: c.y + dy }) {
+                            let l = lab[i];
+                            if l != 0 && !seen.contains(&l) {
+                                seen.push(l);
+                                doors_on[l as usize] += 1;
+                            }
+                        }
+                    }
+                }
+                if std::env::var("SEATOPT_DEBUG").is_ok() {
+                    let mut v: Vec<usize> = (1..sizes.len()).filter(|&i| !touches_border[i]).collect();
+                    v.sort_by_key(|&i| std::cmp::Reverse(sizes[i]));
+                    for &i in v.iter().take(12) {
+                        eprintln!("comp {i}: {:.0} m2, doors {}", sizes[i] as f64 * res * res / 1e6, doors_on[i]);
+                    }
+                }
+                // at least two doors and one per 1000 m² (a sheet frame touches one building door at most)
+                let m2 = |i: usize| sizes[i] as f64 * res * res / 1e6;
+                let with_doors = (1..sizes.len())
+                    .filter(|&i| !touches_border[i] && doors_on[i] >= 2 && doors_on[i] as f64 >= m2(i) / 1000.0)
+                    .max_by_key(|&i| sizes[i]);
+                let best = with_doors.or_else(|| (1..sizes.len()).filter(|&i| !touches_border[i]).max_by_key(|&i| sizes[i]));
                 match best {
                     Some(b) => b as u32,
                     None => return Err("No closed area was found. Check the layer roles or draw the outline.".into()),
