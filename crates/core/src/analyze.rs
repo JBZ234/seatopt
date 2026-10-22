@@ -565,9 +565,48 @@ pub fn analyze(d: &Drawing, opts: &AnalyzeOptions) -> Result<AnalyzeResult, Stri
                 }
                 // at least two doors and one per 1000 m² (a sheet frame touches one building door at most)
                 let m2 = |i: usize| sizes[i] as f64 * res * res / 1e6;
-                let with_doors = (1..sizes.len())
-                    .filter(|&i| !touches_border[i] && doors_on[i] >= 2 && doors_on[i] as f64 >= m2(i) / 1000.0)
-                    .max_by_key(|&i| sizes[i]);
+                let _ = m2;
+                // a sheet frame: the area fills the whole edge of its bounding rectangle and has
+                // (almost) no doors, while the real floor next to it has plenty
+                let max_doors = (1..sizes.len()).filter(|&i| !touches_border[i]).map(|i| doors_on[i]).max().unwrap_or(0);
+                let mut bb = vec![(usize::MAX, usize::MAX, 0usize, 0usize); sizes.len()];
+                for y in 0..f.h {
+                    for x in 0..f.w {
+                        let l = lab[f.idx(x, y)] as usize;
+                        if l != 0 {
+                            let b = &mut bb[l];
+                            b.0 = b.0.min(x);
+                            b.1 = b.1.min(y);
+                            b.2 = b.2.max(x);
+                            b.3 = b.3.max(y);
+                        }
+                    }
+                }
+                let frame_like = |i: usize| -> bool {
+                    let (x0, y0, x1, y1) = bb[i];
+                    if x1 <= x0 + 4 || y1 <= y0 + 4 {
+                        return false;
+                    }
+                    let (mut on, mut tot) = (0usize, 0usize);
+                    for x in x0..=x1 {
+                        for y in [y0, y1] {
+                            tot += 1;
+                            on += (lab[f.idx(x, y)] as usize == i) as usize;
+                        }
+                    }
+                    for y in y0..=y1 {
+                        for x in [x0, x1] {
+                            tot += 1;
+                            on += (lab[f.idx(x, y)] as usize == i) as usize;
+                        }
+                    }
+                    on as f64 >= tot as f64 * 0.9
+                };
+                let with_doors = if max_doors >= 20 {
+                    (1..sizes.len()).filter(|&i| !touches_border[i] && !(doors_on[i] <= 1 && frame_like(i))).max_by_key(|&i| sizes[i])
+                } else {
+                    None
+                };
                 let best = with_doors.or_else(|| (1..sizes.len()).filter(|&i| !touches_border[i]).max_by_key(|&i| sizes[i]));
                 match best {
                     Some(b) => b as u32,

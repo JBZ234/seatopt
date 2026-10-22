@@ -56,7 +56,7 @@ fn pdf_real_con_capas() {
     let sg = guess_scale(&d, &roles);
     assert_eq!(sg.paper_scale, Some(75.0));
     let r = analyze(&d, &AnalyzeOptions { mm_per_unit: sg.mm_per_unit, roles, seed: None, gap_close: 1200.0 }).unwrap();
-    assert!(r.area_m2 > 600.0 && r.area_m2 < 900.0);
+    assert!(r.area_m2 > 600.0 && r.area_m2 < 900.0, "area {}", r.area_m2);
     assert!(r.plan.doors.len() >= 10);
 }
 
