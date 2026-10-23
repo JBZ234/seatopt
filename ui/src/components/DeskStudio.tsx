@@ -1,5 +1,6 @@
 // Studio de escritorios: se arma la forma juntando rectángulos, se ponen las sillas y se deciden
 // las separaciones. El resultado es un tipo más del catálogo (forma “propia”).
+import { meetingTable } from '../meeting';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ruleVal } from '../clear';
 import { uid, useApp } from '../store';
@@ -104,6 +105,7 @@ const TEMPLATES: { id: string; name: string; make: () => { parts: Part[]; seats:
   { id: 'u', name: 'U-shaped', make: () => ({ parts: [{ x: -900, y: 0, w: 1800, h: 600 }, { x: -900, y: -900, w: 500, h: 900 }, { x: 400, y: -900, w: 500, h: 900 }], seats: [seatBottom(0, 0)] }) },
   { id: 'pair', name: 'Pair', make: () => ({ parts: [{ x: -600, y: -600, w: 1200, h: 600 }, { x: -600, y: 0, w: 1200, h: 600 }], seats: [seatTop(0, 600), seatBottom(0, -600)] }) },
   { id: 'isla4', name: 'Island of 4', make: () => ({ parts: [{ x: -1200, y: -600, w: 2400, h: 1200 }], seats: [seatTop(-600, 600), seatTop(600, 600), seatBottom(-600, -600), seatBottom(600, -600)] }) },
+  { id: 'meet8', name: 'Meeting table 8', make: () => { const t = meetingTable(8, true, ''); return { parts: t.parts, seats: t.seats! }; } },
 ];
 
 export default function DeskStudio() {

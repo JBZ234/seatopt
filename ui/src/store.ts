@@ -260,7 +260,7 @@ export function requestedSeats(c: Config): number {
   for (const d of c.demand) {
     const t = c.catalog.find((t) => t.id === d.typeId);
     if (!t || d.max) continue;
-    s += t.flexible ? d.quantity : d.quantity * seatsPerModule(t.shape, t.sides, t.perSide);
+    s += t.flexible ? d.quantity : d.quantity * (t.shape === 'custom' ? Math.max(1, t.seats?.length ?? 1) : seatsPerModule(t.shape, t.sides, t.perSide));
   }
   return s;
 }

@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { meetingTable } from '../meeting';
 import { capacity } from '../actions';
 import { Num, Switch } from '../components/ui';
 import { ruleVal } from '../clear';
@@ -62,6 +64,8 @@ function Preview({ t }: { t: DeskType }) {
 }
 
 export default function DesksStep() {
+  const [mtN, setMtN] = useState(8);
+  const [mtEnds, setMtEnds] = useState(true);
   const st = useApp();
   const c = st.config;
   if (!c) return null;
@@ -206,6 +210,17 @@ export default function DesksStep() {
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'New desk', color: '#5a7d8c', shape: 'straight', seatWidth: 1200, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 0, returnDepth: 0 }); })}>Add straight type</button>
         <button onClick={() => st.updateConfig((cc) => { cc.catalog.push({ id: uid('t'), name: 'New L desk', color: '#a0613f', shape: 'l', seatWidth: 1600, depth: 600, sides: 1, perSide: 1, flexible: false, minPerSide: 1, maxPerSide: 1, returnLength: 1200, returnDepth: 600 }); })}>Add L type</button>
         <button className="studio-btn" onClick={() => st.set({ studio: { open: true } })}>Design in Studio…</button>
+      </div>
+      <div className="meeting-add">
+        <span className="ml">Meeting table</span>
+        <label>Seats <Num value={mtN} unit="" width={52} min={2} max={40} label="Seats of the meeting table" onChange={(v) => setMtN(Math.max(2, Math.min(40, Math.round(v))))} /></label>
+        <label className="check"><input type="checkbox" checked={mtEnds} onChange={(e) => setMtEnds(e.target.checked)} /> Chairs at the ends</label>
+        <button onClick={() => {
+          const t = meetingTable(mtN, mtEnds, uid('mt'));
+          st.snapshot();
+          st.updateConfig((cc) => { cc.catalog.push(t); cc.demand = [...cc.demand.filter((d) => d.typeId !== t.id), { typeId: t.id, quantity: 1 }]; });
+          st.say(`“${t.name}” added (${(t.seatWidth / 1000).toFixed(2)} × ${(t.depth / 1000).toFixed(2)} m), 1 to place. Change it in Studio if you like.`);
+        }}>Add</button>
       </div>
       {c.pinned.length > 0 && (
         <p className="hint">{c.pinned.length} desk{c.pinned.length > 1 ? 's are' : ' is'} pinned on the plan: they count toward the numbers and the optimization places the rest around them.
