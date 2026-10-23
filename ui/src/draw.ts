@@ -38,8 +38,6 @@ export const ringDist = (p: Pt, r: Pt[]) => {
   for (let i = 0; i < r.length; i++) d = Math.min(d, distSeg(p, r[i], r[(i + 1) % r.length]));
   return d;
 };
-/** Strictly inside (not on the outline, within `tol`). */
-const inside = (p: Pt, r: Pt[], tol = 2) => pip(p, r) && ringDist(p, r) > tol;
 
 function properCross(a: Pt, b: Pt, c: Pt, d: Pt, eps = 1e-6) {
   const o = (p: Pt, q: Pt, r: Pt) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
@@ -114,16 +112,28 @@ const mpArea = (mp: MultiPolygon) => mp.reduce((s, poly) => s + poly.reduce((h, 
 
 /** Adds an outline to the area. If it overlaps areas already there, they become one; if it only
  *  touches them, it stays a separate area. Returns the new outlines and which groups were joined. */
-export function addAreaRing(plan: Plan, ring: Pt[]): { region: Pt[][]; regionClear: number[][]; joined: number } {
+export function addAreaRing(plan: Plan, ring0: Pt[]): { region: Pt[][]; regionClear: number[][]; joined: number } {
+  let ring = ring0;
   const region = plan.region;
   const groups = areaGroups(region);
   const nr = toPoly([ring]);
   const hit: AreaGroup[] = [];
+  const touch: AreaGroup[] = [];
   for (const g of groups) {
     const gp = toPoly([region[g.outer], ...g.holes.map((h) => region[h])]);
     try {
-      if (mpArea(polygonClipping.intersection(gp, nr)) > 5e4) hit.push(g); // > 0.05 m²
+      const a = mpArea(polygonClipping.intersection(gp, nr));
+      if (a > OVERLAP_JOIN) hit.push(g);
+      else if (a > 0) touch.push(g);
     } catch { /* degenerate: treat as not overlapping */ }
+  }
+  // a sliver of overlap (snapping to the other face of a wall…): trim the new one so they touch
+  if (!hit.length && touch.length) {
+    try {
+      const d = polygonClipping.difference(nr, ...touch.map((g) => toPoly([region[g.outer], ...g.holes.map((h) => region[h])])));
+      const big = d.slice().sort((p, q) => mpArea([q]) - mpArea([p]))[0];
+      if (big) ring = fromRing(big[0]);
+    } catch { /* keep it as drawn */ }
   }
   const rc = plan.regionClear ?? [];
   const keepIdx = region.map((_, i) => i).filter((i) => !hit.some((g) => g.outer === i || g.holes.includes(i)));
@@ -184,7 +194,9 @@ export function scalePlan(plan: Plan, f: number): Plan {
 export const emptyPlan = (): Plan => ({ region: [], obstacles: [], doors: [], windows: [], rooms: [], building: [], regionClear: [], paths: [] });
 
 // ------------------------------------------------------------ the check
-export interface Issue { level: 'error' | 'warn'; text: string; at?: Pt }
+/** An overlap the app can fix: trim `cut` (outline index) so it only touches `keep`, or join them. */
+export interface OverlapFix { keep: number; cut: number; cutName: string }
+export interface Issue { level: 'error' | 'warn'; text: string; at?: Pt; overlap?: OverlapFix }
 
 const DOOR_TOL = 300; // a door counts as on an area when its middle is this close to the outline
 const mid = (d: Door): Pt => ({ x: (d.a.x + d.b.x) / 2, y: (d.a.y + d.b.y) / 2 });
@@ -229,6 +241,85 @@ function bbox(r: Pt[]) {
 }
 const boxesMeet = (a: ReturnType<typeof bbox>, b: ReturnType<typeof bbox>, m = 50) => a.x0 <= b.x1 + m && b.x0 <= a.x1 + m && a.y0 <= b.y1 + m && b.y0 <= a.y1 + m;
 
+/** Overlaps smaller than this (mm²) are ignored: snapping to slightly different lines. */
+const OVERLAP_IGNORE = 1e4;
+/** Below this an overlap is trimmed on its own when drawing; above it, outlines are joined. */
+const OVERLAP_JOIN = 5e4;
+
+const groupPoly = (R: Pt[][], g: AreaGroup) => toPoly([R[g.outer], ...g.holes.map((h) => R[h])]);
+/** Area (mm²) and a point of the overlap of two areas, or null. */
+function overlapOf(R: Pt[][], a: AreaGroup, b: AreaGroup): { area: number; at: Pt } | null {
+  try {
+    const x = polygonClipping.intersection(groupPoly(R, a), groupPoly(R, b));
+    const area = mpArea(x);
+    if (area <= 0) return null;
+    const biggest = x.slice().sort((p, q) => mpArea([q]) - mpArea([p]))[0][0];
+    const pts = biggest.slice(0, -1).map(([px, py]) => ({ x: px, y: py }));
+    return { area, at: center(pts) };
+  } catch { return null; }
+}
+
+/** The outline `cut` without the part that overlaps the area `keep`, so they only touch. */
+export function trimArea(plan: Plan, keep: number, cut: number): { region: Pt[][]; regionClear: number[][] } | null {
+  const R = plan.region;
+  const groups = areaGroups(R);
+  const gk = groups.find((g) => g.outer === keep), gc = groups.find((g) => g.outer === cut);
+  if (!gk || !gc) return null;
+  let d: MultiPolygon;
+  try { d = polygonClipping.difference(groupPoly(R, gc), groupPoly(R, gk)); } catch { return null; }
+  const rings: Pt[][] = [];
+  for (const poly of d) for (const r of poly) { const pts = fromRing(r); if (pts.length >= 3 && ringArea(pts) > 1e4) rings.push(pts); }
+  if (!rings.length) return null;
+  // the trimmed outline keeps its place (and its number in the list)
+  const drop = new Set(gc.holes);
+  const rc = plan.regionClear ?? [];
+  const region: Pt[][] = [], regionClear: number[][] = [];
+  R.forEach((r, i) => {
+    if (drop.has(i)) return;
+    if (i === cut) { region.push(rings[0]); regionClear.push([]); return; }
+    region.push(r); regionClear.push(rc[i] ?? []);
+  });
+  for (const r of rings.slice(1)) { region.push(r); regionClear.push([]); }
+  return { region, regionClear };
+}
+
+/** The two areas as one outline. */
+export function joinAreas(plan: Plan, a: number, b: number): { region: Pt[][]; regionClear: number[][] } | null {
+  const R = plan.region;
+  const groups = areaGroups(R);
+  const ga = groups.find((g) => g.outer === a), gb = groups.find((g) => g.outer === b);
+  if (!ga || !gb) return null;
+  let u: MultiPolygon;
+  try { u = polygonClipping.union(groupPoly(R, ga), groupPoly(R, gb)); } catch { return null; }
+  const rings: Pt[][] = [];
+  for (const poly of u) for (const r of poly) { const pts = fromRing(r); if (pts.length >= 3) rings.push(pts); }
+  const drop = new Set([a, b, ...ga.holes, ...gb.holes]);
+  const rc = plan.regionClear ?? [];
+  const idx = R.map((_, i) => i).filter((i) => !drop.has(i));
+  return { region: [...idx.map((i) => R[i]), ...rings], regionClear: [...idx.map((i) => rc[i] ?? []), ...rings.map(() => [])] };
+}
+
+/** Trims away every overlap (the smaller area of each pair gives way). */
+export function trimAllOverlaps(plan: Plan): Plan {
+  let p = plan;
+  for (let guard = 0; guard < 50; guard++) {
+    const R = p.region;
+    const groups = areaGroups(R);
+    let changed = false;
+    for (let i = 0; i < groups.length && !changed; i++) for (let j = i + 1; j < groups.length && !changed; j++) {
+      const ov = overlapOf(R, groups[i], groups[j]);
+      if (!ov || ov.area < 1) continue;
+      const small = ringArea(R[groups[i].outer]) <= ringArea(R[groups[j].outer]);
+      const r = trimArea(p, small ? groups[j].outer : groups[i].outer, small ? groups[i].outer : groups[j].outer);
+      if (!r) continue;
+      p = { ...p, ...r };
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  return p;
+}
+
 const cache = new WeakMap<Plan, Issue[]>();
 
 /** Is the plan ready for the optimizer? Errors stop the next step; warnings do not. */
@@ -253,16 +344,20 @@ export function checkPlan(plan: Plan | null): Issue[] {
     const a = ringArea(r) - g.holes.reduce((s, h) => s + ringArea(R[h]), 0);
     if (a < 1e6) out.push({ level: 'error', text: `${name(gi)} is too small (${(a / 1e6).toFixed(2)} m²).`, at: center(r) });
   });
-  // overlapping areas (only touching is fine)
+  // overlapping areas (only touching is fine; a sliver of under 100 cm² from snapping counts as touching)
   for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) {
-    const a = R[groups[i].outer], b = R[groups[j].outer];
-    if (!boxesMeet(boxes[groups[i].outer], boxes[groups[j].outer], 0)) continue;
-    let at: Pt | null = null;
-    for (let s = 0; s < a.length && !at; s++) for (let t = 0; t < b.length && !at; t++) {
-      if (properCross(a[s], a[(s + 1) % a.length], b[t], b[(t + 1) % b.length])) at = a[s];
-    }
-    if (!at) at = a.find((p) => inside(p, b)) ?? b.find((p) => inside(p, a)) ?? null;
-    if (at) out.push({ level: 'error', text: `${name(i)} and ${name(j)} overlap. Move a corner so they only touch, or draw them again (overlapping outlines are joined).`, at });
+    const gi = groups[i], gj = groups[j];
+    if (!boxesMeet(boxes[gi.outer], boxes[gj.outer], 0)) continue;
+    const ov = overlapOf(R, gi, gj);
+    if (!ov || ov.area < OVERLAP_IGNORE) continue;
+    // the smaller one gets trimmed
+    const small = ringArea(R[gi.outer]) <= ringArea(R[gj.outer]);
+    const cut = small ? gi.outer : gj.outer, keep = small ? gj.outer : gi.outer;
+    out.push({
+      level: 'error', at: ov.at,
+      text: `${name(i)} and ${name(j)} overlap (${(ov.area / 1e6).toFixed(ov.area < 1e5 ? 3 : 2)} m²). Trim one so they only touch, or join them.`,
+      overlap: { keep, cut, cutName: name(small ? i : j) },
+    });
   }
 
   // doors

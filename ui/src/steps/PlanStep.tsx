@@ -1,6 +1,6 @@
 import { isWeb } from '../api';
 import { useEffect, useMemo, useRef } from 'react';
-import { analyzePlan, deleteArea, deleteLayer, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setPlanMode, setScale } from '../actions';
+import { analyzePlan, deleteArea, fixAllOverlaps, fixOverlap, deleteLayer, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setPlanMode, setScale } from '../actions';
 import { Fold, Num, Switch } from '../components/ui';
 import { areaCenter, areaGroups, checkPlan, ringArea } from '../draw';
 import { emptySel, fmtLen, STEP, useApp, type Tool } from '../store';
@@ -323,7 +323,10 @@ export default function PlanStep() {
       {draw && layersFold}
 
       <section className="check-sec">
-        <h3 className="section-label">Check</h3>
+        <div className="space-head">
+          <h3 className="section-label">Check</h3>
+          {issues.filter((i) => i.overlap).length > 1 && <button className="small" onClick={fixAllOverlaps}>Trim all overlaps</button>}
+        </div>
         {issues.length === 0 ? (
           <ul className="checks ok"><li><span className="ico">✓</span><span>Areas, doors and obstacles are valid.</span></li></ul>
         ) : (
@@ -331,7 +334,14 @@ export default function PlanStep() {
             {issues.map((i, k) => (
               <li key={k + i.text} className={i.level}>
                 <span className="ico" aria-label={i.level === 'error' ? 'Error' : 'Warning'}>{i.level === 'error' ? '×' : '!'}</span>
-                <span>{i.text}</span>
+                <span>{i.text}
+                  {i.overlap && (
+                    <span className="fix-row">
+                      <button className="small" onClick={() => fixOverlap(i.overlap!.keep, i.overlap!.cut, 'trim')}>Trim {i.overlap.cutName}</button>
+                      <button className="small ghost" onClick={() => fixOverlap(i.overlap!.keep, i.overlap!.cut, 'join')}>Join them</button>
+                    </span>
+                  )}
+                </span>
                 {i.at ? <button className="ghost small" onClick={() => show(i.at)}>Show</button> : <span />}
               </li>
             ))}

@@ -1,7 +1,7 @@
 import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { emptySel, hasDemand, savePlanMode, STEP, uid, useApp, type PlanMode, type ProjectFile } from './store';
-import { addAreaRing, areaGroups, emptyPlan, regionArea, removeAreaGroup, ringArea, scalePlan, selfCross, tidyRing } from './draw';
+import { addAreaRing, areaGroups, emptyPlan, joinAreas, regionArea, removeAreaGroup, ringArea, scalePlan, selfCross, tidyRing, trimAllOverlaps, trimArea } from './draw';
 import type {
   AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, DoorKind, Layout, Module, ObstacleKind, Plan, Problem, Pt, Suggestion, Variant,
 } from './types';
@@ -128,6 +128,25 @@ export function setAreaRing(i: number, pts: Pt[]): boolean {
     regionChanged(p);
   });
   return true;
+}
+
+/** Fixes an overlap: trims the area `cut` so it only touches `keep`, or joins them. */
+export function fixOverlap(keep: number, cut: number, how: 'trim' | 'join') {
+  const p = S().plan;
+  if (!p) return;
+  const r = how === 'trim' ? trimArea(p, keep, cut) : joinAreas(p, keep, cut);
+  if (!r) { S().say('Could not fix it automatically: drag the corners by hand.', 'error'); return; }
+  S().updatePlan((pl) => { pl.region = r.region; pl.regionClear = r.regionClear; regionChanged(pl); });
+  S().say(how === 'trim' ? 'Trimmed: the areas now only touch.' : 'Joined into one area.');
+}
+
+/** Trims every overlap between areas at once. */
+export function fixAllOverlaps() {
+  const p = S().plan;
+  if (!p) return;
+  const n = trimAllOverlaps(p);
+  S().updatePlan((pl) => { pl.region = n.region; pl.regionClear = n.regionClear; regionChanged(pl); });
+  S().say('Overlaps trimmed: the areas now only touch.');
 }
 
 export function addDrawnObstacle(pts: Pt[], kind: ObstacleKind): boolean {

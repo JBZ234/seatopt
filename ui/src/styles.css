@@ -971,3 +971,4 @@ button.link:hover { text-decoration: underline; }
 .scale-hint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding: 6px 8px; border-radius: 6px; border-left: 3px solid var(--exit); background: color-mix(in srgb, var(--exit) 10%, var(--paper)); font-size: 12.5px; }
 .task .field-row label { display: inline-flex; align-items: center; gap: 6px; }
 .bg-sel { stroke: var(--sel); stroke-width: 2.5; opacity: 0.9; }
+.fix-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
