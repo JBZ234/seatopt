@@ -1,6 +1,6 @@
 import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
-import { hasDemand, savePlanMode, STEP, uid, useApp, type PlanMode, type ProjectFile } from './store';
+import { emptySel, hasDemand, savePlanMode, STEP, uid, useApp, type PlanMode, type ProjectFile } from './store';
 import { addAreaRing, areaGroups, emptyPlan, regionArea, removeAreaGroup, ringArea, scalePlan, selfCross, tidyRing } from './draw';
 import type {
   AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, DoorKind, Layout, Module, ObstacleKind, Plan, Problem, Pt, Suggestion, Variant,
@@ -25,7 +25,12 @@ export async function importPlan() {
     if (!out) return;
     const roles: Record<string, typeof out.layers[number]['role']> = {};
     out.layers.forEach((l) => (roles[l.name] = l.role));
-    S().set({ scaleConfirmed: false, tool: 'select', drawing: out, roles, mmPerUnit: out.scale.mmPerUnit, plan: null, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, areaSeeds: [], notes: [out.scale.reason] });
+    // units as the file says, at 1:1 (like AutoCAD); what the doors suggest is only offered
+    const pdf = out.source === 'pdf';
+    const unitMm = pdf ? 25.4 / 72 : out.declaredMm ?? 1;
+    const mm = pdf ? out.scale.mmPerUnit : unitMm;
+    const hint = !pdf && Math.abs(out.scale.mmPerUnit / mm - 1) > 0.05 ? { mmPerUnit: out.scale.mmPerUnit, reason: out.scale.reason } : null;
+    S().set({ scaleConfirmed: !pdf && !!out.declaredMm && !hint, unitMm, scaleHint: hint, hiddenPaths: [], selection: emptySel(), tool: 'select', drawing: out, roles, mmPerUnit: mm, plan: null, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null, background: null, hiddenLayers: [], step: 0, areaSeeds: [], notes: [out.scale.reason] });
     // plano nuevo: reglas y ajustes por defecto (los que dan más puestos); se conservan los
     // escritorios propios del catálogo (los del Studio y los editados)
     const def = await loadDefaults();
@@ -33,11 +38,8 @@ export async function importPlan() {
     const extra = prev ? prev.catalog.filter((t) => !def.catalog.some((d) => d.id === t.id)) : [];
     S().set({ config: { ...def, catalog: [...def.catalog, ...extra] } });
     await loadBackground(true);
-    if (S().planModePref === 'draw') {
-      S().set({ plan: emptyPlan(), planMode: 'draw', areaM2: 0, mainConfirmed: true, tool: 'drawArea', drawShape: 'poly' });
-    } else {
-      await analyzePlan(null);
-    }
+    // nothing is detected: the plan starts empty and is drawn by hand (detecting is a button)
+    S().set({ plan: emptyPlan(), planMode: 'draw', areaM2: 0, mainConfirmed: true, tool: 'select', drawShape: 'poly' });
   } catch (e) {
     S().say(String(e instanceof Error ? e.message : e), 'error');
   }
@@ -51,7 +53,7 @@ export async function startBlank() {
   S().set({
     drawing: null, background: null, hiddenLayers: [], roles: {}, mmPerUnit: 1, notes: [], step: 0, areaSeeds: [],
     plan: emptyPlan(), planMode: 'draw', areaM2: 0, layout: null, alternatives: [], variants: [], suggestions: null, capacity: null,
-    scaleConfirmed: true, mainConfirmed: true, tool: 'drawArea', drawShape: 'poly', history: [], future: [], snapGrid: true,
+    scaleConfirmed: true, mainConfirmed: true, tool: 'drawArea', drawShape: 'poly', history: [], future: [], snapGrid: true, unitMm: 1, scaleHint: null, hiddenPaths: [],
     config: { ...def, catalog: [...def.catalog, ...extra] },
   });
 }
@@ -195,9 +197,7 @@ export async function loadBackground(fresh = false) {
   const bg = await call<BgLayer[]>('background', { drawingId: d.drawingId, mmPerUnit: S().mmPerUnit });
   let hidden: string[];
   if (fresh) {
-    hidden = S().planModePref === 'draw' ? [] : bg.filter((l) => S().roles[l.name] === 'ignore').map((l) => l.name);
-    // nunca ocultar todo el dibujo (PDF sin capas)
-    if (hidden.length >= bg.length) hidden = [];
+    hidden = []; // the drawing as it is: every layer
   } else hidden = S().hiddenLayers.filter((h) => bg.some((l) => l.name === h));
   S().set({ background: bg, hiddenLayers: hidden });
 }
@@ -566,6 +566,7 @@ export async function openProject() {
       step: pf.layout ? 4 : pf.plan ? 1 : 0, variants: [], suggestions: null, capacity: null,
       notes: ['Project opened. To detect the area again or change layers, import the plan again.'],
       planMode: 'draw', areaM2: pf.plan ? regionArea(pf.plan.region) / 1e6 : 0,
+      unitMm: pf.mmPerUnit, scaleHint: null, hiddenPaths: [],
     });
   } catch (e) {
     S().say('Could not open the project: ' + String(e instanceof Error ? e.message : e), 'error');

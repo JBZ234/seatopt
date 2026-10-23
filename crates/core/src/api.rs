@@ -74,6 +74,8 @@ pub struct ImportOut {
     pub scale: ScaleGuess,
     pub bounds: [f64; 4],
     pub unit_note: String,
+    /// Millimeters per drawing unit as the file declares it (None = not declared).
+    pub declared_mm: Option<f64>,
 }
 
 pub fn import_bytes(name: &str, bytes: &[u8]) -> Result<ImportOut, String> {
@@ -101,6 +103,7 @@ fn register(d: Drawing) -> ImportOut {
         scale,
         bounds: [d.bounds.min.x, d.bounds.min.y, d.bounds.max.x, d.bounds.max.y],
         unit_note: d.unit_note.clone(),
+        declared_mm: d.declared_unit_mm,
     };
     store().lock().unwrap().drawings.insert(id, Arc::new(d));
     out

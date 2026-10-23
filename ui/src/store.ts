@@ -14,11 +14,22 @@ export type Tool =
 export const DRAFT_TOOLS: Tool[] = ['drawArea', 'drawObs', 'drawMain', 'drawDoor', 'drawExit', 'outline'];
 export type PlanMode = 'draw' | 'detect';
 
-function loadPlanMode(): PlanMode {
-  try { return localStorage.getItem('seatopt-planmode') === 'detect' ? 'detect' : 'draw'; } catch { return 'draw'; }
+/** New plans always start empty, to draw by hand (detecting is a button). */
+function loadPlanMode(): PlanMode { return 'draw'; }
+export function savePlanMode(_m: PlanMode) { /* not remembered: drawing is always the start */ }
+
+/** Units shown on the plan (coordinates, lengths) and used for typed lengths. */
+export type DispUnit = 'mm' | 'cm' | 'm';
+export const UNIT_MM: Record<DispUnit, number> = { mm: 1, cm: 10, m: 1000 };
+function loadDispUnit(): DispUnit {
+  try { const u = localStorage.getItem('seatopt-unit'); if (u === 'mm' || u === 'cm' || u === 'm') return u; } catch { /* no storage */ }
+  return 'm';
 }
-export function savePlanMode(m: PlanMode) {
-  try { localStorage.setItem('seatopt-planmode', m); } catch { /* no storage */ }
+/** A length in the units shown, with a sensible number of decimals. */
+export function fmtLen(mm: number, u: DispUnit, withUnit = true): string {
+  const v = mm / UNIT_MM[u];
+  const t = u === 'm' ? v.toFixed(2) : u === 'cm' ? v.toFixed(1) : v.toFixed(0);
+  return withUnit ? `${t} ${u}` : t;
 }
 
 /** Workflow steps (index in the top bar). */
@@ -40,9 +51,9 @@ function loadTheme(): Theme {
 }
 
 /** Selección múltiple (como AutoCAD). Ventanas por índice. */
-export interface Selection { modules: string[]; obstacles: string[]; doors: string[]; windows: number[]; /** Anillos del contorno del recinto. */ region?: number[] }
-export const emptySel = (): Selection => ({ modules: [], obstacles: [], doors: [], windows: [], region: [] });
-export const selCount = (s: Selection) => s.modules.length + s.obstacles.length + s.doors.length + s.windows.length + (s.region?.length ?? 0);
+export interface Selection { modules: string[]; obstacles: string[]; doors: string[]; windows: number[]; /** Anillos del contorno del recinto. */ region?: number[]; /** Lines of the drawing ("layerIndex:pathIndex"). */ bg?: string[] }
+export const emptySel = (): Selection => ({ modules: [], obstacles: [], doors: [], windows: [], region: [], bg: [] });
+export const selCount = (s: Selection) => s.modules.length + s.obstacles.length + s.doors.length + s.windows.length + (s.region?.length ?? 0) + (s.bg?.length ?? 0);
 
 interface Snapshot { plan: Plan | null; layout: Layout | null; pinned: Module[]; catalog: DeskType[] }
 
@@ -121,6 +132,13 @@ export interface AppState {
   ortho: boolean;
   /** Point to show on the plan (from the check list). */
   focus: { p: Pt; n: number } | null;
+  /** Drawing unit chosen (mm per unit, before the scale): mm, cm, m, in, ft. */
+  unitMm: number;
+  /** What the file's doors suggest, when it does not match the declared units. */
+  scaleHint: { mmPerUnit: number; reason: string } | null;
+  dispUnit: DispUnit;
+  /** Lines of the drawing hidden one by one ("layerIndex:pathIndex"). */
+  hiddenPaths: string[];
   set: (p: Partial<AppState>) => void;
   updateConfig: (f: (c: Config) => void) => void;
   updatePlan: (f: (p: Plan) => void) => void;
@@ -204,6 +222,10 @@ export const useApp = create<AppState>((set, get) => ({
   obsKind: 'column',
   ortho: true,
   focus: null,
+  unitMm: 1,
+  scaleHint: null,
+  dispUnit: loadDispUnit(),
+  hiddenPaths: [],
   set: (p) => set(p),
   updateConfig: (f) => {
     const c = get().config;

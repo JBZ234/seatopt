@@ -3,12 +3,16 @@ import { addDrawnArea, addDrawnDoor, addDrawnObstacle, deleteArea, placeDesk, se
 import { areaAt, projLine, projSeg } from '../draw';
 import { circWidth, deskBody, doorInfo, doorSide, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
-import { describeSel, deleteSelection, flipHinge, flipSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotatePrompt, rotateSelection } from '../edit';
-import { DRAFT_TOOLS, emptySel, selCount, STEP, useApp, uid, type Tool } from '../store';
+import { describeSel, deleteSelection, flipHinge, hideSelectedLines, polyPicked, flipSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotatePrompt, rotateSelection } from '../edit';
+import { DRAFT_TOOLS, emptySel, fmtLen, selCount, STEP, UNIT_MM, useApp, uid, type DispUnit, type Tool } from '../store';
 import type { CircPath, Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
 const DOOR_COLOR: Record<DoorKind, string> = { main: 'var(--egress)', exit: 'var(--exit)', office: 'var(--office-door)', ignore: 'var(--muted)' };
 const OBS_FILL: Record<ObstacleKind, string> = { column: 'var(--column)', fixedOffice: 'var(--office)', restricted: 'var(--restricted)', reserved: 'var(--reserved)' };
+
+/** Closest zoom: 1 mm = 10 px. (Beyond it the graphics card's precision blurs plans placed far
+ *  from the origin, as DXF coordinates often are.) */
+const ZOOM_MAX = 10;
 
 function ringD(r: Pt[]) {
   if (!r.length) return '';
@@ -100,6 +104,7 @@ interface Props {
 export default function Canvas({ onSeed, onCalibrated }: Props) {
   const st = useApp();
   const { plan, layout, config, background, hiddenLayers, tool, colorBy, showKeepouts, showBackground } = st;
+  const du = st.dispUnit;
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ tx: 0, ty: 0, k: 0.02 });
@@ -186,9 +191,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       r.forEach((q) => add(q.x, q.y));
       for (let i = 0; i < (closed ? r.length : r.length - 1); i++) { const q = r[(i + 1) % r.length]; addSeg(r[i].x, r[i].y, q.x, q.y); }
     };
-    background?.forEach((l) => {
+    const hp = new Set(st.hiddenPaths);
+    background?.forEach((l, li) => {
       if (hiddenLayers.includes(l.name)) return;
-      l.paths.forEach((p) => {
+      l.paths.forEach((p, pi) => {
+        if (hp.has(li + ':' + pi)) return;
         for (let i = 0; i < p.length; i += 2) add(p[i], p[i + 1]);
         for (let i = 0; i + 3 < p.length; i += 2) addSeg(p[i], p[i + 1], p[i + 2], p[i + 3]);
       });
@@ -197,7 +204,71 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     plan?.obstacles.forEach((o) => ring(o.poly));
     plan?.doors.forEach((d) => ring([d.a, d.b], false));
     return { idx, seg, cell };
-  }, [background, hiddenLayers, plan]);
+  }, [background, hiddenLayers, plan, st.hiddenPaths]);
+
+  // ------------------------------------------------ picking lines of the drawing (to hide them)
+  const bgPick = useMemo(() => {
+    const cell = 2000;
+    const m = new Map<string, number[]>();
+    const hp = new Set(st.hiddenPaths);
+    background?.forEach((l, li) => {
+      if (hiddenLayers.includes(l.name)) return;
+      l.paths.forEach((p, pi) => {
+        if (hp.has(li + ':' + pi)) return;
+        for (let i = 0; i + 3 < p.length; i += 2) {
+          const x0 = p[i], y0 = p[i + 1], x1 = p[i + 2], y1 = p[i + 3];
+          const cx0 = Math.floor(Math.min(x0, x1) / cell), cx1 = Math.floor(Math.max(x0, x1) / cell);
+          const cy0 = Math.floor(Math.min(y0, y1) / cell), cy1 = Math.floor(Math.max(y0, y1) / cell);
+          if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > 2500) continue;
+          for (let a = cx0; a <= cx1; a++) for (let b = cy0; b <= cy1; b++) {
+            const k = a + ',' + b;
+            const v = m.get(k);
+            if (v) v.push(li, pi, i); else m.set(k, [li, pi, i]);
+          }
+        }
+      });
+    });
+    return { m, cell };
+  }, [background, hiddenLayers, st.hiddenPaths]);
+  /** The drawing line under the point ("layer:path"), or null. */
+  const bgAt = (q: Pt, tol: number): string | null => {
+    if (!background) return null;
+    const { m, cell } = bgPick;
+    let best: string | null = null, bd = tol;
+    const span = Math.ceil(tol / cell);
+    const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell);
+    for (let a = -span; a <= span; a++) for (let b = -span; b <= span; b++) {
+      const v = m.get((cx + a) + ',' + (cy + b));
+      if (!v) continue;
+      for (let t = 0; t < v.length; t += 3) {
+        const p = background[v[t]].paths[v[t + 1]], i = v[t + 2];
+        const d = distSeg(q, { x: p[i], y: p[i + 1] }, { x: p[i + 2], y: p[i + 3] });
+        if (d < bd) { bd = d; best = v[t] + ':' + v[t + 1]; }
+      }
+    }
+    return best;
+  };
+  /** Drawing lines inside the window (all of the line) or touched by it (crossing). */
+  const bgInRect = (r: { x0: number; y0: number; x1: number; y1: number }, crossing: boolean): string[] => {
+    if (!background) return [];
+    const out: string[] = [];
+    const hp = new Set(st.hiddenPaths);
+    background.forEach((l, li) => {
+      if (hiddenLayers.includes(l.name)) return;
+      l.paths.forEach((p, pi) => {
+        const k = li + ':' + pi;
+        if (hp.has(k) || p.length < 4) return;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i < p.length; i += 2) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); }
+        if (x1 < r.x0 || x0 > r.x1 || y1 < r.y0 || y0 > r.y1) return;
+        if (!crossing) { if (x0 >= r.x0 && x1 <= r.x1 && y0 >= r.y0 && y1 <= r.y1) out.push(k); return; }
+        const pts: Pt[] = [];
+        for (let i = 0; i < p.length; i += 2) pts.push({ x: p[i], y: p[i + 1] });
+        if (polyPicked(pts, r, true, false)) out.push(k);
+      });
+    });
+    return out;
+  };
   const SNAP_TOOLS: string[] = ['outline', 'drawDoor', 'window', 'column', 'fixedOffice', 'restricted', 'reserved', 'calibrate', 'placeDesk', ...DRAFT_TOOLS];
   const snapPt = (w: Pt): Pt | null => {
     const r = 10 / view.k;
@@ -483,12 +554,13 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     setTyped('');
     const last = draft[draft.length - 1];
     if (!t || !last) return;
-    const num = (v: string) => parseFloat(v) * 1000;
+    const num = (v: string) => parseFloat(v) * UNIT_MM[du];
     const c = cursor ?? { x: last.x + 1000, y: last.y };
     let p: Pt | null = null;
     if (t.includes('<')) {
-      const [l, a] = t.split('<').map(num);
-      if (isFinite(l) && isFinite(a)) { const r = (a / 1000) * Math.PI / 180; p = { x: last.x + Math.cos(r) * l, y: last.y + Math.sin(r) * l }; }
+      const [ls, as] = t.split('<');
+      const l = num(ls), a = parseFloat(as);
+      if (isFinite(l) && isFinite(a)) { const r = a * Math.PI / 180; p = { x: last.x + Math.cos(r) * l, y: last.y + Math.sin(r) * l }; }
     } else if (/[x*;]/i.test(t)) {
       const [a, b] = t.split(/[x*;]/i).map(num);
       if (isFinite(a) && isFinite(b)) {
@@ -583,10 +655,12 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   // ------------------------------------------------ capas memorizadas
   const bgEls = useMemo(() => {
     if (!background) return null;
-    return background.filter((l) => !hiddenLayers.includes(l.name)).map((l) => {
+    const hp = new Set(st.hiddenPaths);
+    return background.map((l, li) => ({ l, li })).filter(({ l }) => !hiddenLayers.includes(l.name)).map(({ l, li }) => {
       let d = '';
-      for (const p of l.paths) {
-        if (p.length < 4) continue;
+      for (let pi = 0; pi < l.paths.length; pi++) {
+        const p = l.paths[pi];
+        if (p.length < 4 || (hp.size && hp.has(li + ':' + pi))) continue;
         d += `M${p[0]} ${p[1]}`;
         for (let i = 2; i < p.length; i += 2) d += `L${p[i]} ${p[i + 1]}`;
       }
@@ -599,7 +673,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         </g>
       );
     });
-  }, [background, hiddenLayers]);
+  }, [background, hiddenLayers, st.hiddenPaths]);
 
   const typeColor = useMemo(() => {
     const m: Record<string, string> = {};
@@ -795,9 +869,17 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         {plan?.doors.filter((d) => sel.doors.includes(d.id)).map((d) => <line key={'sd' + d.id} className="sel" x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} />)}
         {plan?.windows.filter((_, i) => sel.windows.includes(i)).map((w, i) => <line key={'sw' + i} className="sel" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
         {plan?.region.filter((_, i) => sel.region?.includes(i)).map((r, i) => <path key={'sr' + i} className="sel" fill="none" d={ringD(r)} />)}
+        {sel.bg?.length ? <path className="sel bg-sel" fill="none" d={sel.bg.map((k) => {
+          const [li, pi] = k.split(':').map(Number);
+          const p = background?.[li]?.paths[pi];
+          if (!p || p.length < 4) return '';
+          let d = `M${p[0]} ${p[1]}`;
+          for (let i = 2; i < p.length; i += 2) d += `L${p[i]} ${p[i + 1]}`;
+          return d;
+        }).join('')} /> : null}
       </>
     );
-  }, [sel, layout, plan]);
+  }, [sel, layout, plan, background]);
 
   // textos (fuera del grupo invertido)
   const sx = (p: Pt) => p.x * view.k + view.tx;
@@ -807,9 +889,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   // ------------------------------------------------ cuadrícula (se adapta al zoom)
   const gridEls = useMemo(() => {
     if (!st.gridOn) return null;
-    let g = st.gridSize;
-    while (g * view.k < 7) g *= 2;
-    const major = g * 5;
+    // decimal like AutoCAD: the snap step times a power of ten, a heavier line every 10
+    // lines every power of ten (1 mm, 1 cm, 10 cm, 1 m, 10 m…) at least 8 px apart; heavier every 10
+    let g = 1;
+    while (g * view.k < 8) g *= 10;
+    const major = g * 10;
     const x0 = -view.tx / view.k, x1 = (size.w - view.tx) / view.k;
     const y1 = view.ty / view.k, y0 = -(size.h - view.ty) / view.k;
     let minor = '', maj = '';
@@ -1141,6 +1225,10 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       let picked;
       if (tiny) {
         picked = pickPoint(toWorld(x, y), 8 / view.k);
+        if (!selCount(picked) && st.step === STEP.plan) {
+          const k = bgAt(toWorld(x, y), 6 / view.k);
+          if (k) picked = { ...emptySel(), bg: [k] };
+        }
         if (!selCount(picked)) {
           if (!e.shiftKey && !(e.ctrlKey || e.metaKey)) st.set({ selection: emptySel() });
           return;
@@ -1148,6 +1236,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       } else {
         const r = normRect(toWorld(b.ax, b.ay), toWorld(b.bx, b.by));
         picked = pickRect(r, b.bx < b.ax);
+        if (st.step === STEP.plan) picked = { ...picked, bg: bgInRect(r, b.bx < b.ax) };
       }
       // como AutoCAD: una selección nueva reemplaza la anterior; Ctrl suma, Shift quita
       const add = e.ctrlKey || e.metaKey;
@@ -1248,7 +1337,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
 
   const zoomBy = (f: number) => {
     setView((v) => {
-      const k = Math.min(2, Math.max(0.0005, v.k * f));
+      const k = Math.min(ZOOM_MAX, Math.max(1e-7, v.k * f));
       const x = size.w / 2, y = size.h / 2;
       const wx = (x - v.tx) / v.k, wy = (y - v.ty) / v.k;
       return { k, tx: x - wx * k, ty: y - wy * k };
@@ -1259,7 +1348,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
     const { sx: x, sy: y } = evPt(e);
     const f = Math.exp(-e.deltaY * 0.0015);
     setView((v) => {
-      const k = Math.min(2, Math.max(0.0005, v.k * f));
+      const k = Math.min(ZOOM_MAX, Math.max(1e-7, v.k * f));
       const wx = (x - v.tx) / v.k, wy = (y - v.ty) / v.k;
       return { k, tx: x - wx * k, ty: y - wy * k };
     });
@@ -1443,6 +1532,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       {selCount(sel) > 0 && (
         <div className="selbar" role="toolbar" aria-label="Selection actions">
           <span>{describeSel(sel)}</span>
+          {sel.bg?.length ? <button className="small" title="Hide these lines of the drawing (H or Delete). The file does not change; “Show hidden lines” brings them back." onClick={hideSelectedLines}>Hide lines</button> : null}
           {sel.modules.length > 0 && <button className="small" title="Keep these desks and their people in the next optimizations (P)" onClick={() => pinSelection(true)}>Pin and lock</button>}
           {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Release</button>}
           {sel.doors.length > 0 && <button className="small" title="Open to the other side (and move its clearance) · F" onClick={flipSelection}>Flip side</button>}
@@ -1514,14 +1604,17 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       <div className="grid-ctl" role="group" aria-label="Grid">
         <label><input type="checkbox" checked={st.gridOn} onChange={(e) => st.set({ gridOn: e.target.checked })} /> Grid</label>
         <label title="The cursor snaps to the grid (and always to corners and edges when drawing or moving). Hold the space bar to release it for a moment; Ctrl+Space turns it on or off."><input type="checkbox" checked={st.snapGrid} onChange={(e) => st.set({ snapGrid: e.target.checked })} /> Snap</label>
-        <select value={st.gridSize} aria-label="Grid size" onChange={(e) => st.set({ gridSize: parseFloat(e.target.value) })}>
-          {[100, 250, 500, 1000].map((g) => <option key={g} value={g}>{(g / 1000).toFixed(g < 1000 ? 2 : 0)} m</option>)}
+        <select value={st.gridSize} aria-label="Grid and snap step" title="Grid and snap step" onChange={(e) => st.set({ gridSize: parseFloat(e.target.value) })}>
+          {[1, 5, 10, 50, 100, 500, 1000].map((g) => <option key={g} value={g}>{fmtLen(g, du).replace(/\.?0+ /, ' ')}</option>)}
+        </select>
+        <select value={du} aria-label="Units" title="Units for coordinates, lengths and what you type" onChange={(e) => { const u = e.target.value as DispUnit; st.set({ dispUnit: u }); try { localStorage.setItem('seatopt-unit', u); } catch { /* no storage */ } }}>
+          <option value="m">m</option><option value="cm">cm</option><option value="mm">mm</option>
         </select>
       </div>
       <div className="readout" aria-live="off">
-        <span>x</span><b>{cursor ? (cursor.x / 1000).toFixed(2) : '—'}</b>
-        <span>y</span><b>{cursor ? (cursor.y / 1000).toFixed(2) : '—'}</b>
-        <span>m</span>
+        <span>x</span><b>{cursor ? fmtLen(cursor.x, du, false) : '—'}</b>
+        <span>y</span><b>{cursor ? fmtLen(cursor.y, du, false) : '—'}</b>
+        <span>{du}</span>
       </div>
       {tool === 'placeDesk' && cursor && placeType && (
         <div className={'fit-tip' + (fitWhy.length ? ' bad' : ' ok')} style={{ left: sx(cursor) + 18, top: sy(cursor) + 18 }}>
@@ -1531,11 +1624,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       {isDraft && cursor && draft.length > 0 && (() => {
         const last = draftKind === 'door' || rectMode ? draft[0] : draft[draft.length - 1];
         const dx = cursor.x - last.x, dy = cursor.y - last.y;
-        const txt = rectMode ? `${(Math.abs(dx) / 1000).toFixed(2)} × ${(Math.abs(dy) / 1000).toFixed(2)} m`
-          : `${(Math.hypot(dx, dy) / 1000).toFixed(2)} m` + (draftKind === 'door' ? '' : ` · ${Math.round(((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360)}°`);
+        const txt = rectMode ? `${fmtLen(Math.abs(dx), du, false)} × ${fmtLen(Math.abs(dy), du)}`
+          : fmtLen(Math.hypot(dx, dy), du) + (draftKind === 'door' ? '' : ` · ${Math.round(((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360)}°`);
         return (
           <div className={'dim-tip' + (typed ? ' typing' : '')} style={{ left: sx(cursor) + 16, top: sy(cursor) - 34 }}>
-            {typed ? <><span className="dim-in">{typed}</span><span className="caret" /> m</> : txt}
+            {typed ? <><span className="dim-in">{typed}</span><span className="caret" /> {du}</> : txt}
           </div>
         );
       })()}

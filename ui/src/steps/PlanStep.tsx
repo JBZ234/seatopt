@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { analyzePlan, deleteArea, deleteLayer, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setPlanMode, setScale } from '../actions';
 import { Fold, Num, Switch } from '../components/ui';
 import { areaCenter, areaGroups, checkPlan, ringArea } from '../draw';
-import { emptySel, STEP, useApp, type Tool } from '../store';
+import { emptySel, fmtLen, STEP, useApp, type Tool } from '../store';
 import type { DoorKind, LayerRole, ObstacleKind, Pt } from '../types';
 
 const ROLE_LABEL: Record<LayerRole, string> = {
@@ -17,6 +17,7 @@ const OBS_LABEL: Record<ObstacleKind, string> = { column: 'Columns', fixedOffice
 const OBS_ONE: Record<ObstacleKind, string> = { column: 'Column', fixedOffice: 'Fixed office or room', restricted: 'Panel or cabinet (with clearance)', reserved: 'Reserved area' };
 
 type TaskId = 'scale' | 'area' | 'door' | 'obs';
+const UNITS: [number, string][] = [[1, 'millimeters'], [10, 'centimeters'], [1000, 'meters'], [25.4, 'inches'], [304.8, 'feet']];
 
 export default function PlanStep() {
   const st = useApp();
@@ -28,7 +29,7 @@ export default function PlanStep() {
   const errors = issues.filter((i) => i.level === 'error');
   const areaOk = groups.length > 0 && !!plan && plan.region[groups[0].outer].length >= 3;
   const mainOk = !!plan && plan.doors.some((d) => d.kind === 'main');
-  const scaleKnown = !drawing || st.scaleConfirmed || (drawing?.scale.reason ?? '').includes('saved') || (drawing?.source !== 'pdf' && (drawing?.unitNote ?? '').startsWith('File units'));
+  const scaleKnown = !drawing || st.scaleConfirmed || (drawing?.scale.reason ?? '').includes('saved');
   const pending: TaskId | null = !areaOk ? 'area' : !mainOk || !st.mainConfirmed ? 'door' : null;
   const blocker = errors.length ? `Fix ${errors.length === 1 ? 'the problem' : `the ${errors.length} problems`} above to continue.`
     : !draw && !st.mainConfirmed ? 'Confirm the main entrance first.' : '';
@@ -40,10 +41,7 @@ export default function PlanStep() {
     const key = `${drawing?.drawingId}|${pending}|${st.planMode}`;
     if (lastAuto.current === key) return;
     lastAuto.current = key;
-    if (draw) {
-      if (pending === 'area' && st.tool === 'select') st.set({ tool: 'drawArea' });
-      return;
-    }
+    if (draw) return; // drawing: you pick the tool
     if (pending === 'area' && background) st.set({ tool: 'seed' });
     else if (pending === 'door') st.set({ tool: plan && plan.doors.length > 0 ? 'mainDoor' : 'drawMain' });
     else if (pending === null && ['seed', 'mainDoor', 'drawMain', 'outline'].includes(st.tool)) st.set({ tool: 'select' });
@@ -103,6 +101,7 @@ export default function PlanStep() {
   );
 
   const canDetect = !!drawing?.drawingId;
+  const scaleN = mmPerUnit / (st.unitMm || 1);
   const scaleTask = drawing && (
     <Task id="scale" n={1} title="Scale" done warn={!scaleKnown}>
       <div className="field-row">
@@ -111,19 +110,33 @@ export default function PlanStep() {
             <Num value={Math.round(paper ?? 100)} unit="" width={60} label="Paper scale" onChange={(v) => { st.set({ scaleConfirmed: true }); setScale(v * 25.4 / 72); }} />
           </label>
         ) : (
-          <select aria-label="Drawing unit" value={mmPerUnit} onChange={(e) => { st.set({ scaleConfirmed: true }); setScale(parseFloat(e.target.value)); }}>
-            <option value={1}>millimeters</option>
-            <option value={10}>centimeters</option>
-            <option value={1000}>meters</option>
-            <option value={25.4}>inches</option>
-            <option value={304.8}>feet</option>
-            {![1, 10, 1000, 25.4, 304.8].includes(mmPerUnit) && <option value={mmPerUnit}>calibrated</option>}
-          </select>
+          <>
+            <label>Units
+              <select aria-label="Drawing units" value={UNITS.some(([v]) => v === st.unitMm) ? st.unitMm : 1} onChange={(e) => { const u = parseFloat(e.target.value); st.set({ unitMm: u, scaleConfirmed: true }); setScale(u * scaleN); }}>
+                {UNITS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+              </select>
+            </label>
+            <label title="Real size per drawing unit: 1:1 when the plan is drawn at real size (the usual in AutoCAD model space)">Scale 1 :
+              <Num value={Math.round(scaleN * 10000) / 10000} unit="" width={64} label="Scale" onChange={(v) => { if (v > 0) { st.set({ scaleConfirmed: true }); setScale(st.unitMm * v); } }} />
+            </label>
+          </>
         )}
         <ChipTool t="calibrate" label="Calibrate with a known length" />
         {!scaleKnown && <button className="ghost small" onClick={() => st.set({ scaleConfirmed: true })}>It is correct</button>}
       </div>
-      <p className="hint">{scaleKnown ? (drawing?.scale.reason.includes('saved') ? drawing.scale.reason : 'Scale confirmed.') : `${drawing?.scale.reason ?? ''}`}{draw && !scaleKnown ? ' Check it before drawing: lengths you type are in meters.' : ''}</p>
+      <p className="hint">{isPdf
+        ? (scaleKnown ? 'Scale confirmed.' : drawing?.scale.reason ?? '')
+        : `1 drawing unit = ${fmtLen(mmPerUnit, mmPerUnit >= 1000 ? 'm' : mmPerUnit >= 10 ? 'cm' : 'mm')}. ${drawing?.declaredMm ? `The file says ${UNITS.find(([v]) => v === drawing.declaredMm)?.[1] ?? 'its units'}.` : 'The file does not say its units.'}`}</p>
+      {!isPdf && st.scaleHint && Math.abs(st.scaleHint.mmPerUnit / mmPerUnit - 1) > 0.05 && (() => {
+        const h = st.scaleHint!;
+        const u = UNITS.find(([v]) => Math.abs(h.mmPerUnit / v - 1) < 0.02);
+        return (
+          <div className="scale-hint">
+            <span>The doors in the drawing measure as if it were drawn in {u ? u[1] : `1:${(h.mmPerUnit / st.unitMm).toFixed(2)}`}.</span>
+            <button className="small" onClick={() => { if (u) st.set({ unitMm: u[0] }); st.set({ scaleConfirmed: true }); setScale(h.mmPerUnit); }}>Use {u ? `${u[1]} 1:1` : 'it'}</button>
+          </div>
+        );
+      })()}
     </Task>
   );
   const off = drawing ? 1 : 0; // task numbers without the scale
@@ -136,7 +149,8 @@ export default function PlanStep() {
         <button className="ghost small" onClick={() => st.set({ hiddenLayers: [] })}>All</button>
         <button className="ghost small" onClick={() => st.set({ hiddenLayers: allNames })}>None</button>
       </span>}>
-      <p className="hint">{draw ? 'The drawing as it is in the file, to trace over. Turn layers off to see better; nothing is detected from them.' : 'If the area comes out wrong, check which layers are walls and which are ignored, and detect again.'}</p>
+      <p className="hint">{draw ? 'The drawing as it is in the file, to trace over. Turn layers off to see better. To hide single lines: with Select, click a line (or drag a window over several) and press H.' : 'If the area comes out wrong, check which layers are walls and which are ignored, and detect again.'}</p>
+      {st.hiddenPaths.length > 0 && <div className="row"><button className="small" onClick={() => st.set({ hiddenPaths: [] })}>Show {st.hiddenPaths.length} hidden line{st.hiddenPaths.length > 1 ? 's' : ''}</button></div>}
       <table className="layers layer-sw">
         <tbody>
           {drawing.layers.map((l) => {
@@ -188,14 +202,8 @@ export default function PlanStep() {
         <strong title={drawing?.name}>{drawing?.name ?? 'Blank plan'}</strong>
       </div>
 
-      {canDetect && (
-        <div className="mode-row">
-          <div className="prio-seg" role="radiogroup" aria-label="How to make the plan">
-            <button role="radio" aria-checked={draw} className={draw ? 'on' : ''} onClick={() => { if (!draw) setPlanMode('draw'); }}>Draw by hand</button>
-            <button role="radio" aria-checked={!draw} className={!draw ? 'on' : ''} onClick={() => { if (draw) setPlanMode('detect'); }}>Detect automatically</button>
-          </div>
-          {draw && plan && (plan.region.length > 0 || plan.doors.length > 0) && <button className="ghost small" onClick={() => setPlanMode('draw', true)}>Start over</button>}
-        </div>
+      {draw && plan && (plan.region.length > 0 || plan.doors.length > 0) && (
+        <div className="mode-row"><button className="ghost small" onClick={() => setPlanMode('draw', true)}>Start over</button></div>
       )}
 
       {draw ? (
@@ -208,6 +216,7 @@ export default function PlanStep() {
             <div className="tool-row">
               <DrawBtn t="drawArea" shape="poly" label="Draw area" primary={!areaOk} />
               <DrawBtn t="drawArea" shape="rect" label="Rectangle" />
+              {canDetect && <button className="ghost" title="Look for the area in the lines of the drawing (replaces what you drew)" onClick={() => setPlanMode('detect')}>Detect automatically</button>}
             </div>
             {groups.length > 0 && (
               <ul className="area-list">
@@ -284,6 +293,7 @@ export default function PlanStep() {
               {areaOk && canDetect && (st.areaSeeds.length > 1 || plan!.region.length > 1) && <ToolBtn t="seedRemove" label="− Remove area" />}
               {canDetect && <button className="ghost" onClick={() => analyzePlan(null)}>Detect again</button>}
               <button className="ghost" onClick={() => setPlanMode('draw')}>Fix it by hand</button>
+              <button className="ghost" onClick={() => setPlanMode('draw', true)}>Back to drawing (empty)</button>
             </div>
           </Task>
 

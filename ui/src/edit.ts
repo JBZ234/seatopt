@@ -1,7 +1,7 @@
 // Edición manual estilo AutoCAD: selección por ventana / captura, mover, girar, borrar, fijar.
 import { call } from './api';
 import { areaGroups, regionArea } from './draw';
-import { emptySel, useApp, type Selection } from './store';
+import { emptySel, selCount, useApp, type Selection } from './store';
 import type { Layout, Module, Pt } from './types';
 
 const S = () => useApp.getState();
@@ -80,7 +80,7 @@ export function pickPoint(p: Pt, tol: number): Selection {
 
 export function mergeSel(a: Selection, b: Selection, remove: boolean): Selection {
   const op = <T,>(x: T[], y: T[]) => (remove ? x.filter((v) => !y.includes(v)) : [...x, ...y.filter((v) => !x.includes(v))]);
-  return { modules: op(a.modules, b.modules), obstacles: op(a.obstacles, b.obstacles), doors: op(a.doors, b.doors), windows: op(a.windows, b.windows), region: op(a.region ?? [], b.region ?? []) };
+  return { modules: op(a.modules, b.modules), obstacles: op(a.obstacles, b.obstacles), doors: op(a.doors, b.doors), windows: op(a.windows, b.windows), region: op(a.region ?? [], b.region ?? []), bg: op(a.bg ?? [], b.bg ?? []) };
 }
 
 // ------------------------------------------------------------ transformaciones
@@ -252,8 +252,19 @@ export function rotateSelection(deg = 90) {
   evaluateSoon();
 }
 
+/** Hides the selected lines of the drawing (only on screen: the file does not change). */
+export function hideSelectedLines() {
+  const sel = S().selection;
+  if (!sel.bg?.length) return;
+  const h = new Set(S().hiddenPaths);
+  sel.bg.forEach((k) => h.add(k));
+  S().set({ hiddenPaths: [...h], selection: { ...sel, bg: [] } });
+}
+
 export function deleteSelection() {
   const sel = S().selection;
+  if (sel.bg?.length) hideSelectedLines(); // lines of the drawing are only hidden
+  if (selCount({ ...sel, bg: [] }) === 0) return;
   S().snapshot();
   if (sel.modules.length) {
     editLayout((l) => {
@@ -318,6 +329,7 @@ export function describeSel(sel: Selection): string {
   if (sel.doors.length) parts.push(`${sel.doors.length} door${sel.doors.length > 1 ? 's' : ''}`);
   if (sel.windows.length) parts.push(`${sel.windows.length} window${sel.windows.length > 1 ? 's' : ''}`);
   if (sel.region?.length) parts.push('area outline');
+  if (sel.bg?.length) parts.push(`${sel.bg.length} drawing line${sel.bg.length > 1 ? 's' : ''}`);
   return parts.join(', ');
 }
 

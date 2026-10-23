@@ -6,8 +6,8 @@ import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
-import { deleteSelection, evaluateSoon, flipSelection, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
-import { emptySel, requestedSeats, savePlanMode, selCount, STEP, useApp, type Theme, type Tool } from './store';
+import { deleteSelection, evaluateSoon, flipSelection, hideSelectedLines, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
+import { emptySel, requestedSeats, selCount, STEP, useApp, type Theme, type Tool } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
 import OrgStep from './steps/OrgStep';
@@ -56,6 +56,7 @@ export default function App() {
       else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'f') s.set({ placeUp: !s.placeUp });
       else if (!ctrl && e.key.toLowerCase() === 'r' && selCount(s.selection)) rotateSelection(e.shiftKey ? -90 : 90);
       else if (!ctrl && e.key.toLowerCase() === 'f' && (s.selection.doors.length || s.selection.obstacles.length)) flipSelection();
+      else if (!ctrl && e.key.toLowerCase() === 'h' && s.selection.bg?.length) hideSelectedLines();
       else if (!ctrl && e.key.toLowerCase() === 'p' && s.selection.modules.length) pinSelection(true);
       else if (!ctrl && e.key.startsWith('Arrow') && selCount(s.selection)) {
         e.preventDefault();
@@ -117,11 +118,6 @@ export default function App() {
           <button className="primary huge" onClick={importPlan}>Choose file…</button>
           <button className="ghost" onClick={openProject}>Open a saved project (.json)</button>
           <button className="ghost" onClick={startBlank}>Draw without a plan (blank grid)</button>
-          <fieldset className="welcome-mode">
-            <legend>After opening a plan</legend>
-            <label><input type="radio" name="pm" checked={st.planModePref === 'draw'} onChange={() => { savePlanMode('draw'); st.set({ planModePref: 'draw' }); }} /> I draw the areas and doors on it <span className="muted">(best for real plans)</span></label>
-            <label><input type="radio" name="pm" checked={st.planModePref === 'detect'} onChange={() => { savePlanMode('detect'); st.set({ planModePref: 'detect' }); }} /> Detect them automatically</label>
-          </fieldset>
           {isWeb ? (
             <p className="hint">Web version: DXF and vector PDF. Save DWG files as DXF from AutoCAD (or use the desktop app). The plan never leaves your computer.</p>
           ) : <details className="welcome-cfg">
