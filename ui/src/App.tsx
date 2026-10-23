@@ -6,7 +6,7 @@ import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
-import { deleteSelection, evaluateSoon, flipSelection, hideSelectedLines, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
+import { alignSelectionToWall, deleteSelection, evaluateSoon, flipSelection, hideSelectedLines, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
 import { emptySel, requestedSeats, selCount, STEP, useApp, type Theme, type Tool } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
@@ -52,7 +52,9 @@ export default function App() {
       else if (ctrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); s.redo(); evaluateSoon(); }
       else if (ctrl && e.key.toLowerCase() === 'z') { e.preventDefault(); s.undo(); evaluateSoon(); }
       else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
-      else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'r') s.set({ placeAngle: (s.placeAngle + 90) % 360 });
+      else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'r') s.set({ placeAngle: (s.placeAngle + (e.shiftKey ? 270 : 90)) % 360 });
+      else if (!ctrl && s.tool === 'placeDesk' && (e.key === '[' || e.key === ']')) s.set({ placeAngle: (s.placeAngle + (e.key === ']' ? 15 : 345)) % 360 });
+      else if (!ctrl && e.key.toLowerCase() === 'w' && (s.selection.modules.length || s.selection.obstacles.length)) alignSelectionToWall();
       else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'f') s.set({ placeUp: !s.placeUp });
       else if (!ctrl && e.key.toLowerCase() === 'r' && selCount(s.selection)) rotateSelection(e.shiftKey ? -90 : 90);
       else if (!ctrl && e.key.toLowerCase() === 'f' && (s.selection.doors.length || s.selection.obstacles.length)) flipSelection();

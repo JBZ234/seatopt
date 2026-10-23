@@ -386,7 +386,19 @@ pub fn fill_gaps(ctx: &Ctx, dec: &mut Decoded, variant: usize, weights: &Weights
     if ctx.variants[variant].grids.is_empty() {
         return ev;
     }
-    let gi = 0usize;
+    // first the main directions; then each slanted wall direction fills what is left along it
+    let grids = &ctx.variants[variant].grids;
+    let th0 = grids[0].theta;
+    let mut order = vec![0usize];
+    for (i, q) in grids.iter().enumerate().skip(1) {
+        let d = (q.theta - th0).rem_euclid(std::f64::consts::FRAC_PI_2);
+        let d = d.min(std::f64::consts::FRAC_PI_2 - d);
+        // one of each pair (θ, θ+90°) is enough: candidates go both ways
+        if d > 1f64.to_radians() && !order.iter().any(|&j| { let e = (grids[j].theta - q.theta).rem_euclid(std::f64::consts::FRAC_PI_2); e.min(std::f64::consts::FRAC_PI_2 - e) < 1e-6 }) {
+            order.push(i);
+        }
+    }
+    for gi in order {
     let g = &ctx.variants[variant].grids[gi];
     let res = g.res;
     let mut masks = build_masks(ctx, g, &mods, &seats, &ev.module_ok);
@@ -470,6 +482,7 @@ pub fn fill_gaps(ctx: &Ctx, dec: &mut Decoded, variant: usize, weights: &Weights
                 since_scan = 0;
             }
         }
+    }
     }
     ev
 }

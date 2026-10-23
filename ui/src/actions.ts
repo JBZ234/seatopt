@@ -1,4 +1,5 @@
 import { deskBody, deskDims } from './clear';
+import { dropOverlapped } from './edit';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { emptySel, hasDemand, savePlanMode, STEP, uid, useApp, type PlanMode, type ProjectFile } from './store';
 import { mergeInto, mergeSimilar } from './paths';
@@ -525,15 +526,15 @@ export function chooseAlternative(i: number) {
 }
 
 /** Coloca un escritorio a mano (queda fijado: la optimización lo respeta y descuenta de la cantidad). */
-export async function placeDesk(center: Pt, forced: string[] = []) {
+export async function placeDesk(center: Pt, forced: string[] = [], angle?: number) {
   const s = S();
   const c = s.config;
   const t = c?.catalog.find((x) => x.id === s.placeType);
   if (!c || !t || !s.plan) return;
   const { per, length, depth } = deskDims(t);
   const m: Module = {
-    id: uid('mano'), typeId: t.id, center, angle: s.placeAngle, length, depth, perSide: per, seatsUp: s.placeUp,
-    body: deskBody(t, center, s.placeAngle, s.placeUp).body, pinned: true, people: [],
+    id: uid('mano'), typeId: t.id, center, angle: angle ?? s.placeAngle, length, depth, perSide: per, seatsUp: s.placeUp,
+    body: deskBody(t, center, angle ?? s.placeAngle, s.placeUp).body, pinned: true, people: [],
   };
   s.snapshot();
   const base: Layout = s.layout ?? {
@@ -543,9 +544,13 @@ export async function placeDesk(center: Pt, forced: string[] = []) {
   const layout: Layout = { ...base, modules: [...base.modules, m] };
   S().updateConfig((cc) => { cc.pinned = [...cc.pinned, m]; });
   try {
-    const nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout });
-    S().set({ layout: nl });
-    const flags = [...new Set([...forced, ...nl.seats.filter((x) => x.moduleId === m.id).flatMap((x) => x.flags)])];
+    let nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout });
+    // what you place by hand wins: optimizer desks it lands on go (and the next search starts afresh)
+    const gone = dropOverlapped(nl, [m.id]);
+    if (gone) nl = await call<Layout>('evaluate', { problem: { plan: s.plan, config: S().config }, layout: { ...nl, genome: null } });
+    S().set({ layout: { ...nl, genome: null }, alternatives: [] });
+    if (gone) S().say(`${gone} desk${gone > 1 ? 's' : ''} from the optimizer under it ${gone > 1 ? 'were' : 'was'} taken out.`);
+    const flags = [...new Set([...(gone ? [] : forced), ...nl.seats.filter((x) => x.moduleId === m.id).flatMap((x) => x.flags)])];
     if (flags.length) S().say(`Placed, but it breaks: ${flags.join('; ')}. Ctrl+Z removes it.`, 'error');
     else S().say(`Seat added: ${nl.kpis.seatsPlaced} seats.`);
   } catch (e) {

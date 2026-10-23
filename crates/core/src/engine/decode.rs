@@ -70,7 +70,7 @@ pub fn random_genome(ctx: &Ctx, rng: &mut Rng) -> Genome {
             // por defecto: zonas más grandes primero
             order.sort_by_key(|&z| std::cmp::Reverse(v.zones[z as usize].cells));
             let zones = (0..nz)
-                .map(|_| {
+                .map(|zi| {
                     let mut pref: Vec<u8> = (0..nt as u8).collect();
                     // tipos con demanda primero, más profundos primero (las islas aprovechan mejor el centro)
                     pref.sort_by(|&a, &b| {
@@ -80,7 +80,8 @@ pub fn random_genome(ctx: &Ctx, rng: &mut Rng) -> Genome {
                             .then(tb.module_depth().partial_cmp(&ta.module_depth()).unwrap())
                     });
                     ZoneGene {
-                        theta: 0,
+                        // start each zone in the direction of its nearest wall
+                        theta: v.zones[zi].grid,
                         off_y: rng.f32() * 0.3,
                         off_x: rng.f32(),
                         from_top: rng.f32() < 0.5,

@@ -165,6 +165,8 @@ impl RotGrid {
 pub struct ZoneInfo {
     pub cells: usize,
     pub centroid: Pt,
+    /// Grid (direction) the rows of this zone start with: the one of its nearest wall.
+    pub grid: u8,
 }
 
 /// Variante de pasillo principal (y por lo tanto de zonas).
@@ -262,7 +264,7 @@ fn auto_res(area_m2: f64) -> f64 {
 
 /// Ángulos candidatos (radianes) a partir de los bordes del recinto y de oficinas fijas.
 fn candidate_angles(plan: &Plan, p: &P) -> (Vec<f64>, f64) {
-    let mut hist: Vec<(f64, f64)> = Vec::new(); // (ángulo mod 90 en grados, peso)
+    let mut hist: Vec<(f64, f64, f64)> = Vec::new(); // (ángulo mod 90 en grados, peso, largo del tramo)
     let mut add_ring = |r: &[Pt], wmul: f64| {
         let n = r.len();
         for i in 0..n {
@@ -274,7 +276,7 @@ fn candidate_angles(plan: &Plan, p: &P) -> (Vec<f64>, f64) {
             }
             let ang = (b.y - a.y).atan2(b.x - a.x).to_degrees();
             let m = ((ang % 90.0) + 90.0) % 90.0;
-            hist.push((m, len * wmul));
+            hist.push((m, len * wmul, len));
         }
     };
     for r in &plan.region {
@@ -287,33 +289,35 @@ fn candidate_angles(plan: &Plan, p: &P) -> (Vec<f64>, f64) {
     }
     let tol = p.e6_tol.max(0.5);
     // agrupar
-    let mut fams: Vec<(f64, f64)> = Vec::new(); // (ángulo medio, peso)
+    let mut fams: Vec<(f64, f64, f64)> = Vec::new(); // (ángulo medio, peso, tramo más largo)
     hist.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    for (a, w) in hist {
+    for (a, w, len) in hist {
         let mut done = false;
         for f in fams.iter_mut() {
             let d = ((a - f.0 + 45.0).rem_euclid(90.0)) - 45.0;
             if d.abs() <= tol {
                 f.0 = (f.0 * f.1 + (f.0 + d) * w) / (f.1 + w);
                 f.1 += w;
+                f.2 = f.2.max(len);
                 done = true;
                 break;
             }
         }
         if !done {
-            fams.push((a, w));
+            fams.push((a, w, len));
         }
     }
     fams.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     if fams.is_empty() {
-        fams.push((0.0, 1.0));
+        fams.push((0.0, 1.0, 0.0));
     }
     let total: f64 = fams.iter().map(|f| f.1).sum();
     let principal = fams[0].0.rem_euclid(90.0);
     let mut out = vec![principal, principal + 90.0];
     if p.e6_diag {
-        for f in fams.iter().skip(1).take(2) {
-            if f.1 >= 0.08 * total {
+        // a slanted wall long enough to put desks against it counts even if it is a small share
+        for f in fams.iter().skip(1).filter(|f| f.1 >= 0.08 * total || f.2 >= 2400.0).take(4) {
+            {
                 let a = f.0.rem_euclid(90.0);
                 out.push(a);
                 out.push(a + 90.0);
@@ -685,19 +689,67 @@ impl Ctx {
 
     fn build_variants(&self) -> Vec<Variant> {
         let styles: Vec<u8> = if self.p.c1_on { vec![0, 1, 2] } else { vec![255] };
-        styles.par_iter().map(|&s| self.build_variant(s)).collect()
+        let mut todo: Vec<(u8, bool)> = styles.iter().map(|&s| (s, false)).collect();
+        // with slanted walls: one more layout where each part follows its own nearest wall
+        if self.angles.len() > 2 {
+            todo.push((styles[0], true));
+        }
+        todo.par_iter().map(|&(s, split)| self.build_variant(s, split)).collect()
     }
 
-    fn build_variant(&self, style: u8) -> Variant {
+    /// For each cell, which direction family (index into angles / 2) its nearest long wall has.
+    fn wall_family(&self) -> Vec<u8> {
+        let f = &self.f;
+        let n = f.len();
+        let fams: Vec<f64> = self.angles.iter().step_by(2).copied().collect();
+        let tol = (self.p.e6_tol.max(0.5) + 1.0).to_radians();
+        let mut best = vec![f32::INFINITY; n];
+        let mut lab = vec![0u8; n];
+        for (fi, &fa) in fams.iter().enumerate() {
+            let mut m = vec![false; n];
+            let mut any = false;
+            for r in &self.plan.region {
+                for i in 0..r.len() {
+                    let a = r[i];
+                    let b = r[(i + 1) % r.len()];
+                    if a.dist(b) < 1500.0 {
+                        continue;
+                    }
+                    let ang = (b.y - a.y).atan2(b.x - a.x);
+                    let d = (ang - fa).rem_euclid(std::f64::consts::FRAC_PI_2);
+                    if d.min(std::f64::consts::FRAC_PI_2 - d) <= tol {
+                        raster::stroke_segment(f, &mut m, a, b, self.res * 0.6, true);
+                        any = true;
+                    }
+                }
+            }
+            if !any {
+                continue;
+            }
+            let d = raster::edt(f, &m);
+            for i in 0..n {
+                if d[i] < best[i] {
+                    best[i] = d[i];
+                    lab[i] = fi as u8;
+                }
+            }
+        }
+        lab
+    }
+
+    fn build_variant(&self, style: u8, split: bool) -> Variant {
         let n = self.f.len();
         let (corridor, violations, corridor_lines) = if style == 255 { (vec![false; n], vec![], vec![]) } else { self.corridor(style) };
-        let name = match style {
+        let mut name = match style {
             0 => "Shortest corridor",
             1 => "Corridor through the middle",
             2 => "Corridor parallel to the walls",
             _ => "No main corridor",
         }
         .to_string();
+        if split {
+            name.push_str(" · rows follow each wall");
+        }
         let corridor_polys = if corridor.iter().any(|&b| b) {
             raster::contours(&self.f, &corridor).into_iter().map(|r| simplify_ring(&r, self.res * 0.8)).filter(|r| r.len() >= 3).collect()
         } else {
@@ -705,14 +757,40 @@ impl Ctx {
         };
         // zonas
         let zfree: Vec<bool> = (0..n).map(|i| self.free[i] && !self.keep0[i] && !corridor[i]).collect();
-        let (lab, sizes) = raster::components(&self.f, &zfree);
+        // zones: free parts; split by the direction of the nearest wall when asked
+        let (lab, sizes, comp_grid) = if split {
+            let fam = self.wall_family();
+            let nf = (self.angles.len() + 1) / 2;
+            let mut lab = vec![0u32; n];
+            let mut sizes = vec![0usize];
+            let mut grid_of = vec![0u8];
+            for fi in 0..nf {
+                let m: Vec<bool> = (0..n).map(|i| zfree[i] && fam[i] as usize == fi).collect();
+                let (l2, s2) = raster::components(&self.f, &m);
+                let base = (sizes.len() - 1) as u32;
+                for i in 0..n {
+                    if l2[i] > 0 {
+                        lab[i] = l2[i] + base;
+                    }
+                }
+                for &sz in s2.iter().skip(1) {
+                    sizes.push(sz);
+                    grid_of.push((fi * 2) as u8);
+                }
+            }
+            (lab, sizes, grid_of)
+        } else {
+            let (lab, sizes) = raster::components(&self.f, &zfree);
+            let g = vec![0u8; sizes.len()];
+            (lab, sizes, g)
+        };
         let min_cells = (2.0e6 / (self.res * self.res)) as usize;
         let mut remap = vec![0u16; sizes.len()];
-        let mut zones = vec![ZoneInfo { cells: 0, centroid: pt(0.0, 0.0) }];
+        let mut zones = vec![ZoneInfo { cells: 0, centroid: pt(0.0, 0.0), grid: 0 }];
         for (i, &s) in sizes.iter().enumerate().skip(1) {
             if s >= min_cells && zones.len() < 60_000 {
                 remap[i] = zones.len() as u16;
-                zones.push(ZoneInfo { cells: s, centroid: pt(0.0, 0.0) });
+                zones.push(ZoneInfo { cells: s, centroid: pt(0.0, 0.0), grid: comp_grid[i] });
             }
         }
         let mut zone_map = vec![0u16; n];

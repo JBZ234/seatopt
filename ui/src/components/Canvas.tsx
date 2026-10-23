@@ -3,7 +3,7 @@ import { addDrawnArea, addDrawnDoor, addDrawnObstacle, deleteArea, placeDesk, se
 import { areaAt, projLine, projSeg } from '../draw';
 import { circWidth, deskBody, doorInfo, doorSide, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
-import { describeSel, deleteSelection, flipHinge, hideSelectedLines, polyPicked, flipSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotatePrompt, rotateSelection } from '../edit';
+import { alignSelectionToWall, describeSel, deleteSelection, flipHinge, hideSelectedLines, polyPicked, flipSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotatePrompt, rotateSelection } from '../edit';
 import { DRAFT_TOOLS, emptySel, fmtLen, selCount, STEP, UNIT_MM, useApp, uid, type DispUnit, type Tool } from '../store';
 import type { CircPath, Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
@@ -453,10 +453,40 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
    *  borde (muros del room, oficinas, columnas, otros escritorios); si queda contra un borde, se
    *  intenta además el otro eje (encaja en rincones). Si no hay nada cerca, la esquina más cercana al
    *  mouse cae en la cuadrícula. */
-  const placeSnap = (raw: Pt): { c: Pt; mark: { p: Pt; kind: SnapKind } | null } => {
+  // a desk placed by hand turns to follow the wall it is near (also slanted walls); Alt keeps the angle
+  const [placeEff, setPlaceEff] = useState<{ ang: number; wall: boolean }>({ ang: 0, wall: false });
+  const alignedAngle = (raw: Pt, alt: boolean): { ang: number; wall: boolean } => {
+    const base = st.placeAngle;
+    if (alt || !plan) return { ang: base, wall: false };
+    const t = config?.catalog.find((x) => x.id === st.placeType);
+    const reach = Math.max(1500, (t ? Math.max(t.depth, 600) : 600) + 1200, 40 / view.k);
+    let best: { d: number; a: number } | null = null;
+    const scan = (r: Pt[]) => {
+      for (let i = 0; i < r.length; i++) {
+        const a = r[i], b = r[(i + 1) % r.length];
+        if (Math.hypot(b.x - a.x, b.y - a.y) < 800) continue;
+        const d = distSeg(raw, a, b);
+        if (d < reach && (!best || d < best.d)) best = { d, a: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI };
+      }
+    };
+    plan.region.forEach(scan);
+    plan.obstacles.forEach((o) => scan(o.poly));
+    if (!best) return { ang: base, wall: false };
+    const w = (best as { a: number }).a;
+    // the multiple of 90° from the wall closest to the chosen angle
+    let pick = w, bd = Infinity;
+    for (let k = -4; k <= 4; k++) {
+      const c = w + k * 90;
+      const dd = Math.abs((((c - base) % 360) + 540) % 360 - 180);
+      if (dd < bd) { bd = dd; pick = c; }
+    }
+    pick = ((pick % 360) + 360) % 360;
+    return { ang: Math.round(pick * 100) / 100, wall: Math.abs((((pick - base) % 90) + 90) % 90) > 0.01 };
+  };
+  const placeSnap = (raw: Pt, ang = placeEff.ang): { c: Pt; mark: { p: Pt; kind: SnapKind } | null } => {
     const t = config?.catalog.find((x) => x.id === st.placeType);
     if (!t || noSnap) return { c: raw, mark: null };
-    const corners = deskBody(t, raw, st.placeAngle, st.placeUp).body;
+    const corners = deskBody(t, raw, ang, st.placeUp).body;
     const rings: Pt[][] = [];
     layout?.modules.forEach((m) => rings.push(m.body));
     plan?.obstacles.forEach((o) => rings.push(o.poly));
@@ -1086,8 +1116,8 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   const placeType = config?.catalog.find((x) => x.id === st.placeType);
   const fitWhy = useMemo(() => {
     if (tool !== 'placeDesk' || !cursor || !plan || !config || !placeType) return [];
-    return checkDesk(plan, config, layout, placeType, cursor, st.placeAngle, st.placeUp);
-  }, [tool, cursor, plan, config, layout, placeType, st.placeAngle, st.placeUp]);
+    return checkDesk(plan, config, layout, placeType, cursor, placeEff.ang, st.placeUp);
+  }, [tool, cursor, plan, config, layout, placeType, placeEff.ang, st.placeUp]);
 
   // ------------------------------------------------ interacción
   const nearestDoor = (p: Pt): Door | null => {
@@ -1160,7 +1190,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       return;
     }
     if (tool === 'placeDesk') {
-      const ps = placeSnap(toWorld(x, y));
+      const pe = alignedAngle(toWorld(x, y), e.altKey);
+      if (pe.ang !== placeEff.ang || pe.wall !== placeEff.wall) setPlaceEff(pe);
+      const ps = placeSnap(toWorld(x, y), pe.ang);
       setCursor(ps.c);
       if (ps.mark?.p.x !== snapMark?.p.x || ps.mark?.p.y !== snapMark?.p.y || ps.mark?.kind !== snapMark?.kind) setSnapMark(ps.mark);
       if (hover) setHover(null);
@@ -1326,7 +1358,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         break;
       case 'placeDesk':
         if (fitWhy.length && !e.shiftKey) { st.say('It does not fit there: ' + fitWhy.join('; ') + '. Shift+click places it anyway; hold Space to move it without snapping.', 'error'); break; }
-        placeDesk(placeSnap(toWorld(x, y)).c, fitWhy);
+        { const pe = alignedAngle(toWorld(x, y), e.altKey); placeDesk(placeSnap(toWorld(x, y), pe.ang).c, fitWhy, pe.ang); }
         break;
       case 'door': case 'mainDoor': case 'exitDoor': {
         const d = nearestDoor(toWorld(x, y));
@@ -1440,7 +1472,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {tool === 'placeDesk' && cursor && (() => {
             const t = config?.catalog.find((x) => x.id === st.placeType);
             if (!t) return null;
-            const g = deskBody(t, cursor, st.placeAngle, st.placeUp);
+            const g = deskBody(t, cursor, placeEff.ang, st.placeUp);
             const two = isTwo(t);
             const sgn = st.placeUp ? 1 : -1;
             const chairAt = (s: number) => ({ x: cursor.x + g.v.x * s * (g.depth / 2 + 260), y: cursor.y + g.v.y * s * (g.depth / 2 + 260) });
@@ -1579,6 +1611,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           {sel.obstacles.length > 0 && !sel.doors.length && <button className="small" title="Mirror left to right · F" onClick={flipSelection}>Mirror</button>}
           {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small" title="Rotate 90° about its center (R; Shift+R the other way)" onClick={() => rotateSelection(90)}>Rotate 90°</button>}
           {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small" title="Rotate by any angle" onClick={rotatePrompt}>Rotate…</button>}
+          {(sel.modules.length + sel.obstacles.length) > 0 && <button className="small" title="Turn each one to follow the nearest wall (also slanted walls) · W" onClick={alignSelectionToWall}>Align to wall</button>}
           {(sel.obstacles.length + sel.doors.length + sel.windows.length + (sel.region?.length ?? 0)) > 0 && <span className="hint-inline">Drag to move · arrows nudge 10 cm (Shift 50 cm)</span>}
           {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length + (st.step === STEP.plan ? sel.region?.length ?? 0 : 0)) > 0 && <button className="small danger" title="Delete" onClick={deleteSelection}>Delete</button>}
           {sel.region?.length ? <span className="hint-inline">{st.step === STEP.plan ? 'Drag a corner · double-click an edge adds one · gold numbers set the clearance' : "Click a gold number to set that edge's clearance"}</span> : null}
@@ -1658,6 +1691,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       {tool === 'placeDesk' && cursor && placeType && (
         <div className={'fit-tip' + (fitWhy.length ? ' bad' : ' ok')} style={{ left: sx(cursor) + 18, top: sy(cursor) + 18 }}>
           {fitWhy.length ? <><b>It does not fit here</b><ul>{fitWhy.map((w) => <li key={w}>{w}</li>)}</ul><small>Shift+click to place it anyway</small></> : <b>It fits · click to place it</b>}
+          <small>{placeEff.wall ? `Following the wall: ${placeEff.ang.toFixed(1)}° · Alt keeps ${st.placeAngle}°` : `${placeEff.ang.toFixed(0)}° · R turns 90° · [ ] turn 15°`}</small>
         </div>
       )}
       {isDraft && cursor && draft.length > 0 && (() => {

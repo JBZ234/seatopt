@@ -1,6 +1,7 @@
 // Edición manual estilo AutoCAD: selección por ventana / captura, mover, girar, borrar, fijar.
 import { call } from './api';
-import { areaGroups, regionArea } from './draw';
+import polygonClipping from 'polygon-clipping';
+import { areaGroups, distSeg as dSeg, regionArea, ringArea } from './draw';
 import { emptySel, selCount, useApp, type Selection } from './store';
 import type { Layout, Module, Pt } from './types';
 
@@ -118,11 +119,103 @@ export function evaluateSoon() {
   }, 250);
 }
 
+const asPoly = (r: Pt[]) => [[...r.map((p) => [p.x, p.y] as [number, number]), [r[0].x, r[0].y] as [number, number]]];
+const overlapArea = (a: Pt[], b: Pt[]) => {
+  try {
+    return polygonClipping.intersection(asPoly(a), asPoly(b)).reduce((s, poly) => s + poly.reduce((h, r, k) => h + (k ? -1 : 1) * ringArea(r.map(([x, y]) => ({ x, y }))), 0), 0);
+  } catch { return 0; }
+};
+/** Desks from the optimizer that the desks `ids` (placed or moved by hand) land on are taken out:
+ *  what you put by hand wins. Returns how many went. */
+export function dropOverlapped(l: Layout, ids: string[]): number {
+  const mine = l.modules.filter((m) => ids.includes(m.id));
+  if (!mine.length) return 0;
+  const shapes = (id: string, body: Pt[]) => [body, ...l.seats.filter((s) => s.moduleId === id).map((s) => s.chair)];
+  const mineShapes = mine.flatMap((m) => shapes(m.id, m.body));
+  const gone = new Set<string>();
+  for (const m of l.modules) {
+    if (m.pinned || ids.includes(m.id)) continue;
+    if (shapes(m.id, m.body).some((a) => mineShapes.some((b) => overlapArea(a, b) > 2e4))) gone.add(m.id);
+  }
+  if (!gone.size) return 0;
+  l.modules = l.modules.filter((m) => !gone.has(m.id));
+  l.seats = l.seats.filter((s) => !gone.has(s.moduleId));
+  return gone.size;
+}
+
+/** Each selected desk or obstacle turns to follow the wall nearest to it (slanted walls too). */
+export function alignSelectionToWall() {
+  const sel = S().selection;
+  const plan = S().plan;
+  if (!plan || (!sel.modules.length && !sel.obstacles.length)) return;
+  const wallAt = (c: Pt): number | null => {
+    let best: { d: number; a: number } | null = null;
+    for (const r of plan.region) for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length];
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 800) continue;
+      const d = dSeg(c, a, b);
+      if (!best || d < best.d) best = { d, a: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI };
+    }
+    return best ? (best as { a: number }).a : null;
+  };
+  const turnBy = (cur: number, wall: number) => {
+    let bd = Infinity, pick = 0;
+    for (let k = -4; k <= 4; k++) {
+      const d = ((((wall + k * 90 - cur) % 360) + 540) % 360) - 180;
+      if (Math.abs(d) < Math.abs(bd)) { bd = d; pick = d; }
+    }
+    return pick;
+  };
+  S().snapshot();
+  let n = 0;
+  if (sel.modules.length) editLayout((l) => {
+    for (const m of l.modules) {
+      if (!sel.modules.includes(m.id)) continue;
+      const w = wallAt(m.center);
+      if (w == null) continue;
+      const deg = turnBy(m.angle, w);
+      if (Math.abs(deg) < 0.05) continue;
+      const c = m.center;
+      m.body = m.body.map((p) => rot(p, c, deg));
+      m.angle = (((m.angle + deg) % 360) + 360) % 360;
+      m.pinned = true;
+      for (const s of l.seats) {
+        if (s.moduleId !== m.id) continue;
+        s.pos = rot(s.pos, c, deg);
+        s.chair = s.chair.map((p) => rot(p, c, deg));
+        s.facing = rot(s.facing, { x: 0, y: 0 }, deg);
+      }
+      n++;
+    }
+    dropOverlapped(l, sel.modules);
+  });
+  if (sel.obstacles.length) {
+    const p2 = structuredClone(S().plan!);
+    p2.obstacles.forEach((o) => {
+      if (!sel.obstacles.includes(o.id)) return;
+      const c = o.poly.reduce((a, p) => ({ x: a.x + p.x / o.poly.length, y: a.y + p.y / o.poly.length }), { x: 0, y: 0 });
+      const w = wallAt(c);
+      if (w == null) return;
+      // the obstacle's own direction: its longest side
+      let la = 0, ll = -1;
+      for (let i = 0; i < o.poly.length; i++) { const a = o.poly[i], b = o.poly[(i + 1) % o.poly.length]; const L = Math.hypot(b.x - a.x, b.y - a.y); if (L > ll) { ll = L; la = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI; } }
+      const deg = turnBy(la, w);
+      if (Math.abs(deg) < 0.05) return;
+      o.poly = o.poly.map((p) => rot(p, c, deg));
+      n++;
+    });
+    S().set({ plan: p2 });
+  }
+  S().say(n ? `Aligned to the wall (${n}).` : 'Already aligned with the nearest wall.');
+  evaluateSoon();
+}
+
 function editLayout(f: (l: Layout) => void) {
   const l = S().layout;
   if (!l) return;
   const n = structuredClone(l);
   f(n);
+  n.genome = null; // the desks by hand changed: the next search starts afresh around them
   S().set({ layout: n });
   syncPinned(n);
 }
@@ -145,6 +238,8 @@ export function moveSelection(dx: number, dy: number) {
         s.chair = s.chair.map((p) => tr(p, dx, dy));
         if (s.roleId) s.locked = true;
       }
+      const n = dropOverlapped(l, sel.modules);
+      if (n) S().say(`${n} desk${n > 1 ? 's' : ''} from the optimizer under it ${n > 1 ? 'were' : 'was'} taken out.`);
     });
   }
   if (sel.obstacles.length || sel.doors.length || sel.windows.length) {
