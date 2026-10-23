@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
-import { computePaths, removePathNode } from '../actions';
+import { computePaths, mergePaths, removePathNode } from '../actions';
 import { circWidth } from '../clear';
 import { Num, Switch } from '../components/ui';
 import { STEP, useApp } from '../store';
@@ -62,6 +62,7 @@ export default function PathsStep() {
 
       <div className="row wrap">
         <button className="primary" onClick={() => computePaths()} disabled={!plan.doors.some((d) => d.kind === 'main')}>{paths.length ? 'Recalculate' : 'Calculate paths'}</button>
+        {paths.length > 1 && <button className="ghost" title="Paths that run side by side become one band up to where they part" onClick={() => mergePaths()}>Merge similar paths</button>}
         <label className="inline-switch">
           <Switch on={st.showSecondary} label="Show office-to-office paths" onChange={(v) => st.set({ showSecondary: v, pathSel: v || sel?.kind !== 'secondary' ? st.pathSel : null })} />
           Office-to-office paths
@@ -99,6 +100,8 @@ export default function PathsStep() {
             {sel.width ? <button className="small" onClick={() => upd(sel.id, (q) => { q.width = null; })}>Use the general width</button> : null}
             {st.pathSel?.node != null && st.pathSel.node > 0 && st.pathSel.node < sel.pts.length - 1 && <button className="small" onClick={removePathNode}>Delete node</button>}
             {sel.edited && <button className="small" onClick={() => computePaths(sel.id)}>Reset to calculated</button>}
+            <button className="small" title={st.pathSel?.node != null ? 'The paths next to this one follow it up to the selected node, then part' : 'The paths next to this one follow it while they run alongside (select a node to stop there)'}
+              onClick={() => mergePaths(sel.id, st.pathSel?.node ?? undefined)}>{st.pathSel?.node != null ? 'Merge others up to this node' : 'Merge others into this one'}</button>
             <button className="small" onClick={() => setKeep([sel.id], !sel.keep)}>{sel.keep ? 'Do not keep' : 'Keep'}</button>
           </div>
         </section>

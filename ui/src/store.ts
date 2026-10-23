@@ -55,7 +55,7 @@ export interface Selection { modules: string[]; obstacles: string[]; doors: stri
 export const emptySel = (): Selection => ({ modules: [], obstacles: [], doors: [], windows: [], region: [], bg: [] });
 export const selCount = (s: Selection) => s.modules.length + s.obstacles.length + s.doors.length + s.windows.length + (s.region?.length ?? 0) + (s.bg?.length ?? 0);
 
-interface Snapshot { plan: Plan | null; layout: Layout | null; pinned: Module[]; catalog: DeskType[] }
+interface Snapshot { plan: Plan | null; layout: Layout | null; pinned: Module[]; catalog: DeskType[]; hiddenPaths?: string[] }
 
 export interface JobUi { kind: string; progress: Progress | null; signal: { cancel: boolean } }
 
@@ -174,24 +174,24 @@ export const useApp = create<AppState>((set, get) => ({
   history: [],
   future: [],
   snapshot: () => {
-    const { plan, layout, config, history } = get();
-    set({ history: [...history.slice(-49), clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] })], future: [] });
+    const { plan, layout, config, history, hiddenPaths } = get();
+    set({ history: [...history.slice(-49), clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [], hiddenPaths })], future: [] });
   },
   undo: () => {
     const h = get().history;
     if (!h.length) return;
     const last = h[h.length - 1];
-    const { plan, layout, config, future } = get();
-    const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] });
-    set({ history: h.slice(0, -1), future: [...future.slice(-49), now], plan: last.plan, areaM2: last.plan ? regionArea(last.plan.region) / 1e6 : 0, layout: last.layout, config: config ? { ...config, pinned: last.pinned, catalog: last.catalog.length ? last.catalog : config.catalog } : config, selection: emptySel() });
+    const { plan, layout, config, future, hiddenPaths } = get();
+    const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [], hiddenPaths });
+    set({ history: h.slice(0, -1), future: [...future.slice(-49), now], plan: last.plan, hiddenPaths: last.hiddenPaths ?? get().hiddenPaths, areaM2: last.plan ? regionArea(last.plan.region) / 1e6 : 0, layout: last.layout, config: config ? { ...config, pinned: last.pinned, catalog: last.catalog.length ? last.catalog : config.catalog } : config, selection: emptySel() });
   },
   redo: () => {
     const f = get().future;
     if (!f.length) return;
     const next = f[f.length - 1];
-    const { plan, layout, config, history } = get();
-    const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [] });
-    set({ future: f.slice(0, -1), history: [...history.slice(-49), now], plan: next.plan, areaM2: next.plan ? regionArea(next.plan.region) / 1e6 : 0, layout: next.layout, config: config ? { ...config, pinned: next.pinned, catalog: next.catalog.length ? next.catalog : config.catalog } : config, selection: emptySel() });
+    const { plan, layout, config, history, hiddenPaths } = get();
+    const now = clone({ plan, layout, pinned: config?.pinned ?? [], catalog: config?.catalog ?? [], hiddenPaths });
+    set({ future: f.slice(0, -1), history: [...history.slice(-49), now], plan: next.plan, hiddenPaths: next.hiddenPaths ?? get().hiddenPaths, areaM2: next.plan ? regionArea(next.plan.region) / 1e6 : 0, layout: next.layout, config: config ? { ...config, pinned: next.pinned, catalog: next.catalog.length ? next.catalog : config.catalog } : config, selection: emptySel() });
   },
   toast: null,
   calib: [],

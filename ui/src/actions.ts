@@ -1,6 +1,8 @@
 import { deskBody, deskDims } from './clear';
 import { call, openPlan, openText, runJob, saveBase64, saveText } from './api';
 import { emptySel, hasDemand, savePlanMode, STEP, uid, useApp, type PlanMode, type ProjectFile } from './store';
+import { mergeInto, mergeSimilar } from './paths';
+import { circWidth } from './clear';
 import { addAreaRing, areaGroups, emptyPlan, joinAreas, regionArea, removeAreaGroup, ringArea, scalePlan, selfCross, tidyRing, trimAllOverlaps, trimArea } from './draw';
 import type {
   AnalyzeResult, BgLayer, CircPath, Config, Capacity, Defaults, DoorKind, Layout, Module, ObstacleKind, Plan, Problem, Pt, Suggestion, Variant,
@@ -340,6 +342,35 @@ export function problem(): Problem | null {
 
 /** Calculates the circulation paths on the empty floor. Paths edited by hand are kept as they are;
  *  the others are replaced, keeping whether they were kept and their own width. */
+/** Paths that run side by side become one band up to where they part. With `refId`, the others
+ *  follow that path (up to its node `upTo`); otherwise all of them, paths edited by hand leading. */
+export function mergePaths(refId?: string, upTo?: number) {
+  const { plan, config } = S();
+  if (!plan?.paths?.length || !config) return;
+  const tol = (a: CircPath, b: CircPath) => Math.max(circWidth(config, a), circWidth(config, b)) * 0.8;
+  let n = 0;
+  let paths: CircPath[];
+  if (refId) {
+    const ref = plan.paths.find((p) => p.id === refId);
+    if (!ref) return;
+    paths = plan.paths.map((p) => {
+      if (p.id === refId) return p;
+      const r = mergeInto(ref.pts, p.pts, tol(ref, p), upTo ?? Infinity);
+      if (!r) return p;
+      n++;
+      return { ...p, pts: r, edited: true };
+    });
+  } else {
+    const r = mergeSimilar(plan.paths, tol, () => false);
+    paths = r.paths;
+    n = r.merged;
+  }
+  if (!n) { S().say(refId ? 'No other path runs next to this one.' : 'No paths run side by side.'); return; }
+  S().updatePlan((pl) => { pl.paths = paths; });
+  S().set({ layout: null, alternatives: [] });
+  S().say(`${n} path${n === 1 ? '' : 's'} now share${n === 1 ? 's' : ''} the same band${refId && upTo != null ? ' up to that node' : ''}.`);
+}
+
 export async function computePaths(onlyId?: string) {
   const p = problem();
   if (!p) return;
@@ -354,6 +385,9 @@ export async function computePaths(onlyId?: string) {
     } else {
       merged = fresh.map((f) => { const o = old.get(f.id); return !o ? f : o.edited ? o : { ...f, keep: o.keep, width: o.width }; });
     }
+    // paths that run side by side share one band up to where they part
+    const cfg = S().config;
+    if (cfg) merged = mergeSimilar(merged, (a, b) => Math.max(circWidth(cfg, a), circWidth(cfg, b)) * 0.8).paths;
     S().updatePlan((pl) => { pl.paths = merged; });
     S().set({ pathSel: onlyId ? { id: onlyId, node: null } : null, layout: null, alternatives: [] });
     if (!onlyId) {

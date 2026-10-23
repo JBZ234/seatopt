@@ -150,7 +150,7 @@ export default function PlanStep() {
         <button className="ghost small" onClick={() => st.set({ hiddenLayers: allNames })}>None</button>
       </span>}>
       <p className="hint">{draw ? 'The drawing as it is in the file, to trace over. Turn layers off to see better. To hide single lines: with Select, click a line (or drag a window over several) and press H.' : 'If the area comes out wrong, check which layers are walls and which are ignored, and detect again.'}</p>
-      {st.hiddenPaths.length > 0 && <div className="row"><button className="small" onClick={() => st.set({ hiddenPaths: [] })}>Show {st.hiddenPaths.length} hidden line{st.hiddenPaths.length > 1 ? 's' : ''}</button></div>}
+      {st.hiddenPaths.length > 0 && <div className="row"><button className="small" onClick={() => { st.snapshot(); st.set({ hiddenPaths: [] }); }}>Show {st.hiddenPaths.length} hidden line{st.hiddenPaths.length > 1 ? 's' : ''}</button></div>}
       <table className="layers layer-sw">
         <tbody>
           {drawing.layers.map((l) => {

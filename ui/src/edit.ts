@@ -256,6 +256,7 @@ export function rotateSelection(deg = 90) {
 export function hideSelectedLines() {
   const sel = S().selection;
   if (!sel.bg?.length) return;
+  S().snapshot(); // Ctrl+Z shows them again
   const h = new Set(S().hiddenPaths);
   sel.bg.forEach((k) => h.add(k));
   S().set({ hiddenPaths: [...h], selection: { ...sel, bg: [] } });
