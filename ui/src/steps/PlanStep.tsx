@@ -1,7 +1,7 @@
 import { isWeb } from '../api';
 import { useEffect, useMemo, useRef } from 'react';
 import { analyzePlan, deleteArea, deleteLayer, exportCleanDxf, exportPdf, exportPlanDxf, exportSimple, importPlan, loadBackground, openProject, setPlanMode, setScale } from '../actions';
-import { Fold, Num } from '../components/ui';
+import { Fold, Num, Switch } from '../components/ui';
 import { areaCenter, areaGroups, checkPlan, ringArea } from '../draw';
 import { emptySel, STEP, useApp, type Tool } from '../store';
 import type { DoorKind, LayerRole, ObstacleKind, Pt } from '../types';
@@ -127,6 +127,60 @@ export default function PlanStep() {
     </Task>
   );
   const off = drawing ? 1 : 0; // task numbers without the scale
+
+  const allNames = background?.map((l) => l.name) ?? [];
+  const shownCount = allNames.filter((n) => !hiddenLayers.includes(n)).length;
+  const layersFold = drawing && drawing.layers.length > 0 && (
+    <Fold key={draw ? 'ld' : 'lt'} open={draw} title={`Drawing layers (${shownCount}/${allNames.length || drawing.layers.length} shown)`}
+      right={background && <span className="row">
+        <button className="ghost small" onClick={() => st.set({ hiddenLayers: [] })}>All</button>
+        <button className="ghost small" onClick={() => st.set({ hiddenLayers: allNames })}>None</button>
+      </span>}>
+      <p className="hint">{draw ? 'The drawing as it is in the file, to trace over. Turn layers off to see better; nothing is detected from them.' : 'If the area comes out wrong, check which layers are walls and which are ignored, and detect again.'}</p>
+      <table className="layers layer-sw">
+        <tbody>
+          {drawing.layers.map((l) => {
+            const visible = !hiddenLayers.includes(l.name);
+            const has = allNames.includes(l.name);
+            return (
+              <tr key={l.name} className={visible ? '' : 'off'}>
+                <td><Switch small on={visible && has} disabled={!has} label={(visible ? 'Hide ' : 'Show ') + l.name}
+                  onChange={(v) => st.set({ hiddenLayers: v ? hiddenLayers.filter((h) => h !== l.name) : [...hiddenLayers, l.name] })} /></td>
+                <td><i className="dot" style={{ background: l.color }} /></td>
+                <td className="lname" title={`${l.name} · ${l.paths} items`}>{l.name}</td>
+                <td>
+                  <select value={roles[l.name]} aria-label={`Role of ${l.name}`} title="What the layer is (used to detect automatically and for the exports)" onChange={(e) => st.set({ roles: { ...roles, [l.name]: e.target.value as LayerRole } })}>
+                    {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </td>
+                <td>
+                  <button className="ghost small danger icon-btn" title={`Delete all lines and objects of “${l.name}”`} aria-label={`Delete layer ${l.name}`} onClick={() => deleteLayer(l.name)}>
+                    <svg viewBox="0 0 16 16" aria-hidden><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" /></svg>
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {!draw && (
+        <>
+          <div className="row">
+            <button onClick={async () => { await loadBackground(); await analyzePlan(null); }}>Apply and detect again</button>
+          </div>
+          <div className="field-row">
+            <label title="Openings of this width or less (door openings) are closed to separate the area from other spaces.">Close openings up to
+              <Num value={st.gapClose} unit="mm" label="Close openings" onChange={(v) => st.set({ gapClose: v })} />
+            </label>
+          </div>
+        </>
+      )}
+      {background && (
+        <label className="check"><input type="checkbox" checked={st.showBackground} onChange={(e) => st.set({ showBackground: e.target.checked })} /> Show the background drawing</label>
+      )}
+    </Fold>
+  );
+
 
   return (
     <div className="step-body">
@@ -256,6 +310,8 @@ export default function PlanStep() {
         </ol>
       )}
 
+      {draw && layersFold}
+
       <section className="check-sec">
         <h3 className="section-label">Check</h3>
         {issues.length === 0 ? (
@@ -315,50 +371,7 @@ export default function PlanStep() {
         </Fold>
       )}
 
-      {drawing && drawing.layers.length > 0 && (
-        <Fold title={`Drawing layers (${drawing.layers.length})`}>
-          <p className="hint">If the area comes out wrong, check which layers are walls and which are ignored, and detect again.</p>
-          <table className="layers">
-            <tbody>
-              {drawing.layers.map((l) => {
-                const visible = !hiddenLayers.includes(l.name);
-                return (
-                  <tr key={l.name}>
-                    <td>
-                      <button className="eye" aria-label={visible ? 'Hide layer' : 'Show layer'} aria-pressed={visible}
-                        onClick={() => st.set({ hiddenLayers: visible ? [...hiddenLayers, l.name] : hiddenLayers.filter((h) => h !== l.name) })}>
-                        <i style={{ background: visible ? l.color : 'transparent', borderColor: l.color }} />
-                      </button>
-                    </td>
-                    <td className="lname" title={`${l.name} · ${l.paths} strokes`}>{l.name}</td>
-                    <td>
-                      <select value={roles[l.name]} onChange={(e) => st.set({ roles: { ...roles, [l.name]: e.target.value as LayerRole } })}>
-                        {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
-                    </td>
-                    <td>
-                      <button className="ghost small danger icon-btn" title={`Delete all lines and objects of “${l.name}”`} aria-label={`Delete layer ${l.name}`} onClick={() => deleteLayer(l.name)}>
-                        <svg viewBox="0 0 16 16" aria-hidden><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" /></svg>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="row">
-            <button onClick={async () => { await loadBackground(); await analyzePlan(null); }}>Apply and detect again</button>
-          </div>
-          <div className="field-row">
-            <label title="Openings of this width or less (door openings) are closed to separate the area from other spaces.">Close openings up to
-              <Num value={st.gapClose} unit="mm" label="Close openings" onChange={(v) => st.set({ gapClose: v })} />
-            </label>
-          </div>
-          {background && (
-            <label className="check"><input type="checkbox" checked={st.showBackground} onChange={(e) => st.set({ showBackground: e.target.checked })} /> Show the background drawing</label>
-          )}
-        </Fold>
-      )}
+      {!draw && layersFold}
 
       {plan && areaOk && (
         <Fold title="Export base plan">

@@ -202,6 +202,8 @@ pub struct Ctx {
     pub doors: Vec<DoorInfo>,
     pub main_seeds: Vec<usize>,
     pub exit_seeds: Vec<usize>,
+    /// Areas drawn with no door at all: people get in anyway (a cell deep inside each one).
+    pub area_seeds: Vec<usize>,
     /// Celdas libres junto a las puertas (siempre transitables para llegar al vano).
     pub door_approach: Vec<bool>,
     pub windows: Vec<Window>,
@@ -452,6 +454,7 @@ impl Ctx {
         let mut doors = Vec::new();
         let mut main_seeds = Vec::new();
         let mut exit_seeds = Vec::new();
+        let mut area_seeds: Vec<usize> = Vec::new();
         for d in &plan.doors {
             if d.kind == DoorKind::Ignore {
                 continue;
@@ -461,14 +464,16 @@ impl Ctx {
             let nrm = u.perp();
             let mid = d.mid();
             let probe = |s: f64| -> usize { (1..=8).filter(|k| inside(mid + nrm * (s * (*k as f64) * 150.0))).count() };
-            let inward = if probe(1.0) >= probe(-1.0) { nrm } else { -nrm };
-            let inward = if d.flip { -inward } else { inward };
+            let inside_dir = if probe(1.0) >= probe(-1.0) { nrm } else { -nrm };
+            // the side it opens to (its clearance goes there); people come in on the free side
+            // whichever way it opens
+            let inward = if d.flip { -inside_dir } else { inside_dir };
             // semillas: celdas libres justo adentro del vano
             let mut seeds = Vec::new();
             for k in 0..=12 {
                 let t = k as f64 / 12.0;
                 for off in [0.6, 1.2, 2.0, 3.0] {
-                    let q = d.a.lerp(d.b, t) + inward * (res * off);
+                    let q = d.a.lerp(d.b, t) + inside_dir * (res * off);
                     if let Some(i) = f.cell_idx(q) {
                         if free[i] {
                             seeds.push(i);
@@ -565,6 +570,39 @@ impl Ctx {
             let clear = raster::edt(&f, &hard);
             let pass: Vec<bool> = (0..n).map(|i| free[i] && ((clear[i] as f64) >= p.c2_w * 0.5 - res * 0.5 || door_approach[i])).collect();
             let d = super::dial::dial(&f, &pass, &main_seeds, u32::MAX - 1);
+            // outlines of the area with no door touching them (a hole is not an area)
+            for (ri, ring) in plan.region.iter().enumerate() {
+                if ring.len() < 3 {
+                    continue;
+                }
+                let hole = plan.region.iter().enumerate().any(|(j, o)| j != ri && o.len() >= 3 && ring.iter().all(|&q| crate::geom::point_in_polygon(q, o)));
+                if hole {
+                    continue;
+                }
+                let has_door = doors.iter().any(|di| di.door.kind != DoorKind::Ignore && di.seeds.iter().any(|&c| crate::geom::point_in_polygon(f.center_i(c), ring)));
+                if has_door {
+                    continue;
+                }
+                let mut best: Option<(usize, f32)> = None;
+                let mut reached = false;
+                for i in 0..n {
+                    if !pass[i] || !crate::geom::point_in_polygon(f.center_i(i), ring) {
+                        continue;
+                    }
+                    if d[i] != super::dial::UNREACH {
+                        reached = true;
+                        break;
+                    }
+                    if best.map_or(true, |(_, c)| clear[i] > c) {
+                        best = Some((i, clear[i]));
+                    }
+                }
+                if !reached {
+                    if let Some((i, _)) = best {
+                        area_seeds.push(i);
+                    }
+                }
+            }
             for di in doors.iter_mut() {
                 di.reachable_empty = di.seeds.iter().any(|&s| d[s] != super::dial::UNREACH);
                 // with several separate areas, doors of the other areas are reached from inside them
@@ -625,6 +663,7 @@ impl Ctx {
             doors,
             main_seeds,
             exit_seeds,
+            area_seeds,
             door_approach,
             windows: plan.windows.clone(),
             win_dist,

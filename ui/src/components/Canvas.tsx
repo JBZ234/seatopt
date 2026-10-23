@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { addDrawnArea, addDrawnDoor, addDrawnObstacle, deleteArea, placeDesk, setAreaRing } from '../actions';
 import { areaAt, projLine, projSeg } from '../draw';
-import { circWidth, deskBody, doorInfo, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
+import { circWidth, deskBody, doorInfo, doorSide, isTwo, moduleInfo, obstacleClears, obstacleInfo, regionInfo, wallDefault, type ClearInfo, type ClearKey } from '../clear';
 import { checkDesk } from '../fit';
-import { describeSel, deleteSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotateSelection } from '../edit';
+import { describeSel, deleteSelection, flipHinge, flipSelection, mergeSel, moveSelection, normRect, pickPoint, pickRect, pinSelection, rotatePrompt, rotateSelection } from '../edit';
 import { DRAFT_TOOLS, emptySel, selCount, STEP, useApp, uid, type Tool } from '../store';
 import type { CircPath, Config, Door, DoorKind, Layout, Module, ObstacleKind, Plan, Pt, Seat } from '../types';
 
@@ -590,7 +590,14 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         d += `M${p[0]} ${p[1]}`;
         for (let i = 2; i < p.length; i += 2) d += `L${p[i]} ${p[i + 1]}`;
       }
-      return <path key={l.name} d={d} stroke={l.color} />;
+      return (
+        <g key={l.name}>
+          <path d={d} stroke={l.color} />
+          {l.texts?.map(([x, y, h, r, t], i) => (
+            <text key={i} className="bg-text" fill={l.color} fontSize={h} transform={`translate(${x} ${y}) scale(1 -1)${r ? ` rotate(${-r})` : ''}`}>{t}</text>
+          ))}
+        </g>
+      );
     });
   }, [background, hiddenLayers]);
 
@@ -616,6 +623,19 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           : layout?.corridors.map((c, i) => <path key={'c' + i} className="corridor" d={ringD(c)} />))}
         {plan.obstacles.map((o) => <path key={o.id} className="obstacle" d={ringD(o.poly)} fill={OBS_FILL[o.kind]} />)}
         {plan.windows.map((w, i) => <line key={'w' + i} className="window" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
+        {plan.doors.filter((d) => d.kind !== 'ignore').map((d) => {
+          // leaf and swing: hinge at a, opening toward the side the door opens to
+          const w = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y);
+          if (w < 1) return null;
+          const n = doorSide(plan, d);
+          const leaf = { x: d.a.x + n.x * w, y: d.a.y + n.y * w };
+          const a0 = Math.atan2(leaf.y - d.a.y, leaf.x - d.a.x);
+          let a1 = Math.atan2(d.b.y - d.a.y, d.b.x - d.a.x);
+          while (a1 - a0 > Math.PI) a1 -= 2 * Math.PI;
+          while (a0 - a1 > Math.PI) a1 += 2 * Math.PI;
+          const arc = Array.from({ length: 13 }, (_, i) => { const t = a0 + ((a1 - a0) * i) / 12; return `${(d.a.x + Math.cos(t) * w).toFixed(0)},${(d.a.y + Math.sin(t) * w).toFixed(0)}`; });
+          return <polyline key={'sw' + d.id} className="door-swing" stroke={DOOR_COLOR[d.kind]} points={`${d.a.x},${d.a.y} ${leaf.x},${leaf.y} ${arc.join(' ')}`} />;
+        })}
         {plan.doors.map((d) => <line key={d.id} className={'door ' + d.kind} x1={d.a.x} y1={d.a.y} x2={d.b.x} y2={d.b.y} stroke={DOOR_COLOR[d.kind]} />)}
       </>
     );
@@ -983,7 +1003,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       const hit = pickPoint(toWorld(x, y), 8 / view.k);
       const already = hit.modules.some((id) => sel.modules.includes(id)) || hit.obstacles.some((id) => sel.obstacles.includes(id))
         || hit.doors.some((id) => sel.doors.includes(id)) || hit.windows.some((i) => sel.windows.includes(i));
+      const grab = !already && !e.shiftKey && !(e.ctrlKey || e.metaKey) && (hit.obstacles.length + hit.doors.length + hit.windows.length + hit.modules.length) > 0;
       if (already && !e.shiftKey && !(e.ctrlKey || e.metaKey)) { const a = toWorld(x, y); setMoving({ a, b: a }); }
+      else if (grab) { st.set({ selection: hit }); const a = toWorld(x, y); setMoving({ a, b: a }); }
       else setBox({ ax: x, ay: y, bx: x, by: y });
       return;
     }
@@ -1423,11 +1445,12 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
           <span>{describeSel(sel)}</span>
           {sel.modules.length > 0 && <button className="small" title="Keep these desks and their people in the next optimizations (P)" onClick={() => pinSelection(true)}>Pin and lock</button>}
           {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Release</button>}
-          {sel.doors.length > 0 && (
-            <button className="small" title="Flip the side the door opens to (and its clearance)"
-              onClick={() => st.updatePlan((p) => { p.doors.forEach((d) => { if (sel.doors.includes(d.id)) d.flip = !d.flip; }); })}>Flip swing</button>
-          )}
-          {(sel.modules.length > 0 || sel.obstacles.length > 0) && <button className="small" title="Rotate the selected desks or obstacles 90° about their center (R)" onClick={() => rotateSelection(90)}>Rotate 90°</button>}
+          {sel.doors.length > 0 && <button className="small" title="Open to the other side (and move its clearance) · F" onClick={flipSelection}>Flip side</button>}
+          {sel.doors.length > 0 && <button className="small" title="Put the hinge at the other end of the opening" onClick={flipHinge}>Flip hinge</button>}
+          {sel.obstacles.length > 0 && !sel.doors.length && <button className="small" title="Mirror left to right · F" onClick={flipSelection}>Mirror</button>}
+          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small" title="Rotate 90° about its center (R; Shift+R the other way)" onClick={() => rotateSelection(90)}>Rotate 90°</button>}
+          {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length) > 0 && <button className="small" title="Rotate by any angle" onClick={rotatePrompt}>Rotate…</button>}
+          {(sel.obstacles.length + sel.doors.length + sel.windows.length + (sel.region?.length ?? 0)) > 0 && <span className="hint-inline">Drag to move · arrows nudge 10 cm (Shift 50 cm)</span>}
           {(sel.modules.length + sel.obstacles.length + sel.doors.length + sel.windows.length + (st.step === STEP.plan ? sel.region?.length ?? 0 : 0)) > 0 && <button className="small danger" title="Delete" onClick={deleteSelection}>Delete</button>}
           {sel.region?.length ? <span className="hint-inline">{st.step === STEP.plan ? 'Drag a corner · double-click an edge adds one · gold numbers set the clearance' : "Click a gold number to set that edge's clearance"}</span> : null}
           <button className="ghost small" title="Esc" onClick={() => st.set({ selection: emptySel() })}>Clear selection</button>
@@ -1523,7 +1546,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
             ? (draft.length ? 'Click the other end of the opening, or type its width (0.9) + Enter' : 'Click one end of the opening, on the edge of an area')
             : rectMode
               ? (draft.length ? 'Click the opposite corner, or type width x height (4x3) + Enter' : 'Click a corner (or drag)')
-              : (draft.length ? (draft.length >= 3 ? 'Next corner · Enter, right-click or the first point closes it' : 'Next corner · type a length (3.5) + Enter') : 'Click the first corner')}</span>
+              : (draft.length ? (draft.length >= 3 ? 'Next corner · Enter, right-click or the first point closes it' : 'Next corner · type a length (3.5) + Enter') : draftKind === 'area' && plan?.region.length ? 'Click the first corner of another area · Esc when you are done' : 'Click the first corner')}</span>
           {draftKind !== 'door' && !rectMode && <span className={'chip-k' + (orthoNow(shiftOn) ? ' on' : '')} title="F8 turns it on or off; Shift does the opposite while held">Ortho {orthoNow(shiftOn) ? 'on' : 'off'} · F8</span>}
           {draft.length > 0 && <span className="keys">Backspace undo point · Esc cancel</span>}
         </div>

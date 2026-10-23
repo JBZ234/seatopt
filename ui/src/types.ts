@@ -111,7 +111,7 @@ export interface ImportOut {
   drawingId: string; name: string; source: 'dxf' | 'dwg' | 'pdf'; layers: LayerOut[];
   scale: ScaleGuess; bounds: [number, number, number, number]; unitNote: string;
 }
-export interface BgLayer { name: string; color: string; paths: number[][] }
+export interface BgLayer { name: string; color: string; paths: number[][]; /** [x, y, height, rotation°, text] in mm */ texts?: [number, number, number, number, string][] }
 export interface AnalyzeOptions { mmPerUnit: number; roles: Record<string, LayerRole>; seed?: Pt | null; gapClose: number }
 export interface AnalyzeResult { plan: Plan; notes: string[]; areaM2: number }
 

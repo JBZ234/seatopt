@@ -129,7 +129,7 @@ function editLayout(f: (l: Layout) => void) {
 
 export function moveSelection(dx: number, dy: number) {
   const sel = S().selection;
-  if (!sel.modules.length && !sel.obstacles.length && !sel.doors.length && !sel.windows.length) return;
+  if (!sel.modules.length && !sel.obstacles.length && !sel.doors.length && !sel.windows.length && !(sel.region?.length && S().step === 0)) return;
   S().snapshot();
   if (sel.modules.length) {
     editLayout((l) => {
@@ -154,17 +154,70 @@ export function moveSelection(dx: number, dy: number) {
       n.obstacles.forEach((o) => { if (sel.obstacles.includes(o.id)) o.poly = o.poly.map((p) => tr(p, dx, dy)); });
       n.doors.forEach((d) => { if (sel.doors.includes(d.id)) { d.a = tr(d.a, dx, dy); d.b = tr(d.b, dx, dy); } });
       n.windows.forEach((w, i) => { if (sel.windows.includes(i)) { w.a = tr(w.a, dx, dy); w.b = tr(w.b, dx, dy); } });
+      if (sel.doors.length) n.paths = [];
       S().set({ plan: n });
+    }
+  }
+  if (sel.region?.length && S().step === 0) {
+    // whole areas (with their holes) move too
+    const plan = S().plan;
+    if (plan) {
+      const groups = areaGroups(plan.region);
+      const move = new Set<number>();
+      for (const i of sel.region) { move.add(i); groups.find((g) => g.outer === i)?.holes.forEach((h) => move.add(h)); }
+      const n = structuredClone(plan);
+      n.region = n.region.map((r, i) => (move.has(i) ? r.map((p) => tr(p, dx, dy)) : r));
+      n.paths = [];
+      S().set({ plan: n, layout: null, planMode: 'draw' });
     }
   }
   evaluateSoon();
 }
 
+const midOf = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+/** Doors: flip the side they open to. Obstacles: mirror them left to right. */
+export function flipSelection() {
+  const sel = S().selection;
+  const plan = S().plan;
+  if (!plan || (!sel.doors.length && !sel.obstacles.length)) return;
+  S().snapshot();
+  const n = structuredClone(plan);
+  n.doors.forEach((d) => { if (sel.doors.includes(d.id)) d.flip = !d.flip; });
+  n.obstacles.forEach((o) => {
+    if (!sel.obstacles.includes(o.id)) return;
+    const cx = o.poly.reduce((a, p) => a + p.x, 0) / o.poly.length;
+    o.poly = o.poly.map((p) => ({ x: 2 * cx - p.x, y: p.y })).reverse();
+    if (o.clear?.length === 4) o.clear = [o.clear[2], o.clear[1], o.clear[0], o.clear[3]];
+  });
+  n.paths = sel.doors.length ? [] : n.paths;
+  S().set({ plan: n });
+  evaluateSoon();
+}
+
+/** Doors: the hinge goes to the other end of the opening. */
+export function flipHinge() {
+  const sel = S().selection;
+  const plan = S().plan;
+  if (!plan || !sel.doors.length) return;
+  S().snapshot();
+  const n = structuredClone(plan);
+  n.doors.forEach((d) => { if (sel.doors.includes(d.id)) { const a = d.a; d.a = d.b; d.b = a; d.flip = !d.flip; } });
+  S().set({ plan: n });
+}
+
+/** Asks for an angle and rotates the selection by it. */
+export function rotatePrompt() {
+  const ans = prompt('Rotate by how many degrees? (positive = counterclockwise)', '45');
+  const deg = parseFloat((ans ?? '').replace(',', '.'));
+  if (isFinite(deg) && deg !== 0) rotateSelection(deg);
+}
+
 export function rotateSelection(deg = 90) {
   const sel = S().selection;
-  if (!sel.modules.length && !sel.obstacles.length) return;
+  if (!sel.modules.length && !sel.obstacles.length && !sel.doors.length && !sel.windows.length) return;
   S().snapshot();
-  editLayout((l) => {
+  if (sel.modules.length) editLayout((l) => {
     for (const m of l.modules) {
       if (!sel.modules.includes(m.id)) continue;
       const c = m.center;
@@ -180,7 +233,7 @@ export function rotateSelection(deg = 90) {
       }
     }
   });
-  if (sel.obstacles.length) {
+  if (sel.obstacles.length || sel.doors.length || sel.windows.length) {
     const plan = S().plan;
     if (plan) {
       const n = structuredClone(plan);
@@ -189,6 +242,10 @@ export function rotateSelection(deg = 90) {
         const c = o.poly.reduce((a, p) => ({ x: a.x + p.x / o.poly.length, y: a.y + p.y / o.poly.length }), { x: 0, y: 0 });
         o.poly = o.poly.map((p) => rot(p, c, deg));
       });
+      // doors and windows turn about their middle
+      n.doors.forEach((d) => { if (sel.doors.includes(d.id)) { const c = midOf(d.a, d.b); d.a = rot(d.a, c, deg); d.b = rot(d.b, c, deg); } });
+      n.windows.forEach((w, i) => { if (sel.windows.includes(i)) { const c = midOf(w.a, w.b); w.a = rot(w.a, c, deg); w.b = rot(w.b, c, deg); } });
+      if (sel.doors.length) n.paths = [];
       S().set({ plan: n });
     }
   }

@@ -120,6 +120,10 @@ impl Affine {
     pub fn scale_factor(&self) -> f64 {
         (self.a * self.d - self.b * self.c).abs().sqrt()
     }
+    /// Rotation of the x axis, in degrees.
+    pub fn rotation_deg(&self) -> f64 {
+        self.b.atan2(self.a).to_degrees()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]

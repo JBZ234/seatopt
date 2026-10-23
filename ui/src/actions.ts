@@ -32,7 +32,7 @@ export async function importPlan() {
     const prev = S().config;
     const extra = prev ? prev.catalog.filter((t) => !def.catalog.some((d) => d.id === t.id)) : [];
     S().set({ config: { ...def, catalog: [...def.catalog, ...extra] } });
-    await loadBackground();
+    await loadBackground(true);
     if (S().planModePref === 'draw') {
       S().set({ plan: emptyPlan(), planMode: 'draw', areaM2: 0, mainConfirmed: true, tool: 'drawArea', drawShape: 'poly' });
     } else {
@@ -186,14 +186,19 @@ export async function deleteLayer(name: string) {
   }
 }
 
-export async function loadBackground() {
+/** Lines of the drawing to show under the plan. `fresh` (a plan just opened): to draw by hand
+ *  every layer shows, as it is; to detect, the ignored layers start hidden. Otherwise the layers
+ *  keep the visibility they had. */
+export async function loadBackground(fresh = false) {
   const d = S().drawing;
   if (!d) return;
   const bg = await call<BgLayer[]>('background', { drawingId: d.drawingId, mmPerUnit: S().mmPerUnit });
-  // capas ignoradas o de mobiliario, ocultas al inicio para que el plano se lea mejor
-  let hidden = bg.filter((l) => S().roles[l.name] === 'ignore').map((l) => l.name);
-  // nunca ocultar todo el dibujo (PDF sin capas)
-  if (hidden.length >= bg.length) hidden = [];
+  let hidden: string[];
+  if (fresh) {
+    hidden = S().planModePref === 'draw' ? [] : bg.filter((l) => S().roles[l.name] === 'ignore').map((l) => l.name);
+    // nunca ocultar todo el dibujo (PDF sin capas)
+    if (hidden.length >= bg.length) hidden = [];
+  } else hidden = S().hiddenLayers.filter((h) => bg.some((l) => l.name === h));
   S().set({ background: bg, hiddenLayers: hidden });
 }
 

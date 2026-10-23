@@ -962,3 +962,9 @@ button.link:hover { text-decoration: underline; }
 .check-sec .section-label { margin-bottom: 0; }
 /* while making the plan, the drawing shows through the areas */
 .canvas.on-plan .region { fill-opacity: 0.45; }
+
+.door-swing { fill: none; stroke-width: 1; stroke-opacity: 0.75; vector-effect: non-scaling-stroke; pointer-events: none; }
+.bg-text { stroke: none; opacity: 0.75; font-family: var(--fc, sans-serif); pointer-events: none; }
+.layer-sw td { padding: 2px 4px; }
+.layer-sw .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.layer-sw tr.off .lname { color: var(--muted); }

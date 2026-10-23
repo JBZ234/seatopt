@@ -307,9 +307,12 @@ pub fn evaluate(ctx: &Ctx, dec: &Decoded, variant: usize, weights: &Weights, ful
         // separate areas (not connected to the entrance) are reached through their own doors
         let mut s = ctx.main_seeds.clone();
         s.extend(ctx.doors.iter().filter(|d| !d.reachable_empty).flat_map(|d| d.seeds.iter().copied()));
+        s.extend(ctx.area_seeds.iter().copied());
         s
     } else {
-        ctx.doors.iter().flat_map(|d| d.seeds.iter().copied()).collect()
+        let mut s: Vec<usize> = ctx.doors.iter().flat_map(|d| d.seeds.iter().copied()).collect();
+        s.extend(ctx.area_seeds.iter().copied());
+        s
     };
     let d_any = dial::dial(f, &pass_d, &seeds, u32::MAX - 1);
     let d_doors = if p.c7_on && p.c7_doors { dial::dial(f, &pass_dw, &seeds, u32::MAX - 1) } else { vec![] };

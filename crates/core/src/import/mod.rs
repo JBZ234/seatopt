@@ -38,6 +38,9 @@ pub struct LayerInfo {
     pub name: String,
     pub color: String,
     pub paths: usize,
+    /// Things only shown (dimensions, leaders, texts): not used to detect anything.
+    #[serde(default)]
+    pub shown: usize,
 }
 
 /// Dibujo importado, tal cual viene del archivo (unidades del archivo).
@@ -51,6 +54,9 @@ pub struct Drawing {
     /// Tramos curvos (arcos) por separado: sirven para detectar puertas.
     pub curves: Vec<DPath>,
     pub texts: Vec<DText>,
+    /// Lines only shown for tracing (dimensions, leaders…): never used to detect walls or doors.
+    #[serde(default)]
+    pub extra: Vec<DPath>,
     pub bounds: BBox,
     /// mm por unidad del dibujo según el archivo (None si no se sabe).
     pub declared_unit_mm: Option<f64>,
@@ -67,6 +73,7 @@ impl Drawing {
             paths: vec![],
             curves: vec![],
             texts: vec![],
+            extra: vec![],
             bounds: BBox::empty(),
             declared_unit_mm: None,
             unit_note: String::new(),
@@ -76,7 +83,7 @@ impl Drawing {
         if let Some(i) = self.layers.iter().position(|l| l.name == name) {
             return i as u32;
         }
-        self.layers.push(LayerInfo { name: name.into(), color: color.into(), paths: 0 });
+        self.layers.push(LayerInfo { name: name.into(), color: color.into(), paths: 0, shown: 0 });
         (self.layers.len() - 1) as u32
     }
     pub fn add_path(&mut self, layer: u32, pts: Vec<Pt>, closed: bool) {
@@ -91,6 +98,20 @@ impl Drawing {
         }
         self.layers[layer as usize].paths += 1;
         self.paths.push(DPath { layer, pts, closed });
+    }
+    pub fn add_extra(&mut self, layer: u32, pts: Vec<Pt>, closed: bool) {
+        if pts.len() < 2 || pts.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+            return;
+        }
+        self.layers[layer as usize].shown += 1;
+        self.extra.push(DPath { layer, pts, closed });
+    }
+    pub fn add_text(&mut self, t: DText) {
+        if t.text.trim().is_empty() || !t.pos.x.is_finite() || !t.pos.y.is_finite() {
+            return;
+        }
+        self.layers[t.layer as usize].shown += 1;
+        self.texts.push(t);
     }
     pub fn add_curve(&mut self, layer: u32, pts: Vec<Pt>) {
         if pts.len() >= 3 && pts.iter().all(|p| p.x.is_finite() && p.y.is_finite()) {
@@ -186,4 +207,40 @@ pub fn import_bytes(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     } else {
         Err(format!("Formato no soportado: {name}"))
     }
+}
+
+/// Points along a NURBS curve (degree `p`, control points with weights, knot vector), 12 per span.
+/// None if the data does not make a valid curve.
+pub fn nurbs(ctrl: &[Pt], weights: &[f64], knots: &[f64], p: usize) -> Option<Vec<Pt>> {
+    let n = ctrl.len();
+    if n < 2 || p == 0 || knots.len() != n + p + 1 {
+        return None;
+    }
+    let w = |i: usize| if weights.len() == n { weights[i] } else { 1.0 };
+    let (u0, u1) = (knots[p], knots[n]);
+    if !(u1 > u0) {
+        return None;
+    }
+    // de Boor on homogeneous points
+    let eval = |u: f64| -> Pt {
+        let mut k = p;
+        while k + 1 < n && knots[k + 1] <= u {
+            k += 1;
+        }
+        let mut d: Vec<(f64, f64, f64)> = (0..=p).map(|j| { let i = j + k - p; let wi = w(i); (ctrl[i].x * wi, ctrl[i].y * wi, wi) }).collect();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = j + k - p;
+                let den = knots[i + p - r + 1] - knots[i];
+                let a = if den.abs() < 1e-12 { 0.0 } else { (u - knots[i]) / den };
+                d[j] = ((1.0 - a) * d[j - 1].0 + a * d[j].0, (1.0 - a) * d[j - 1].1 + a * d[j].1, (1.0 - a) * d[j - 1].2 + a * d[j].2);
+            }
+        }
+        let (x, y, ww) = d[p];
+        if ww.abs() < 1e-12 { Pt { x, y } } else { Pt { x: x / ww, y: y / ww } }
+    };
+    let spans = knots.windows(2).filter(|k| k[1] > k[0]).count().max(1);
+    let m = (spans * 12).clamp(8, 2000);
+    let out: Vec<Pt> = (0..=m).map(|i| eval(u0 + (u1 - u0) * i as f64 / m as f64)).collect();
+    if out.iter().all(|q| q.x.is_finite() && q.y.is_finite()) { Some(out) } else { None }
 }

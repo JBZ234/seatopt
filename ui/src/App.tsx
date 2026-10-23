@@ -6,7 +6,7 @@ import { backendName, isWeb } from './api';
 import Canvas from './components/Canvas';
 import DeskStudio from './components/DeskStudio';
 import { Bar } from './components/ui';
-import { deleteSelection, evaluateSoon, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
+import { deleteSelection, evaluateSoon, flipSelection, moveSelection, pinSelection, rotateSelection, selectAll } from './edit';
 import { emptySel, requestedSeats, savePlanMode, selCount, STEP, useApp, type Theme, type Tool } from './store';
 import DesksStep from './steps/DesksStep';
 import OptimizeStep from './steps/OptimizeStep';
@@ -54,7 +54,8 @@ export default function App() {
       else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
       else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'r') s.set({ placeAngle: (s.placeAngle + 90) % 360 });
       else if (!ctrl && s.tool === 'placeDesk' && e.key.toLowerCase() === 'f') s.set({ placeUp: !s.placeUp });
-      else if (!ctrl && e.key.toLowerCase() === 'r' && selCount(s.selection)) rotateSelection(90);
+      else if (!ctrl && e.key.toLowerCase() === 'r' && selCount(s.selection)) rotateSelection(e.shiftKey ? -90 : 90);
+      else if (!ctrl && e.key.toLowerCase() === 'f' && (s.selection.doors.length || s.selection.obstacles.length)) flipSelection();
       else if (!ctrl && e.key.toLowerCase() === 'p' && s.selection.modules.length) pinSelection(true);
       else if (!ctrl && e.key.startsWith('Arrow') && selCount(s.selection)) {
         e.preventDefault();

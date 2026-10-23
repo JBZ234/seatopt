@@ -86,6 +86,17 @@ export function obstacleInfo(c: Config, o: Obstacle): ClearInfo {
   return { zones, labels, edges };
 }
 
+/** Side a door opens to (unit vector), as the engine decides it; `flip` turns it over. */
+export function doorSide(plan: Plan, d: Door): Pt {
+  const u = norm(sub(d.b, d.a));
+  const nrm = { x: -u.y, y: u.x };
+  const mid = mul(add(d.a, d.b), 0.5);
+  const free = (q: Pt) => inRegion(q, plan.region) && !plan.obstacles.some((o) => (o.kind === 'column' || o.kind === 'fixedOffice') && pip(q, o.poly));
+  const score = (s: number) => [1, 2, 3, 4, 5, 6].filter((k) => free(add(mid, mul(nrm, s * 150 * k)))).length;
+  const inward = score(1) >= score(-1) ? nrm : mul(nrm, -1);
+  return d.flip ? mul(inward, -1) : inward;
+}
+
 /** Despeje frente a una puerta: fondo y ancho (propios o de las reglas C4 / C3). */
 export function doorClear(c: Config, plan: Plan, d: Door) {
   const w = Math.max(300, Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y));

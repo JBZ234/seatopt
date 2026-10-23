@@ -297,7 +297,7 @@ export function checkPlan(plan: Plan | null): Issue[] {
     const queue = reach.map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
     while (queue.length) { const i = queue.pop()!; for (const j of adj[i]) if (!reach[j]) { reach[j] = true; queue.push(j); } }
     reach.forEach((v, gi) => {
-      if (!v) out.push({ level: 'error', text: `${name(gi)} has no door: draw the door people use to get in (or join it to an area that has one).`, at: center(R[groups[gi].outer]) });
+      if (!v) out.push({ level: 'warn', text: `${name(gi)} has no door: it is furnished as if people could get in from anywhere. Draw its door for better aisles.`, at: center(R[groups[gi].outer]) });
     });
   }
 

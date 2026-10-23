@@ -30,7 +30,7 @@ pub fn read_dxf(name: &str, bytes: &[u8]) -> Result<Drawing, String> {
     d.declared_unit_mm = unit;
     d.unit_note = note.into();
 
-    let mut ctx = Ctx { d: &mut d, blocks: &blocks, colors: &layer_colors };
+    let mut ctx = Ctx { d: &mut d, blocks: &blocks, colors: &layer_colors, show_only: false };
     for e in dx.entities() {
         if e.common.is_in_paper_space {
             continue;
@@ -48,6 +48,8 @@ struct Ctx<'a, 'b> {
     d: &'a mut Drawing,
     blocks: &'a HashMap<String, &'b dxf::Block>,
     colors: &'a HashMap<String, String>,
+    /// Inside a dimension: its lines are only shown.
+    show_only: bool,
 }
 
 impl<'a, 'b> Ctx<'a, 'b> {
@@ -61,15 +63,35 @@ impl<'a, 'b> Ctx<'a, 'b> {
         self.d.layer_id(&name, &color)
     }
 
+    fn path(&mut self, li: u32, pts: Vec<Pt>, closed: bool) {
+        if self.show_only { self.d.add_extra(li, pts, closed) } else { self.d.add_path(li, pts, closed) }
+    }
+    fn curve(&mut self, li: u32, pts: Vec<Pt>) {
+        if !self.show_only {
+            self.d.add_curve(li, pts);
+        }
+    }
+    /// The geometry of a dimension is an anonymous block, already placed in the drawing.
+    fn dimension(&mut self, block: &str, m: &Affine, layer: &str, depth: usize) {
+        let Some(b) = self.blocks.get(block) else { return };
+        let was = self.show_only;
+        self.show_only = true;
+        for be in &b.entities {
+            self.entity(be, m, Some(layer), depth + 1);
+        }
+        self.show_only = was;
+    }
+
     fn entity(&mut self, e: &Entity, m: &Affine, parent: Option<&str>, depth: usize) {
         if depth > 10 {
             return;
         }
+        let own_layer = if (e.common.layer == "0" || e.common.layer.is_empty()) && parent.is_some() { parent.unwrap().to_string() } else { e.common.layer.clone() };
         let tp = |p: &dxf::Point| m.apply(pt(p.x, p.y));
         match &e.specific {
             EntityType::Line(l) => {
                 let li = self.layer(e, parent);
-                self.d.add_path(li, vec![tp(&l.p1), tp(&l.p2)], false);
+                self.path(li, vec![tp(&l.p1), tp(&l.p2)], false);
             }
             EntityType::LwPolyline(pl) => {
                 let li = self.layer(e, parent);
@@ -90,7 +112,7 @@ impl<'a, 'b> Ctx<'a, 'b> {
                         let mut arc = vec![a];
                         arc.extend(flatten_bulge(a, b, vs[i].bulge));
                         let arc_w: Vec<Pt> = arc.iter().map(|&p| m.apply(p)).collect();
-                        self.d.add_curve(li, arc_w);
+                        self.curve(li, arc_w);
                     }
                     pts.extend(flatten_bulge(a, b, vs[i].bulge));
                 }
@@ -98,7 +120,7 @@ impl<'a, 'b> Ctx<'a, 'b> {
                     pts.pop();
                 }
                 let pts: Vec<Pt> = pts.into_iter().map(|p| m.apply(p)).collect();
-                self.d.add_path(li, pts, closed);
+                self.path(li, pts, closed);
             }
             EntityType::Polyline(pl) => {
                 let li = self.layer(e, parent);
@@ -119,7 +141,7 @@ impl<'a, 'b> Ctx<'a, 'b> {
                     pts.pop();
                 }
                 let pts: Vec<Pt> = pts.into_iter().map(|p| m.apply(p)).collect();
-                self.d.add_path(li, pts, closed);
+                self.path(li, pts, closed);
             }
             EntityType::Arc(a) => {
                 let li = self.layer(e, parent);
@@ -132,8 +154,8 @@ impl<'a, 'b> Ctx<'a, 'b> {
                 };
                 let pts = flatten_arc(c, a.radius, s.to_radians(), en.to_radians());
                 let pts: Vec<Pt> = pts.into_iter().map(|p| m.apply(p)).collect();
-                self.d.add_curve(li, pts.clone());
-                self.d.add_path(li, pts, false);
+                self.curve(li, pts.clone());
+                self.path(li, pts, false);
             }
             EntityType::Circle(c) => {
                 let li = self.layer(e, parent);
@@ -142,7 +164,7 @@ impl<'a, 'b> Ctx<'a, 'b> {
                 let mut pts = flatten_arc(pt(c.center.x, c.center.y), c.radius, 0.0, std::f64::consts::TAU);
                 pts.pop();
                 let pts: Vec<Pt> = pts.into_iter().map(|p| m.apply(p)).collect();
-                self.d.add_path(li, pts, true);
+                self.path(li, pts, true);
             }
             EntityType::Ellipse(el) => {
                 let li = self.layer(e, parent);
@@ -161,38 +183,69 @@ impl<'a, 'b> Ctx<'a, 'b> {
                     })
                     .collect();
                 let closed = (t1 - t0 - std::f64::consts::TAU).abs() < 1e-6;
-                self.d.add_path(li, pts, closed);
+                self.path(li, pts, closed);
             }
             EntityType::Spline(sp) => {
                 let li = self.layer(e, parent);
-                let src = if sp.fit_points.len() >= 2 { &sp.fit_points } else { &sp.control_points };
-                let pts: Vec<Pt> = src.iter().map(|p| tp(p)).collect();
-                self.d.add_path(li, pts, sp.is_closed());
+                let ctrl: Vec<Pt> = sp.control_points.iter().map(|p| pt(p.x, p.y)).collect();
+                let pts = super::nurbs(&ctrl, &sp.weight_values, &sp.knot_values, sp.degree_of_curve.max(1) as usize)
+                    .unwrap_or_else(|| { let src = if sp.fit_points.len() >= 2 { &sp.fit_points } else { &sp.control_points }; src.iter().map(|p| pt(p.x, p.y)).collect() });
+                let pts: Vec<Pt> = pts.into_iter().map(|p| m.apply(p)).collect();
+                self.path(li, pts, sp.is_closed());
+            }
+            EntityType::RotatedDimension(dm) => self.dimension(&dm.dimension_base.block_name, m, &own_layer, depth),
+            EntityType::RadialDimension(dm) => self.dimension(&dm.dimension_base.block_name, m, &own_layer, depth),
+            EntityType::DiameterDimension(dm) => self.dimension(&dm.dimension_base.block_name, m, &own_layer, depth),
+            EntityType::AngularThreePointDimension(dm) => self.dimension(&dm.dimension_base.block_name, m, &own_layer, depth),
+            EntityType::OrdinateDimension(dm) => self.dimension(&dm.dimension_base.block_name, m, &own_layer, depth),
+            EntityType::Leader(l) => {
+                let li = self.layer(e, parent);
+                let pts: Vec<Pt> = l.vertices.iter().map(|p| tp(p)).collect();
+                self.d.add_extra(li, pts, false);
+            }
+            EntityType::MLine(l) => {
+                let li = self.layer(e, parent);
+                let pts: Vec<Pt> = l.vertices.iter().map(|p| tp(p)).collect();
+                self.d.add_extra(li, pts, false);
+            }
+            EntityType::Trace(s) => {
+                let li = self.layer(e, parent);
+                let pts = vec![tp(&s.first_corner), tp(&s.second_corner), tp(&s.fourth_corner), tp(&s.third_corner)];
+                self.d.add_extra(li, pts, true);
             }
             EntityType::Solid(s) => {
                 let li = self.layer(e, parent);
                 // orden de vértices de SOLID: 1,2,4,3
                 let pts = vec![tp(&s.first_corner), tp(&s.second_corner), tp(&s.fourth_corner), tp(&s.third_corner)];
-                self.d.add_path(li, pts, true);
+                self.path(li, pts, true);
             }
             EntityType::Face3D(s) => {
                 let li = self.layer(e, parent);
                 let pts = vec![tp(&s.first_corner), tp(&s.second_corner), tp(&s.third_corner), tp(&s.fourth_corner)];
-                self.d.add_path(li, pts, true);
+                self.path(li, pts, true);
             }
             EntityType::Text(t) => {
                 let li = self.layer(e, parent);
                 let p = tp(&t.location);
-                self.d.texts.push(super::DText { layer: li, pos: p, height: t.text_height * m.scale_factor(), rot: t.rotation, text: t.value.clone() });
+                self.d.add_text(super::DText { layer: li, pos: p, height: t.text_height * m.scale_factor(), rot: t.rotation + m.rotation_deg(), text: t.value.clone() });
             }
             EntityType::MText(t) => {
                 let li = self.layer(e, parent);
                 let p = tp(&t.insertion_point);
                 let mut s = t.extended_text.join("");
                 s.push_str(&t.text);
-                self.d.texts.push(super::DText { layer: li, pos: p, height: t.initial_text_height * m.scale_factor(), rot: t.rotation_angle, text: clean_mtext(&s) });
+                self.d.add_text(super::DText { layer: li, pos: p, height: t.initial_text_height * m.scale_factor(), rot: t.rotation_angle + m.rotation_deg(), text: clean_mtext(&s) });
             }
             EntityType::Insert(ins) => {
+                // attribute values (room names, numbers…)
+                for a in ins.attributes() {
+                    if a.is_invisible() {
+                        continue;
+                    }
+                    let li = self.layer(e, parent);
+                    let p = tp(&a.location);
+                    self.d.add_text(super::DText { layer: li, pos: p, height: a.text_height * m.scale_factor(), rot: a.rotation + m.rotation_deg(), text: a.value.clone() });
+                }
                 let Some(block) = self.blocks.get(&ins.name) else { return };
                 let block_layer = if e.common.layer == "0" && parent.is_some() { parent.unwrap().to_string() } else { e.common.layer.clone() };
                 let cols = ins.column_count.max(1) as i32;

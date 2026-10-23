@@ -97,7 +97,7 @@ fn register(d: Drawing) -> ImportOut {
         drawing_id: id.clone(),
         name: d.name.clone(),
         source: d.source,
-        layers: d.layers.iter().filter(|l| l.paths > 0).map(|l| LayerOut { name: l.name.clone(), color: l.color.clone(), paths: l.paths, role: roles[&l.name] }).collect(),
+        layers: d.layers.iter().filter(|l| l.paths > 0 || l.shown > 0).map(|l| LayerOut { name: l.name.clone(), color: l.color.clone(), paths: l.paths + l.shown, role: roles[&l.name] }).collect(),
         scale,
         bounds: [d.bounds.min.x, d.bounds.min.y, d.bounds.max.x, d.bounds.max.y],
         unit_note: d.unit_note.clone(),
@@ -134,12 +134,19 @@ pub struct BgLayer {
     pub name: String,
     pub color: String,
     pub paths: Vec<Vec<f32>>,
+    /// Texts of the layer: [x, y, height, rotation°] (mm) and the text.
+    #[serde(default)]
+    pub texts: Vec<(f32, f32, f32, f32, String)>,
 }
 
 pub fn background(id: &str, mm_per_unit: f64) -> Result<Vec<BgLayer>, String> {
     let d = drawing(id)?;
-    let mut layers: Vec<BgLayer> = d.layers.iter().map(|l| BgLayer { name: l.name.clone(), color: l.color.clone(), paths: vec![] }).collect();
-    for p in &d.paths {
+    let mut layers: Vec<BgLayer> = d.layers.iter().map(|l| BgLayer { name: l.name.clone(), color: l.color.clone(), paths: vec![], texts: vec![] }).collect();
+    for t in &d.texts {
+        let h = (t.height * mm_per_unit) as f32;
+        layers[t.layer as usize].texts.push(((t.pos.x * mm_per_unit) as f32, (t.pos.y * mm_per_unit) as f32, if h > 0.0 { h } else { 200.0 }, t.rot as f32, t.text.clone()));
+    }
+    for p in d.paths.iter().chain(d.extra.iter()) {
         let mut v = Vec::with_capacity(p.pts.len() * 2 + 2);
         for q in &p.pts {
             v.push((q.x * mm_per_unit).round() as f32);
@@ -151,7 +158,7 @@ pub fn background(id: &str, mm_per_unit: f64) -> Result<Vec<BgLayer>, String> {
         }
         layers[p.layer as usize].paths.push(v);
     }
-    Ok(layers.into_iter().filter(|l| !l.paths.is_empty()).collect())
+    Ok(layers.into_iter().filter(|l| !l.paths.is_empty() || !l.texts.is_empty()).collect())
 }
 
 pub fn analyze(id: &str, opts: &AnalyzeOptions) -> Result<AnalyzeResult, String> {
