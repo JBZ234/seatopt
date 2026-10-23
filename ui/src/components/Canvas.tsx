@@ -14,6 +14,23 @@ const OBS_FILL: Record<ObstacleKind, string> = { column: 'var(--column)', fixedO
  *  from the origin, as DXF coordinates often are.) */
 const ZOOM_MAX = 10;
 
+/** Box of a text of the drawing (approximate: 0.6 x height per character), as drawn. */
+function textBox([x, y, h, r, t]: [number, number, number, number, string]): Pt[] {
+  const w = Math.max(1, t.length) * h * 0.6;
+  const a = (r * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return [[0, -0.25 * h], [w, -0.25 * h], [w, h], [0, h]].map(([u, v]) => ({ x: x + u * c - v * s, y: y + u * s + v * c }));
+}
+function pipC(p: Pt, poly: Pt[]) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+/** Black and white of the drawing (AutoCAD color 7) follow the theme, like in AutoCAD. */
+const inkOf = (c: string) => (/^#(000000|ffffff)$/i.test(c) ? 'var(--graphite)' : c);
+
 function ringD(r: Pt[]) {
   if (!r.length) return '';
   let s = `M${r[0].x.toFixed(0)} ${r[0].y.toFixed(0)}`;
@@ -233,6 +250,18 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
   /** The drawing line under the point ("layer:path"), or null. */
   const bgAt = (q: Pt, tol: number): string | null => {
     if (!background) return null;
+    // a text (dimension value, note…) under the cursor
+    const hpT = new Set(st.hiddenPaths);
+    for (let li = background.length - 1; li >= 0; li--) {
+      const l = background[li];
+      if (hiddenLayers.includes(l.name) || !l.texts) continue;
+      for (let i = 0; i < l.texts.length; i++) {
+        const k = `t${li}:${i}`;
+        if (hpT.has(k)) continue;
+        const box = textBox(l.texts[i]);
+        if (pipC(q, box) || box.some((c, j) => distSeg(q, c, box[(j + 1) % 4]) < tol)) return k;
+      }
+    }
     const { m, cell } = bgPick;
     let best: string | null = null, bd = tol;
     const span = Math.ceil(tol / cell);
@@ -265,6 +294,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         const pts: Pt[] = [];
         for (let i = 0; i < p.length; i += 2) pts.push({ x: p[i], y: p[i + 1] });
         if (polyPicked(pts, r, true, false)) out.push(k);
+      });
+      l.texts?.forEach((t, i) => {
+        const k = `t${li}:${i}`;
+        if (hp.has(k)) return;
+        if (polyPicked(textBox(t), r, crossing, true)) out.push(k);
       });
     });
     return out;
@@ -666,9 +700,9 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       }
       return (
         <g key={l.name}>
-          <path d={d} stroke={l.color} />
-          {l.texts?.map(([x, y, h, r, t], i) => (
-            <text key={i} className="bg-text" fill={l.color} fontSize={h} transform={`translate(${x} ${y}) scale(1 -1)${r ? ` rotate(${-r})` : ''}`}>{t}</text>
+          <path d={d} stroke={inkOf(l.color)} />
+          {l.texts?.map(([x, y, h, r, t], i) => (hp.size && hp.has(`t${li}:${i}`) ? null :
+            <text key={i} className="bg-text" fill={inkOf(l.color)} fontSize={h} transform={`translate(${x} ${y}) scale(1 -1)${r ? ` rotate(${-r})` : ''}`}>{t}</text>
           ))}
         </g>
       );
@@ -870,6 +904,11 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
         {plan?.windows.filter((_, i) => sel.windows.includes(i)).map((w, i) => <line key={'sw' + i} className="sel" x1={w.a.x} y1={w.a.y} x2={w.b.x} y2={w.b.y} />)}
         {plan?.region.filter((_, i) => sel.region?.includes(i)).map((r, i) => <path key={'sr' + i} className="sel" fill="none" d={ringD(r)} />)}
         {sel.bg?.length ? <path className="sel bg-sel" fill="none" d={sel.bg.map((k) => {
+          if (k.startsWith('t')) {
+            const [li, ti] = k.slice(1).split(':').map(Number);
+            const t = background?.[li]?.texts?.[ti];
+            return t ? ringD(textBox(t)) : '';
+          }
           const [li, pi] = k.split(':').map(Number);
           const p = background?.[li]?.paths[pi];
           if (!p || p.length < 4) return '';
@@ -1532,7 +1571,7 @@ export default function Canvas({ onSeed, onCalibrated }: Props) {
       {selCount(sel) > 0 && (
         <div className="selbar" role="toolbar" aria-label="Selection actions">
           <span>{describeSel(sel)}</span>
-          {sel.bg?.length ? <button className="small" title="Hide these lines of the drawing (H or Delete). The file does not change; “Show hidden lines” brings them back." onClick={hideSelectedLines}>Hide lines</button> : null}
+          {sel.bg?.length ? <button className="small" title="Hide these lines of the drawing (H or Delete). The file does not change; “Show hidden lines” brings them back." onClick={hideSelectedLines}>Hide</button> : null}
           {sel.modules.length > 0 && <button className="small" title="Keep these desks and their people in the next optimizations (P)" onClick={() => pinSelection(true)}>Pin and lock</button>}
           {sel.modules.length > 0 && <button className="small" onClick={() => pinSelection(false)}>Release</button>}
           {sel.doors.length > 0 && <button className="small" title="Open to the other side (and move its clearance) · F" onClick={flipSelection}>Flip side</button>}

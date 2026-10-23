@@ -329,7 +329,11 @@ export function describeSel(sel: Selection): string {
   if (sel.doors.length) parts.push(`${sel.doors.length} door${sel.doors.length > 1 ? 's' : ''}`);
   if (sel.windows.length) parts.push(`${sel.windows.length} window${sel.windows.length > 1 ? 's' : ''}`);
   if (sel.region?.length) parts.push('area outline');
-  if (sel.bg?.length) parts.push(`${sel.bg.length} drawing line${sel.bg.length > 1 ? 's' : ''}`);
+  if (sel.bg?.length) {
+    const t = sel.bg.filter((k) => k.startsWith('t')).length, l = sel.bg.length - t;
+    if (l) parts.push(`${l} drawing line${l > 1 ? 's' : ''}`);
+    if (t) parts.push(`${t} text${t > 1 ? 's' : ''}`);
+  }
   return parts.join(', ');
 }
 
